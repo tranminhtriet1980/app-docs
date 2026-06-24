@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "description": "8 standard immigration document templates (Data test folder). Exception uploads append _new to the standard name.",
+  "types": {
+    "passport": {
+      "display_name": "Passport",
+      "sample_file": "PASSPORT.pdf",
+      "exception_example": "Passport_new.pdf",
+      "form_section": "DS-160 / DS-260 — Hộ chiếu",
+      "fields": {
+        "full_name": {"label": "Họ và tên / Full name", "format": "UPPERCASE"},
+        "family_name": {"label": "Họ / Surname", "format": "UPPERCASE"},
+        "given_names": {"label": "Tên / Given names", "format": "UPPERCASE"},
+        "date_of_birth": {"label": "Ngày sinh / Date of birth", "format": "YYYY-MM-DD"},
+        "place_of_birth": {"label": "Nơi sinh / Place of birth", "format": "UPPERCASE"},
+        "birth_city": {"label": "Thành phố sinh", "format": "UPPERCASE"},
+        "birth_state": {"label": "Tỉnh/Bang sinh", "format": "UPPERCASE"},
+        "birth_country": {"label": "Quốc gia sinh", "format": "UPPERCASE"},
+        "gender": {"label": "Giới tính / Sex", "format": "M|F|MALE|FEMALE"},
+        "nationality": {"label": "Quốc tịch / Nationality", "format": "UPPERCASE"},
+        "id_card_number": {"label": "Số CMND-CCCD / ID card N°", "format": "AS_PRINTED"},
+        "passport_type": {"label": "Loại / Type (P)", "format": "AS_PRINTED"},
+        "country_code": {"label": "Mã quốc gia / Code (VNM)", "format": "UPPERCASE"},
+        "passport_number": {"label": "Số hộ chiếu / Passport N°", "format": "AS_PRINTED"},
+        "issue_date": {"label": "Ngày cấp / Date of issue", "format": "YYYY-MM-DD"},
+        "expiration_date": {"label": "Có giá trị đến / Date of expiry", "format": "YYYY-MM-DD"},
+        "place_of_issue": {"label": "Nơi cấp / Place of issue", "format": "AS_PRINTED"},
+        "issuing_country": {"label": "Quốc gia cấp", "format": "UPPERCASE"}
+      }
+    },
+    "judicial_certificate": {
+      "display_name": "JUDICIAL CERTIFICATE",
+      "sample_file": "JUDICIAL CERTIFICATE .pdf",
+      "exception_example": "JUDICIAL CERTIFICATE_new.pdf",
+      "form_section": "DS-160 — Lý lịch tư pháp",
+      "fields": {
+        "full_name": {"label": "Họ và tên", "format": "UPPERCASE"},
+        "date_of_birth": {"label": "Ngày sinh", "format": "YYYY-MM-DD"},
+        "nationality": {"label": "Quốc tịch", "format": "UPPERCASE"},
+        "father_name": {"label": "Cha", "format": "UPPERCASE"},
+        "mother_name": {"label": "Mẹ", "format": "UPPERCASE"},
+        "document_number": {"label": "Số văn bản", "format": "AS_PRINTED"},
+        "issue_date": {"label": "Ngày cấp", "format": "YYYY-MM-DD"},
+        "document_type": {"label": "Loại giấy", "format": "AS_PRINTED"}
+      }
+    },
+    "divorce": {
+      "display_name": "Divorce",
+      "sample_file": "DIVORCE DECREE .pdf",
+      "exception_example": "Divorce_new.pdf",
+      "form_section": "DS-160 / DS-260 — Ly hôn",
+      "fields": {
+        "husband_full_name": {"label": "Chồng", "format": "UPPERCASE"},
+        "wife_full_name": {"label": "Vợ", "format": "UPPERCASE"},
+        "marriage_date": {"label": "Ngày cưới", "format": "YYYY-MM-DD"},
+        "divorce_date": {"label": "Ngày ly hôn", "format": "YYYY-MM-DD"},
+        "document_number": {"label": "Số quyết định", "format": "AS_PRINTED"}
+      }
+    },
+    "birth_certificate": {
+      "display_name": "Birth certificate",
+      "sample_file": "BIRTH CERTIFICATE.pdf",
+      "exception_example": "Birth certificate_new.pdf",
+      "form_section": "DS-160 — Giấy khai sinh (chủ hồ sơ)",
+      "fields": {
+        "full_name": {"label": "Họ và tên", "format": "UPPERCASE"},
+        "date_of_birth": {"label": "Ngày sinh", "format": "YYYY-MM-DD"},
+        "place_of_birth": {"label": "Nơi sinh", "format": "UPPERCASE"},
+        "gender": {"label": "Giới tính", "format": "MALE|FEMALE"},
+        "father_name": {"label": "Cha — Họ tên (gộp)", "format": "UPPERCASE"},
+        "father_surname": {"label": "Cha — Họ", "format": "UPPERCASE"},
+        "father_given_names": {"label": "Cha — Tên", "format": "UPPERCASE"},
+        "father_date_of_birth": {"label": "Cha — Ngày sinh", "format": "YYYY-MM-DD"},
+        "father_birth_city": {"label": "Cha — Thành phố nơi sinh", "format": "UPPERCASE"},
+        "father_place_of_birth": {"label": "Cha — Nơi sinh (đầy đủ)", "format": "UPPERCASE"},
+        "father_birth_state": {"label": "Cha — Tỉnh/Bang nơi sinh", "format": "UPPERCASE"},
+        "father_birth_country": {"label": "Cha — Quốc gia nơi sinh", "format": "UPPERCASE"},
+        "mother_name": {"label": "Mẹ — Họ tên (gộp)", "format": "UPPERCASE"},
+        "mother_surname": {"label": "Mẹ — Họ", "format": "UPPERCASE"},
+        "mother_given_names": {"label": "Mẹ — Tên", "format": "UPPERCASE"},
+        "mother_date_of_birth": {"label": "Mẹ — Ngày sinh", "format": "YYYY-MM-DD"},
+        "mother_birth_city": {"label": "Mẹ — Thành phố nơi sinh", "format": "UPPERCASE"},
+        "mother_place_of_birth": {"label": "Mẹ — Nơi sinh (đầy đủ)", "format": "UPPERCASE"},
+        "mother_birth_state": {"label": "Mẹ — Tỉnh/Bang nơi sinh", "format": "UPPERCASE"},
+        "mother_birth_country": {"label": "Mẹ — Quốc gia nơi sinh", "format": "UPPERCASE"},
+        "registration_number": {"label": "Số đăng ký", "format": "AS_PRINTED"}
+      }
+    },
+    "death_certificate": {
+      "display_name": "Death certificate",
+      "sample_file": "Death certificate.pdf",
+      "exception_example": "Death certificate_new.pdf",
+      "form_section": "DS-260 — Giấy báo tử",
+      "fields": {
+        "deceased_full_name": {"label": "Người mất", "format": "UPPERCASE"},
+        "date_of_death": {"label": "Ngày mất", "format": "YYYY-MM-DD"},
+        "place_of_death": {"label": "Nơi mất", "format": "UPPERCASE"},
+        "relationship_to_applicant": {"label": "Quan hệ", "format": "AS_PRINTED"},
+        "document_number": {"label": "Số giấy", "format": "AS_PRINTED"}
+      }
+    },
+    "marriage_certificate": {
+      "display_name": "Marriage certificate",
+      "sample_file": "Marriage certificate.pdf",
+      "exception_example": "Marriage certificate_new.pdf",
+      "form_section": "DS-160 / DS-260 — Giấy kết hôn",
+      "fields": {
+        "husband_full_name": {"label": "Chồng — họ tên", "format": "UPPERCASE"},
+        "husband_surname": {"label": "Chồng — họ", "format": "UPPERCASE"},
+        "husband_given_names": {"label": "Chồng — tên", "format": "UPPERCASE"},
+        "husband_date_of_birth": {"label": "Chồng — ngày sinh", "format": "YYYY-MM-DD"},
+        "husband_birth_city": {"label": "Chồng — TP nơi sinh", "format": "UPPERCASE"},
+        "husband_place_of_birth": {"label": "Chồng — nơi sinh", "format": "UPPERCASE"},
+        "husband_birth_country": {"label": "Chồng — quốc gia sinh", "format": "UPPERCASE"},
+        "husband_address": {"label": "Chồng — địa chỉ", "format": "UPPERCASE"},
+        "husband_occupation": {"label": "Chồng — nghề nghiệp", "format": "UPPERCASE"},
+        "wife_full_name": {"label": "Vợ — họ tên", "format": "UPPERCASE"},
+        "wife_surname": {"label": "Vợ — họ", "format": "UPPERCASE"},
+        "wife_given_names": {"label": "Vợ — tên", "format": "UPPERCASE"},
+        "wife_date_of_birth": {"label": "Vợ — ngày sinh", "format": "YYYY-MM-DD"},
+        "wife_birth_city": {"label": "Vợ — TP nơi sinh", "format": "UPPERCASE"},
+        "wife_place_of_birth": {"label": "Vợ — nơi sinh", "format": "UPPERCASE"},
+        "wife_birth_country": {"label": "Vợ — quốc gia sinh", "format": "UPPERCASE"},
+        "wife_address": {"label": "Vợ — địa chỉ", "format": "UPPERCASE"},
+        "wife_occupation": {"label": "Vợ — nghề nghiệp", "format": "UPPERCASE"},
+        "marriage_date": {"label": "Ngày cưới", "format": "YYYY-MM-DD"},
+        "marriage_place": {"label": "Nơi cưới (đầy đủ)", "format": "UPPERCASE"},
+        "marriage_city": {"label": "Thành phố kết hôn", "format": "UPPERCASE"},
+        "marriage_state": {"label": "Tỉnh/Bang kết hôn", "format": "UPPERCASE"},
+        "marriage_country": {"label": "Quốc gia kết hôn", "format": "UPPERCASE"},
+        "document_number": {"label": "Số giấy", "format": "AS_PRINTED"}
+      }
+    },
+    "birth_certificate_child": {
+      "display_name": "Birth certificate child",
+      "sample_file": "Birth certificate child.pdf",
+      "exception_example": "Birth certificate child_new.pdf",
+      "form_section": "DS-260 — 5. THÔNG TIN CỦA CON CÁI",
+      "fields": {
+        "child_full_name": {"label": "Tên con", "format": "UPPERCASE"},
+        "child_date_of_birth": {"label": "Ngày sinh con", "format": "YYYY-MM-DD"},
+        "child_place_of_birth": {"label": "Nơi sinh con", "format": "UPPERCASE"},
+        "child_gender": {"label": "Giới tính con", "format": "MALE|FEMALE"},
+        "father_name": {"label": "Cha", "format": "UPPERCASE"},
+        "mother_name": {"label": "Mẹ", "format": "UPPERCASE"},
+        "registration_number": {"label": "Số đăng ký", "format": "AS_PRINTED"}
+      }
+    },
+    "military_discharge": {
+      "display_name": "Military discharge",
+      "sample_file": "MILITARY DISCHARGE .pdf",
+      "exception_example": "Military discharge_new.pdf",
+      "form_section": "DS-160 — Nghĩa vụ quân sự",
+      "fields": {
+        "full_name": {"label": "Họ và tên", "format": "UPPERCASE"},
+        "military_country": {"label": "Quốc gia", "format": "UPPERCASE"},
+        "military_branch": {"label": "Khu/Chiến khu", "format": "UPPERCASE"},
+        "military_rank": {"label": "Cấp bậc", "format": "UPPERCASE"},
+        "military_specialty": {"label": "Chuyên ngành", "format": "UPPERCASE"},
+        "service_from_date": {"label": "Từ ngày", "format": "YYYY-MM-DD"},
+        "service_to_date": {"label": "Đến ngày", "format": "YYYY-MM-DD"},
+        "document_number": {"label": "Số giấy", "format": "AS_PRINTED"}
+      }
+    }
+  }
+}

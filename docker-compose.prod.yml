@@ -1,0 +1,122 @@
+# Production stack: PostgreSQL + Backend + Frontend + Caddy (HTTPS port 2026)
+#
+# Quick start:
+#   cp .env.production.example .env.production
+#   # Edit .env.production (SECRET_KEY, OPENAI_API_KEY, DOMAIN, ...)
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Open: https://YOUR_DOMAIN:2026
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: immigration-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-immigration}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-immigration_ai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-immigration} -d ${POSTGRES_DB:-immigration_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - appnet
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: immigration-ai-backend
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-immigration}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-immigration_ai}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
+      OPENAI_INPUT_COST_PER_1M: ${OPENAI_INPUT_COST_PER_1M:-0.15}
+      OPENAI_OUTPUT_COST_PER_1M: ${OPENAI_OUTPUT_COST_PER_1M:-0.60}
+      MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}
+      UPLOAD_DIR: uploads
+      EXPORT_DIR: exports
+      CORS_ORIGINS: http://${DOMAIN}:${HTTPS_PORT:-2026},http://localhost:${HTTPS_PORT:-2026},http://127.0.0.1:${HTTPS_PORT:-2026},http://${DOMAIN}:${FRONTEND_PORT:-3000},http://localhost:${FRONTEND_PORT:-3000},http://127.0.0.1:${FRONTEND_PORT:-3000}
+      APP_BASE_URL: http://${DOMAIN}:${HTTPS_PORT:-2026}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@immipath.local}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_exports:/app/exports
+      - backend_backups:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 8
+    networks:
+      - appnet
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ""
+        BACKEND_INTERNAL_URL: http://backend:8000
+    container_name: immigration-ai-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - appnet
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: immigration-ai-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_PORT:-2026}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+    networks:
+      - appnet
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  backend_exports:
+  backend_backups:
+  caddy_data:
+  caddy_config:

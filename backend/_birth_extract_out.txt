@@ -1,0 +1,3 @@
+('DANG VAN HUNG', 'BIRTH CERTIFICATE.pdf', 'place_of_birth', 'An Don, An Hai Bac, Da Nang City')
+('DANG VAN HUNG', 'PASSPORT.pdf', 'birth_city', 'ĐÀ NẴNG')
+('DANG VAN HUNG', 'PASSPORT.pdf', 'place_of_birth', 'ĐÀ NẴNG')

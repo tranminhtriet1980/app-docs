@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+.venv/
+
+# Environment & secrets (NEVER commit)
+.env
+.env.local
+.env.production
+.env.tmp
+backend/.env
+backend/.env.tmp
+frontend/.env.local
+deploy/certs/
+*.pem
+
+# Build & cache
+frontend/.next/
+frontend/out/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local DB & uploads (runtime data)
+backend/immigration.db
+backend/uploads/
+backend/exports/
+backend/backups/
+*.db-journal
+
+# OS & editor
+.DS_Store
+Thumbs.db
+*.swp
+~$*
+~$*.docx
+~$*.xlsx
+
+# Test data (có thể chứa PII — không đẩy lên GitHub)
+Data test/
+
+# Logs
+*.log
+npm-debug.log*

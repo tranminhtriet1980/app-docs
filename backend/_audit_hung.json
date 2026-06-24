@@ -1,0 +1,1085 @@
+{
+  "applicants": [
+    {
+      "id": "2ec6f885-14c4-412f-ad4f-5c9a3f242310",
+      "display_name": "DANG VAN HUNG",
+      "status": "review",
+      "documents": 6,
+      "profile_fields_total": 31,
+      "profile_filled": 31,
+      "canonical_empty_count": 164,
+      "documents_detail": [
+        {
+          "filename": "BIRTH CERTIFICATE - DANG VAN HUNG (1).pdf",
+          "type": "birth_certificate",
+          "status": "extracted",
+          "extracted_field_count": 17,
+          "sample_keys": [
+            "full_name",
+            "name",
+            "surname",
+            "family_name",
+            "given_name",
+            "given_names",
+            "date_of_birth",
+            "dob",
+            "place_of_birth",
+            "birth_place",
+            "gender",
+            "sex",
+            "nationality",
+            "father_name",
+            "mother_name"
+          ],
+          "sample": {
+            "full_name": "DANG VAN HUNG",
+            "name": "DANG VAN HUNG",
+            "surname": "DANG",
+            "family_name": "DANG",
+            "given_name": "HUNG",
+            "given_names": "VAN HUNG",
+            "date_of_birth": "1975-05-05",
+            "dob": "1975-05-05",
+            "place_of_birth": "An Don, An Hai Bac, Da Nang City",
+            "birth_place": "An Don, An Hai Bac, Da Nang City",
+            "gender": "Male",
+            "sex": "Male",
+            "nationality": "",
+            "father_name": "",
+            "mother_name": "DANG THI TIEM",
+            "father_full_name": "",
+            "mother_full_name": "DANG THI TIEM"
+          }
+        },
+        {
+          "filename": "DIVORCE DECREE - DANG VAN HUNG & MAI NGOC HOA (1).pdf",
+          "type": "other",
+          "status": "extracted",
+          "extracted_field_count": 18,
+          "sample_keys": [
+            "document_type",
+            "document_number",
+            "full_name",
+            "name",
+            "family_name",
+            "surname",
+            "given_names",
+            "given_name",
+            "wife_full_name",
+            "husband_full_name",
+            "plaintiff_name",
+            "defendant_name",
+            "spouse_name",
+            "date_of_birth",
+            "dob"
+          ],
+          "sample": {
+            "document_type": "DECISION ON RECOGNITION OF CONSENSUAL DIVORCE AND AGREEMENT OF THE PARTIES",
+            "document_number": "41/2025/QDST-HNGD",
+            "full_name": "DANG VAN HUNG",
+            "name": "DANG VAN HUNG",
+            "family_name": "DANG",
+            "surname": "DANG",
+            "given_names": "VAN HUNG",
+            "given_name": "VAN HUNG",
+            "wife_full_name": "MAI NGOC HOA",
+            "husband_full_name": "DANG VAN HUNG",
+            "plaintiff_name": "MAI NGOC HOA",
+            "defendant_name": "DANG VAN HUNG",
+            "spouse_name": "MAI NGOC HOA AND DANG VAN HUNG",
+            "date_of_birth": "",
+            "dob": "",
+            "nationality": "",
+            "father_name": "",
+            "mother_name": ""
+          }
+        },
+        {
+          "filename": "JUDICIAL CERTIFICATE - DANG VAN HUNG (1).pdf",
+          "type": "other",
+          "status": "extracted",
+          "extracted_field_count": 18,
+          "sample_keys": [
+            "full_name",
+            "name",
+            "surname",
+            "family_name",
+            "given_name",
+            "given_names",
+            "date_of_birth",
+            "dob",
+            "nationality",
+            "father_name",
+            "mother_name",
+            "husband_full_name",
+            "wife_full_name",
+            "spouse_name",
+            "defendant_name"
+          ],
+          "sample": {
+            "full_name": "DANG VAN HUNG",
+            "name": "DANG VAN HUNG",
+            "surname": "DANG",
+            "family_name": "DANG",
+            "given_name": "VAN HUNG",
+            "given_names": "VAN HUNG",
+            "date_of_birth": "1975-05-05",
+            "dob": "1975-05-05",
+            "nationality": "Vietnamese",
+            "father_name": "",
+            "mother_name": "DANG THI TIEM",
+            "husband_full_name": "",
+            "wife_full_name": "",
+            "spouse_name": "",
+            "defendant_name": "",
+            "plaintiff_name": "",
+            "document_number": "10609/LLTP-HSNV",
+            "document_type": "JUDICIAL CERTIFICATE #2"
+          }
+        },
+        {
+          "filename": "PASSPORT - DANG VAN HUNG.pdf",
+          "type": "passport",
+          "status": "extracted",
+          "extracted_field_count": 52,
+          "sample_keys": [
+            "family_name",
+            "surname",
+            "last_name",
+            "given_names",
+            "given_name",
+            "first_name",
+            "middle_name",
+            "full_name",
+            "name",
+            "full_name_native",
+            "name_native_language",
+            "native_full_name",
+            "other_name_used",
+            "has_other_names",
+            "other_names"
+          ],
+          "sample": {
+            "family_name": "ĐẶNG",
+            "surname": "ĐẶNG",
+            "last_name": "ĐẶNG",
+            "given_names": "VĂN HÙNG",
+            "given_name": "VĂN HÙNG",
+            "first_name": "HÙNG",
+            "middle_name": "VĂN",
+            "full_name": "ĐẶNG VĂN HÙNG",
+            "name": "ĐẶNG VĂN HÙNG",
+            "full_name_native": "",
+            "name_native_language": "",
+            "native_full_name": "",
+            "other_name_used": "NO",
+            "has_other_names": "NO",
+            "other_names": "",
+            "other_name": "",
+            "alias": "",
+            "gender": "MALE",
+            "sex": "M",
+            "marital_status": "",
+            "current_marital_status": "",
+            "date_of_birth": "1975-05-05",
+            "dob": "1975-05-05",
+            "birth_date": "1975-05-05",
+            "birth_city": "ĐÀ NẴNG"
+          }
+        },
+        {
+          "filename": "GKS - DANG VAN HUNG.pdf",
+          "type": "birth_certificate",
+          "status": "extracted",
+          "extracted_field_count": 32,
+          "sample_keys": [
+            "full_name",
+            "name",
+            "surname",
+            "family_name",
+            "given_name",
+            "given_names",
+            "date_of_birth",
+            "dob",
+            "place_of_birth",
+            "birth_place",
+            "gender",
+            "sex",
+            "nationality",
+            "mother_name",
+            "mother_full_name"
+          ],
+          "sample": {
+            "full_name": "ĐẶNG VĂN HÙNG",
+            "name": "ĐẶNG VĂN HÙNG",
+            "surname": "ĐẶNG",
+            "family_name": "ĐẶNG",
+            "given_name": "HÙNG",
+            "given_names": "VĂN HÙNG",
+            "date_of_birth": "1975-05-05",
+            "dob": "1975-05-05",
+            "place_of_birth": "An Đồn, An Hải Bắc, thành phố Đà Nẵng",
+            "birth_place": "An Đồn, An Hải Bắc, thành phố Đà Nẵng",
+            "gender": "Nam",
+            "sex": "Nam",
+            "nationality": "",
+            "mother_name": "ĐẶNG THỊ TIÊM",
+            "mother_full_name": "ĐẶNG THỊ TIÊM",
+            "mother_surname": "ĐẶNG",
+            "mother_given_names": "THỊ TIÊM",
+            "mother_date_of_birth": "1954-01-01",
+            "mother_is_living": "",
+            "mother_address": "An Đồn, An Hải Bắc, thành phố Đà Nẵng",
+            "mother_city": "Đà Nẵng",
+            "mother_country": "Việt Nam",
+            "father_name": "",
+            "father_full_name": "",
+            "father_surname": ""
+          }
+        },
+        {
+          "filename": "DS260 - DANG VAN HUNG.pdf",
+          "type": "other",
+          "status": "extracted",
+          "extracted_field_count": 28,
+          "sample_keys": [
+            "full_name",
+            "name",
+            "family_name",
+            "surname",
+            "given_names",
+            "given_name",
+            "date_of_birth",
+            "dob",
+            "nationality",
+            "document_type",
+            "document_number",
+            "sex",
+            "city",
+            "state_province",
+            "country"
+          ],
+          "sample": {
+            "full_name": "DANG VAN HUNG",
+            "name": "DANG VAN HUNG",
+            "family_name": "DANG",
+            "surname": "DANG",
+            "given_names": "VAN HUNG",
+            "given_name": "VAN HUNG",
+            "date_of_birth": "1975-05-05",
+            "dob": "1975-05-05",
+            "nationality": "VIET NAM",
+            "document_type": "DS-260",
+            "document_number": "C0509328",
+            "sex": "MALE",
+            "city": "DA NANG",
+            "state_province": "DA NANG",
+            "country": "VIET NAM",
+            "passport_id": "C0509328",
+            "passport_country": "VIETNAM",
+            "passport_issue_date": "2018-05-16",
+            "passport_expiration_date": "2028-05-16",
+            "current_address": "35 AN HAI 15, AN HAI",
+            "address_line1": "35 AN HAI 15, AN HAI",
+            "address_city": "DA NANG",
+            "address_state": "DA NANG",
+            "address_country": "VIET NAM",
+            "address_from_date": "2000-02-02"
+          }
+        }
+      ],
+      "sections": {
+        "identity": {
+          "filled": 11,
+          "total": 15,
+          "missing": [
+            {
+              "key": "identity.full_name_native",
+              "label": "Họ tên bản ngữ"
+            },
+            {
+              "key": "identity.other_names",
+              "label": "Chi tiết tên khác"
+            },
+            {
+              "key": "identity.marital_status",
+              "label": "Tình trạng hôn nhân"
+            },
+            {
+              "key": "identity.birth_state",
+              "label": "Tỉnh/Bang nơi sinh"
+            }
+          ]
+        },
+        "passport": {
+          "filled": 4,
+          "total": 4,
+          "missing": []
+        },
+        "immigration": {
+          "filled": 0,
+          "total": 8,
+          "missing": [
+            {
+              "key": "immigration.visa_type",
+              "label": "immigration.visa_type"
+            },
+            {
+              "key": "immigration.visa_number",
+              "label": "immigration.visa_number"
+            },
+            {
+              "key": "immigration.visa_issue_date",
+              "label": "immigration.visa_issue_date"
+            },
+            {
+              "key": "immigration.visa_expiry_date",
+              "label": "immigration.visa_expiry_date"
+            },
+            {
+              "key": "immigration.sevis_id",
+              "label": "immigration.sevis_id"
+            },
+            {
+              "key": "immigration.i94_number",
+              "label": "immigration.i94_number"
+            },
+            {
+              "key": "immigration.class_of_admission",
+              "label": "immigration.class_of_admission"
+            },
+            {
+              "key": "immigration.admit_until_date",
+              "label": "immigration.admit_until_date"
+            }
+          ]
+        },
+        "contact_address": {
+          "filled": 7,
+          "total": 8,
+          "missing": [
+            {
+              "key": "contact.postal_code",
+              "label": "Mã bưu điện"
+            }
+          ]
+        },
+        "contact_communication": {
+          "filled": 0,
+          "total": 8,
+          "missing": [
+            {
+              "key": "contact.phone_primary",
+              "label": "Điện thoại chính"
+            },
+            {
+              "key": "contact.phone_secondary",
+              "label": "Điện thoại phụ"
+            },
+            {
+              "key": "contact.phone_work",
+              "label": "Điện thoại nơi làm việc"
+            },
+            {
+              "key": "contact.other_phones_used",
+              "label": "SĐT khác trong 5 năm? (Yes/No)"
+            },
+            {
+              "key": "contact.other_phones_history",
+              "label": "Chi tiết SĐT khác (5 năm)"
+            },
+            {
+              "key": "contact.email",
+              "label": "Email chính"
+            },
+            {
+              "key": "contact.other_emails_used",
+              "label": "Email khác trong 5 năm? (Yes/No)"
+            },
+            {
+              "key": "contact.other_emails_history",
+              "label": "Chi tiết email khác (5 năm)"
+            }
+          ]
+        },
+        "social_media": {
+          "filled": 0,
+          "total": 4,
+          "missing": [
+            {
+              "key": "social.platform",
+              "label": "Mạng XH — nền tảng & tên (vd: Facebook – Dang Hung)"
+            },
+            {
+              "key": "social.identifier",
+              "label": "Link / ID mạng xã hội"
+            },
+            {
+              "key": "social.other_used",
+              "label": "MXH khác trong 5 năm? (Yes/No)"
+            },
+            {
+              "key": "social.other_history",
+              "label": "Chi tiết MXH khác (5 năm)"
+            }
+          ]
+        },
+        "family_father": {
+          "filled": 0,
+          "total": 14,
+          "missing": [
+            {
+              "key": "family.father_surname",
+              "label": "Cha — Họ"
+            },
+            {
+              "key": "family.father_given_names",
+              "label": "Cha — Tên"
+            },
+            {
+              "key": "family.father_name",
+              "label": "Cha — Họ tên (gộp)"
+            },
+            {
+              "key": "family.father_date_of_birth",
+              "label": "Cha — Ngày sinh"
+            },
+            {
+              "key": "family.father_birth_city",
+              "label": "Cha — TP nơi sinh"
+            },
+            {
+              "key": "family.father_birth_state",
+              "label": "Cha — Tỉnh/Bang nơi sinh"
+            },
+            {
+              "key": "family.father_birth_country",
+              "label": "Cha — Quốc gia nơi sinh"
+            },
+            {
+              "key": "family.father_is_living",
+              "label": "Cha — Còn sống? (Yes/No)"
+            },
+            {
+              "key": "family.father_death_year",
+              "label": "Cha — Năm mất"
+            },
+            {
+              "key": "family.father_address_line1",
+              "label": "Cha — Địa chỉ hiện tại"
+            },
+            {
+              "key": "family.father_city",
+              "label": "Cha — Thành phố"
+            },
+            {
+              "key": "family.father_state",
+              "label": "Cha — Tỉnh/Bang"
+            },
+            {
+              "key": "family.father_postal_code",
+              "label": "Cha — Mã bưu điện"
+            },
+            {
+              "key": "family.father_country",
+              "label": "Cha — Quốc gia"
+            }
+          ]
+        },
+        "family_mother": {
+          "filled": 7,
+          "total": 14,
+          "missing": [
+            {
+              "key": "family.mother_birth_city",
+              "label": "Mẹ — TP nơi sinh"
+            },
+            {
+              "key": "family.mother_birth_state",
+              "label": "Mẹ — Tỉnh/Bang nơi sinh"
+            },
+            {
+              "key": "family.mother_birth_country",
+              "label": "Mẹ — Quốc gia nơi sinh"
+            },
+            {
+              "key": "family.mother_is_living",
+              "label": "Mẹ — Còn sống? (Yes/No)"
+            },
+            {
+              "key": "family.mother_death_year",
+              "label": "Mẹ — Năm mất"
+            },
+            {
+              "key": "family.mother_state",
+              "label": "Mẹ — Tỉnh/Bang"
+            },
+            {
+              "key": "family.mother_postal_code",
+              "label": "Mẹ — Mã bưu điện"
+            }
+          ]
+        },
+        "family_spouse": {
+          "filled": 1,
+          "total": 15,
+          "missing": [
+            {
+              "key": "family.spouse_surname",
+              "label": "Vợ/chồng — Họ"
+            },
+            {
+              "key": "family.spouse_given_names",
+              "label": "Vợ/chồng — Tên"
+            },
+            {
+              "key": "family.spouse_date_of_birth",
+              "label": "Vợ/chồng — Ngày sinh"
+            },
+            {
+              "key": "family.spouse_birth_city",
+              "label": "Vợ/chồng — TP nơi sinh"
+            },
+            {
+              "key": "family.spouse_birth_state",
+              "label": "Vợ/chồng — Tỉnh/Bang nơi sinh"
+            },
+            {
+              "key": "family.spouse_birth_country",
+              "label": "Vợ/chồng — Quốc gia nơi sinh"
+            },
+            {
+              "key": "family.spouse_address_line1",
+              "label": "Vợ/chồng — Địa chỉ hiện tại"
+            },
+            {
+              "key": "family.spouse_occupation",
+              "label": "Vợ/chồng — Nghề nghiệp"
+            },
+            {
+              "key": "family.spouse_occupation_other",
+              "label": "Vợ/chồng — Ngành nghề (ghi rõ)"
+            },
+            {
+              "key": "family.spouse_marriage_date",
+              "label": "Ngày kết hôn"
+            },
+            {
+              "key": "family.spouse_marriage_city",
+              "label": "Kết hôn tại — Thành phố"
+            },
+            {
+              "key": "family.spouse_marriage_state",
+              "label": "Kết hôn tại — Tỉnh/Bang"
+            },
+            {
+              "key": "family.spouse_marriage_country",
+              "label": "Kết hôn tại — Quốc gia"
+            },
+            {
+              "key": "family.spouse_immigrating_with_you",
+              "label": "Vợ/chồng nhập cư cùng? (Yes/No)"
+            }
+          ]
+        },
+        "family_previous_spouses": {
+          "filled": 0,
+          "total": 2,
+          "missing": [
+            {
+              "key": "family.previous_spouses_used",
+              "label": "Có vợ/chồng trước? (Yes/No)"
+            },
+            {
+              "key": "family.previous_spouses_history",
+              "label": "Chi tiết vợ/chồng cũ (ly hôn, ngày cưới…)"
+            }
+          ]
+        },
+        "family_children": {
+          "filled": 0,
+          "total": 3,
+          "missing": [
+            {
+              "key": "family.children_used",
+              "label": "Có con? (Yes/No)"
+            },
+            {
+              "key": "family.children_count",
+              "label": "Số con / ghi chú"
+            },
+            {
+              "key": "family.children_history",
+              "label": "Chi tiết từng con (tên, DOB, địa chỉ, nhập cư…)"
+            }
+          ]
+        },
+        "travel_us": {
+          "filled": 0,
+          "total": 6,
+          "missing": [
+            {
+              "key": "travel.us_visited_used",
+              "label": "Đã từng đến Mỹ? (Yes/No)"
+            },
+            {
+              "key": "travel.us_visit_history",
+              "label": "Chi tiết lần đến Mỹ"
+            },
+            {
+              "key": "travel.us_visa_issued_used",
+              "label": "Đã được cấp visa Mỹ? (Yes/No)"
+            },
+            {
+              "key": "travel.us_visa_history",
+              "label": "Chi tiết visa Mỹ"
+            },
+            {
+              "key": "travel.us_refused_used",
+              "label": "Bị từ chối visa/nhập cảnh? (Yes/No)"
+            },
+            {
+              "key": "travel.us_refused_history",
+              "label": "Chi tiết từ chối visa/nhập cảnh"
+            }
+          ]
+        },
+        "employment_current": {
+          "filled": 0,
+          "total": 16,
+          "missing": [
+            {
+              "key": "employment.primary_occupation",
+              "label": "Nghề nghiệp chính"
+            },
+            {
+              "key": "employment.occupation_other_specify",
+              "label": "Ngành nghề (ghi rõ)"
+            },
+            {
+              "key": "employment.present_employer",
+              "label": "Công ty / trường hiện tại"
+            },
+            {
+              "key": "employment.employer_name",
+              "label": "Tên công ty (OCR)"
+            },
+            {
+              "key": "employment.employer_address_line1",
+              "label": "Địa chỉ công ty"
+            },
+            {
+              "key": "employment.employer_city",
+              "label": "Công ty — Thành phố"
+            },
+            {
+              "key": "employment.employer_state",
+              "label": "Công ty — Tỉnh/Bang"
+            },
+            {
+              "key": "employment.employer_postal_code",
+              "label": "Công ty — Mã bưu điện"
+            },
+            {
+              "key": "employment.employer_country",
+              "label": "Công ty — Quốc gia"
+            },
+            {
+              "key": "employment.other_occupation_used",
+              "label": "Có việc làm khác? (Yes/No)"
+            },
+            {
+              "key": "employment.other_occupation_detail",
+              "label": "Chi tiết việc làm khác"
+            },
+            {
+              "key": "employment.prior_jobs_10_years_used",
+              "label": "Làm việc khác 10 năm qua? (Yes/No)"
+            },
+            {
+              "key": "employment.prior_jobs_history",
+              "label": "Lịch sử việc làm 10 năm (công ty, chức danh, ngày…)"
+            },
+            {
+              "key": "employment.job_title",
+              "label": "Chức danh"
+            },
+            {
+              "key": "employment.salary",
+              "label": "Lương"
+            },
+            {
+              "key": "employment.start_date",
+              "label": "Ngày bắt đầu làm việc"
+            }
+          ]
+        },
+        "education_schools": {
+          "filled": 0,
+          "total": 17,
+          "missing": [
+            {
+              "key": "education.middle_school_name",
+              "label": "THCS — Tên trường"
+            },
+            {
+              "key": "education.middle_school_address",
+              "label": "THCS — Địa chỉ"
+            },
+            {
+              "key": "education.middle_school_period",
+              "label": "THCS — Thời gian học"
+            },
+            {
+              "key": "education.high_school_name",
+              "label": "THPT — Tên trường"
+            },
+            {
+              "key": "education.high_school_address",
+              "label": "THPT — Địa chỉ"
+            },
+            {
+              "key": "education.high_school_period",
+              "label": "THPT — Thời gian học"
+            },
+            {
+              "key": "education.college_name",
+              "label": "CĐ/ĐH — Tên trường"
+            },
+            {
+              "key": "education.college_address",
+              "label": "CĐ/ĐH — Địa chỉ"
+            },
+            {
+              "key": "education.college_major",
+              "label": "CĐ/ĐH — Ngành học"
+            },
+            {
+              "key": "education.college_period",
+              "label": "CĐ/ĐH — Thời gian học"
+            },
+            {
+              "key": "education.school_name",
+              "label": "education.school_name"
+            },
+            {
+              "key": "education.degree",
+              "label": "education.degree"
+            },
+            {
+              "key": "education.gpa",
+              "label": "education.gpa"
+            },
+            {
+              "key": "education.graduation_date",
+              "label": "education.graduation_date"
+            },
+            {
+              "key": "education.program_name",
+              "label": "education.program_name"
+            },
+            {
+              "key": "education.program_start_date",
+              "label": "education.program_start_date"
+            },
+            {
+              "key": "education.program_end_date",
+              "label": "education.program_end_date"
+            }
+          ]
+        },
+        "additional_info": {
+          "filled": 0,
+          "total": 11,
+          "missing": [
+            {
+              "key": "additional.military_served_used",
+              "label": "Đã phục vụ quân đội? (Yes/No)"
+            },
+            {
+              "key": "additional.military_country",
+              "label": "NVQS — Quốc gia"
+            },
+            {
+              "key": "additional.military_branch",
+              "label": "NVQS — Khu/Chiến khu"
+            },
+            {
+              "key": "additional.military_rank",
+              "label": "NVQS — Cấp bậc / vị trí"
+            },
+            {
+              "key": "additional.military_specialty",
+              "label": "NVQS — Chuyên ngành"
+            },
+            {
+              "key": "additional.military_service_from",
+              "label": "NVQS — Từ ngày"
+            },
+            {
+              "key": "additional.military_service_to",
+              "label": "NVQS — Đến ngày"
+            },
+            {
+              "key": "additional.other_languages_used",
+              "label": "Ngôn ngữ khác ngoài tiếng Việt? (Yes/No)"
+            },
+            {
+              "key": "additional.other_languages_detail",
+              "label": "Chi tiết ngôn ngữ khác"
+            },
+            {
+              "key": "additional.travel_5_years_used",
+              "label": "Du lịch nước khác 5 năm? (Yes/No)"
+            },
+            {
+              "key": "additional.travel_5_years_detail",
+              "label": "Chi tiết du lịch 5 năm"
+            }
+          ]
+        },
+        "security_background": {
+          "filled": 0,
+          "total": 45,
+          "missing": [
+            {
+              "key": "security.health_tuberculosis",
+              "label": "Bệnh lao / bệnh lây lan công cộng?"
+            },
+            {
+              "key": "security.health_vaccinations",
+              "label": "Có giấy tờ tiêm chủng theo luật Mỹ?"
+            },
+            {
+              "key": "security.health_mental_disorder",
+              "label": "Rối loạn tâm thần/thể chất đe dọa an toàn?"
+            },
+            {
+              "key": "security.health_drug_abuse",
+              "label": "Đang/đã nghiện ma túy?"
+            },
+            {
+              "key": "security.crime_arrested",
+              "label": "Bị bắt/kết án (kể cả được ân xá)?"
+            },
+            {
+              "key": "security.crime_controlled_substances",
+              "label": "Vi phạm luật chất cấm?"
+            },
+            {
+              "key": "security.crime_spouse_drug_trafficking_benefit",
+              "label": "Vợ/chồng/con buôn ma túy — hưởng lợi 5 năm?"
+            },
+            {
+              "key": "security.crime_prostitution",
+              "label": "Mại dâm / kinh doanh bất hợp pháp 10 năm?"
+            },
+            {
+              "key": "security.crime_money_laundering",
+              "label": "Rửa tiền?"
+            },
+            {
+              "key": "security.crime_human_trafficking",
+              "label": "Buôn người?"
+            },
+            {
+              "key": "security.crime_aid_human_trafficker",
+              "label": "Giúp buôn người (Tổng thống xác định)?"
+            },
+            {
+              "key": "security.crime_family_human_trafficking_benefit",
+              "label": "Gia đình buôn người — hưởng lợi 5 năm?"
+            },
+            {
+              "key": "security.illegal_activity_us",
+              "label": "Gián điệp/phá hoại/vi phạm xuất khẩu tại Mỹ?"
+            },
+            {
+              "key": "security.terrorist_activities",
+              "label": "Hoạt động khủng bố?"
+            },
+            {
+              "key": "security.terrorist_financial_support",
+              "label": "Hỗ trợ tài chính khủng bố?"
+            },
+            {
+              "key": "security.terrorist_organization_member",
+              "label": "Thành viên tổ chức khủng bố?"
+            },
+            {
+              "key": "security.terrorist_family_support",
+              "label": "Gia đình hỗ trợ khủng bố 5 năm?"
+            },
+            {
+              "key": "security.genocide",
+              "label": "Diệt chủng?"
+            },
+            {
+              "key": "security.torture",
+              "label": "Tra tấn?"
+            },
+            {
+              "key": "security.extrajudicial_killings",
+              "label": "Giết người phi pháp/chính trị/bạo lực?"
+            },
+            {
+              "key": "security.child_soldiers",
+              "label": "Tuyển/dùng binh lính trẻ em?"
+            },
+            {
+              "key": "security.religious_freedom_violations",
+              "label": "Vi phạm tự do tôn giáo (quan chức)?"
+            },
+            {
+              "key": "security.totalitarian_party",
+              "label": "Đảng cộng sản/độc tài?"
+            },
+            {
+              "key": "security.farc_support",
+              "label": "Hỗ trợ FARC/ELN/AUC Colombia?"
+            },
+            {
+              "key": "security.property_expropriation",
+              "label": "Chiếm đoạt tài sản người Mỹ?"
+            },
+            {
+              "key": "security.family_property_expropriation",
+              "label": "Gia đình chiếm đoạt tài sản người Mỹ?"
+            },
+            {
+              "key": "security.forced_abortion_sterilization",
+              "label": "Ép phá thai/triệt sản?"
+            },
+            {
+              "key": "security.chemical_weapons_info",
+              "label": "Tiết lộ thông tin Vũ khí hóa học?"
+            },
+            {
+              "key": "security.family_chemical_weapons_info",
+              "label": "Gia đình tiết lộ thông tin VKHH?"
+            },
+            {
+              "key": "security.immigration_fraud",
+              "label": "Gian lận visa/nhập cư?"
+            },
+            {
+              "key": "security.deported",
+              "label": "Bị trục xuất khỏi nước khác?"
+            },
+            {
+              "key": "security.child_custody_withheld",
+              "label": "Giữ con công dân Mỹ trái quyền nuôi?"
+            },
+            {
+              "key": "security.aid_child_custody_withheld",
+              "label": "Giúp giữ con công dân Mỹ trái quyền?"
+            },
+            {
+              "key": "security.illegal_voting",
+              "label": "Bầu cử trái phép tại Mỹ?"
+            },
+            {
+              "key": "security.renounce_citizenship_tax",
+              "label": "Từ bỏ quốc tịch Mỹ tránh thuế?"
+            },
+            {
+              "key": "security.f_visa_public_school_unpaid",
+              "label": "Học trường công F visa không hoàn tiền?"
+            },
+            {
+              "key": "security.uncertified_labor",
+              "label": "Lao động chưa chứng nhận Bộ Lao động?"
+            },
+            {
+              "key": "security.foreign_medical_no_exam",
+              "label": "Bác sĩ nước ngoài chưa qua thi?"
+            },
+            {
+              "key": "security.healthcare_worker_no_cert",
+              "label": "Y tá/điều dưỡng chưa chứng nhận?"
+            },
+            {
+              "key": "security.permanently_ineligible_citizenship",
+              "label": "Vĩnh viễn không đủ điều kiện quốc tịch Mỹ?"
+            },
+            {
+              "key": "security.evade_military_service",
+              "label": "Rời Mỹ tránh nghĩa vụ quân sự?"
+            },
+            {
+              "key": "security.polygamy",
+              "label": "Đến Mỹ thực hành đa thê?"
+            },
+            {
+              "key": "security.j_visa_residence_requirement",
+              "label": "J visa chưa đủ 2 năm cư trú nước ngoài?"
+            },
+            {
+              "key": "security.frivolous_asylum",
+              "label": "Đơn tị nạn vô căn cứ?"
+            },
+            {
+              "key": "security.public_charge",
+              "label": "Có thể trở thành gánh nặng công?"
+            }
+          ]
+        },
+        "ssn": {
+          "filled": 0,
+          "total": 4,
+          "missing": [
+            {
+              "key": "ssn.applied_before",
+              "label": "Đã xin SSN? (Yes/No)"
+            },
+            {
+              "key": "ssn.applied_detail",
+              "label": "Chi tiết đơn SSN"
+            },
+            {
+              "key": "ssn.want_card_issued",
+              "label": "Muốn cấp thẻ SSN? (Yes/No)"
+            },
+            {
+              "key": "ssn.authorize_disclosure",
+              "label": "Cho phép tiết lộ thông tin SSN? (Yes/No)"
+            }
+          ]
+        }
+      },
+      "filled_sample": {
+        "other.document_type": "DIVORCE DECREE",
+        "identity.full_name": "DANG VAN HUNG",
+        "identity.family_name": "DANG",
+        "identity.given_names": "VAN HUNG",
+        "identity.date_of_birth": "1975-05-05",
+        "identity.place_of_birth": "An Đồn, An Hải Bắc, thành phố Đà Nẵng",
+        "identity.gender": "Male",
+        "family.mother_name": "DANG THI TIEM",
+        "family.spouse_name": "MAI NGOC HOA",
+        "identity.nationality": "VIET NAM",
+        "identity.middle_name": "VĂN",
+        "identity.other_name_used": "NO",
+        "identity.birth_city": "ĐÀ NẴNG",
+        "identity.birth_country": "VIỆT NAM",
+        "passport.number": "C5059328",
+        "passport.issue_date": "2018-05-16",
+        "passport.expiry_date": "2028-05-16",
+        "passport.issuing_country": "VIỆT NAM",
+        "family.mother_surname": "ĐẶNG",
+        "family.mother_given_names": "THỊ TIÊM",
+        "family.mother_date_of_birth": "1954-01-01",
+        "family.mother_address_line1": "An Đồn, An Hải Bắc, thành phố Đà Nẵng",
+        "family.mother_city": "Đà Nẵng",
+        "family.mother_country": "Việt Nam",
+        "contact.city": "DA NANG",
+        "contact.state": "DA NANG",
+        "contact.country": "VIET NAM",
+        "contact.address_line1": "35 AN HAI 15, AN HAI",
+        "contact.address_from_date": "2000-02-02",
+        "contact.other_addresses_used": "NO",
+        "contact.other_addresses_history": "05/05/1975 - 31/08/1999; 1991 - 07/1999: o tai khu pho An Don, phuong An Hai Bac, q. Son Tra, Tp Da Nang; 08/1999 - 21/12/2000; 08/1999 - 21/12/2000: o nha nguoi 40 An Hai 21, p. An Hai, Da Nang"
+      }
+    }
+  ]
+}

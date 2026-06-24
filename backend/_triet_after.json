@@ -1,0 +1,48 @@
+﻿{
+  "name": "Trß║ºn Minh Triß║┐t",
+  "status": "review",
+  "docs": [
+    {
+      "file": "BIRTH CERTIFICATE.pdf",
+      "status": "extracted",
+      "type": "birth_certificate",
+      "error": ""
+    },
+    {
+      "file": "Death certificate.pdf",
+      "status": "extracted",
+      "type": "death_certificate",
+      "error": ""
+    },
+    {
+      "file": "DIVORCE DECREE .pdf",
+      "status": "extracted",
+      "type": "divorce",
+      "error": ""
+    },
+    {
+      "file": "Driving license .pdf",
+      "status": "extracted",
+      "type": "other",
+      "error": ""
+    },
+    {
+      "file": "JUDICIAL CERTIFICATE .pdf",
+      "status": "failed",
+      "type": "judicial_certificate",
+      "error": "Request timed out."
+    },
+    {
+      "file": "MILITARY DISCHARGE .pdf",
+      "status": "failed",
+      "type": null,
+      "error": "Request timed out."
+    },
+    {
+      "file": "PASSPORT.pdf",
+      "status": "extracted",
+      "type": "passport",
+      "error": ""
+    }
+  ]
+}

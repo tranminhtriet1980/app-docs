@@ -1,0 +1,271 @@
+﻿Headers: ['STT', 'Mß╗Ñc DS-260 (Section)', 'Ti├¬u ─æß╗ü mß╗Ñc', 'Ghi ch├║ nguß╗ôn', 'Nh├ún form Word DS-260', 'Field key DS-260', 'Nh├ún hiß╗ân thß╗ï (Review)', 'Loß║íi giß║Ñy tß╗¥ ch├¡nh (document)', 'T├¬n giß║Ñy tß╗¥ (VN)', 'Key OpenAI ch├¡nh (JSON fields.*)', 'Alias key OpenAI (JSON fields.*)', 'Tß║Ñt cß║ú key OpenAI cß╗ºa doc_type', 'Gi├í trß╗ï OpenAI ΓÇö DANG VAN HUNG', 'Key OpenAI c├│ gi├í trß╗ï (HUNG)', 'Giß║Ñy tß╗¥ nguß╗ôn gi├í trß╗ï (HUNG)']
+---
+Section: section_divorce
+Title: Ly h├┤n
+Subtitle: Nguß╗ôn: Divorce
+Key: Husband Full Name
+Doc: Husband Full Name
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_divorce
+Title: Ly h├┤n
+Subtitle: Nguß╗ôn: Divorce
+Key: Wife Full Name
+Doc: Wife Full Name
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_divorce
+Title: Ly h├┤n
+Subtitle: Nguß╗ôn: Divorce
+Key: Marriage Date
+Doc: Marriage Date
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_divorce
+Title: Ly h├┤n
+Subtitle: Nguß╗ôn: Divorce
+Key: Divorce Date
+Doc: Divorce Date
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_divorce
+Title: Ly h├┤n
+Subtitle: Nguß╗ôn: Divorce
+Key: Document Number
+Doc: Document Number
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Do you have any previous spouses?
+Doc: Do you have any Previous Spouses?
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Previous spouse's name
+Doc: Previous spouse's name
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Previous Spouse Date of Birth
+Doc: Previous Spouse Date of Birth
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Date of Divorce
+Doc: Date of Divorce
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Date of previous marriage
+Doc: Date of previous marriage
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Husband Full Name (ly h├┤n)
+Doc: Husband Full Name (ly h├┤n)
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Wife Full Name (ly h├┤n)
+Doc: Wife Full Name (ly h├┤n)
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_previous_spouse
+Title: DS-260 ΓÇö Previous Spouse / TH├öNG TIN NG╞»ß╗£I PHß╗ÉI NGß║¬U C┼¿ (─É├â LY H├öN)
+Subtitle: Nguß╗ôn: Divorce decree
+Key: Divorce Document Number
+Doc: Divorce Document Number
+Doc VN: divorce
+OCR field: Divorce / Quyß║┐t ─æß╗ïnh ly h├┤n
+Enrich: husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth, spouse_name, plaintiff_name, defendant_name, marriage_date, divorce_date, document_number, document_type
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse's Surnames ΓÇö Hß╗ì vß╗ú/chß╗ông
+Doc: Spouse Surnames / Hß╗ì phß╗æi ngß║½u
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse's Given Names ΓÇö T├¬n vß╗ú/chß╗ông
+Doc: Spouse Given Names / T├¬n phß╗æi ngß║½u
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Full Name
+Doc: Spouse Full Name
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Date of Birth
+Doc: Spouse Date of Birth
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse City of Birth
+Doc: Spouse City of Birth
+Doc VN: birth_certificate
+OCR field: Birth certificate / Giß║Ñy khai sinh (chß╗º hß╗ô s╞í)
+Enrich: full_name, date_of_birth, place_of_birth, gender, father_name, father_surname, father_given_names, father_date_of_birth, father_birth_city, father_place_of_birth, father_birth_state, father_birth_country, mother_name, mother_surname, mother_given_names, mother_full_name, mother_date_of_birth, mother_dob, mother_year_of_birth, mother_birth_city, mother_city, mother_place_of_birth, mother_address, mother_residence, mother_birth_country, mother_country, mother_nationality, mother_birth_state, father_full_name, father_dob, father_year_of_birth, father_city, father_address, father_residence, father_country, father_nationality, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse State of Birth
+Doc: Spouse State of Birth
+Doc VN: birth_certificate
+OCR field: Birth certificate / Giß║Ñy khai sinh (chß╗º hß╗ô s╞í)
+Enrich: full_name, date_of_birth, place_of_birth, gender, father_name, father_surname, father_given_names, father_date_of_birth, father_birth_city, father_place_of_birth, father_birth_state, father_birth_country, mother_name, mother_surname, mother_given_names, mother_full_name, mother_date_of_birth, mother_dob, mother_year_of_birth, mother_birth_city, mother_city, mother_place_of_birth, mother_address, mother_residence, mother_birth_country, mother_country, mother_nationality, mother_birth_state, father_full_name, father_dob, father_year_of_birth, father_city, father_address, father_residence, father_country, father_nationality, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Country of Birth
+Doc: Spouse Country of Birth
+Doc VN: birth_certificate
+OCR field: Birth certificate / Giß║Ñy khai sinh (chß╗º hß╗ô s╞í)
+Enrich: full_name, date_of_birth, place_of_birth, gender, father_name, father_surname, father_given_names, father_date_of_birth, father_birth_city, father_place_of_birth, father_birth_state, father_birth_country, mother_name, mother_surname, mother_given_names, mother_full_name, mother_date_of_birth, mother_dob, mother_year_of_birth, mother_birth_city, mother_city, mother_place_of_birth, mother_address, mother_residence, mother_birth_country, mother_country, mother_nationality, mother_birth_state, father_full_name, father_dob, father_year_of_birth, father_city, father_address, father_residence, father_country, father_nationality, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Current Address
+Doc: Spouse Current Address
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Occupation
+Doc: Spouse Occupation
+Doc VN: spouse_applicant_profile
+OCR field: Hß╗ô s╞í phß╗æi ngß║½u (JSON profile)
+Enrich: None
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Spouse Occupation Specify Other
+Doc: Spouse Occupation Specify Other
+Doc VN: spouse_applicant_profile
+OCR field: Hß╗ô s╞í phß╗æi ngß║½u (JSON profile)
+Enrich: None
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Date of Marriage
+Doc: Date of Marriage
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Marriage City
+Doc: Marriage City
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Marriage State/Province
+Doc: Marriage State/Province
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Marriage Country
+Doc: Marriage Country
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Husband Full Name (giß║Ñy kß║┐t h├┤n)
+Doc: Husband Full Name (giß║Ñy kß║┐t h├┤n)
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Wife Full Name (giß║Ñy kß║┐t h├┤n)
+Doc: Wife Full Name (giß║Ñy kß║┐t h├┤n)
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number
+---
+Section: section_spouse
+Title: DS-260 ΓÇö Spouse Information / TH├öNG TIN Cß╗ªA NG╞»ß╗£I PHß╗ÉI NGß║¬U
+Subtitle: Nguß╗ôn: Marriage certificate
+Key: Marriage Certificate Number
+Doc: Marriage Certificate Number
+Doc VN: marriage_certificate
+OCR field: Marriage certificate / Giß║Ñy kß║┐t h├┤n
+Enrich: husband_full_name, wife_full_name, spouse_name, spouse_full_name, husband_name, wife_name, husband_surname, wife_surname, husband_given_names, wife_given_names, spouse_surname, spouse_given_names, husband_date_of_birth, wife_date_of_birth, spouse_date_of_birth, husband_birth_city, wife_birth_city, spouse_birth_city, husband_birth_state, wife_birth_state, spouse_birth_state, husband_birth_country, wife_birth_country, spouse_birth_country, husband_address, wife_address, spouse_address, husband_occupation, wife_occupation, spouse_occupation, marriage_date, marriage_place, marriage_city, marriage_state, marriage_country, document_number, registration_number

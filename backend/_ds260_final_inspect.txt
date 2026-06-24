@@ -1,0 +1,84 @@
+[P] Personal, Address, and Phone Information
+[P] PERSONAL INFORMATION – THÔNG TIN CÁ NHÂN
+[P] Name (Last/Middle/First) (HỌ và TÊN):                                                    
+[P] Full Name in Native Language (HỌ và TÊN):                                         
+[P] Other Name Used? (HỌ và TÊN khác): 
+[P] (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ Họ và Tên dưới đây):
+[P] Sex (Male or Female) (NAM hay NỮ):                                            
+[P]  Current Marital Status (Tình trạng hôn nhân hiện tại):                                                                                          
+[P] Date of Birth (dd/mm/yyyy) (Ngày tháng năm sinh):                                                                        
+[P] City of Birth (THÀNH PHỐ nơi sinh):                                                                                                                
+[P] State/Province of Birth (TỈNH /BANG nơi sinh):                                                                                           
+[P] Country/Region of Birth (QUỐC GIA nơi sinh):                                                                                              
+[P] Country/Region of Origin (Nationality) (QUỐC TỊCH):                                                                                        
+[P] PASSPORT/TRAVEL DOCUMENT – HỘ CHIẾU
+[P] Passport ID (số HỘ CHIẾU):                                                                                                                                   
+[P] Country/Authority that issued Passport (QUỐC GIA cấp HỘ CHIẾU):                                                                 
+[P] Issuance Date (ngày cấp HỘ CHIẾU dd/mm/yyyy):                                                                                             
+[P] Expiration Date (ngày hết hạn HỘ CHIẾU dd/mm/yyyy):                                                                                    
+[P] Do you hold or have you held any nationality other than the one you have indicated above? (Bạn có giữ QUỐC TỊCH KHÁC ngoài QUỐC TỊCH đang có)
+[P]  (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ chi tiết dưới đây)
+[P] ADDRESS - ĐỊA CHỈ 
+[P] Current Address (ĐỊA CHỈ hiện tại):                                                                                                                          
+[P] City (THÀNH PHỐ):                                                                                                                                                   
+[P] State/Province (TỈNH / BANG):                                                                                                                                 
+[P] Postal zone/Zip Code (MÃ BƯU ĐIỆN):        ImmiPath sẽ điền nếu địa chỉ ở VN                                                    
+[P] Country/Region (QUỐC GIA):                                                                                                                                     
+[P] From Date (ở TỪ dd/mm/yyyy):                                                                                                                              
+[P] Have you lived anywhere other than this address since the age of sixteen?
+[P] (Bạn có từng ở những chổ khác kể từ năm 16 tuổi đến nay hay không?)                                                                                                                               
+[P] (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ chi tiết dưới đây địa chỉ nhà, thành phố, tỉnh và mã bưu điện, ở từ ngày tháng năm nào dd/mm/yyyy đến ngày tháng năm nào dd/mm/yyyy)
+[P] Lưu ý: Kiểm tra kỹ thông tin cho khớp, ví dụ có những mốc quan trong như:
+[P] Không cần NGÀY chính xác, chỉ cần khai tháng & năm
+[P] Sau khi kết hôn, vợ chồng dọn về sống chung 1 địa chỉ 
+[P] Có thời gian đi học/ đi làm ở địa phương khác thì khai thông tin theo địa chỉ thật nơi đã đi học/ đi làm 
+[P] Người khai đơn DS-260 là nam có đi nghĩa vụ quân sự, thì phải khai lịch sử địa chỉ ở trong quân ngũ, không thể là địa chỉ khác 
+[P] Người khai đơn DS-260 là nữ khi sinh con ở địa phương khác thì cũng phải liệt kê vào 
+[P] CONTACT INFORMATION – THÔNG TIN LIÊN LẠC
+[P] Primary Phone Number (số ĐIỆN THOẠI CHÍNH):                                                                                       
+[P] Secondary Phone Number (số ĐIỆN THOẠI PHỤ):                                                                                       
+[P] Work Phone Number (số ĐIỆN THOẠI NƠI LÀM VIỆC):                                                                            
+[P] Other Telephone Number used last Five years? (số ĐIỆN THOẠI KHÁC đã sử dụng trong 5 NĂM QUA)
+[P] (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ chi tiết dưới đây)
+[P] Email Address (địa chỉ EMAIL):                                                                                                                         
+[P] Other Email used last Five years? (địa chỉ EMAIL KHÁC đã sử dụng trong 5 NĂM QUA)
+[P] (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ chi tiết dưới đây)
+[P] SOCIAL MEDIA – MẠNG XÃ HỘI
+[P] Social Media Provider/Platform (sử dụng MẠNG XÃ HỘI nào):                                                                       
+[P] Social Media Identifier (cung cấp TÊN MẠNG XÃ HỘI CỦA BẠN & LINK TRANG MẠNG XÃ HỘI (LINK NGẮN))                                                              
+[P] Other Social Media used last Five years? (cung cấp TÊN MẠNG XÃ HỘI KHÁC CỦA BẠN  đã sử dụng trong 5 NĂM QUA)
+[P] (Yes or No, if ‘Yes’ write details below) (KHÔNG CÓ ghi NO, Nếu CÓ: ghi đầy đủ chi tiết dưới đây)
+[P] Family Information – Thông tin gia đình
+[P] THÔNG TIN CỦA CHA
+[P] Father’s Surnames (HỌBIRTH CERTIFICATE
+[P] Father’s Given Names (TÊN):                  BIRTH CERTIFICATE                                                                                                                   
+[P] Date of Birth (dd/mm/yyyy) (Ngày tháng năm sinh):  BIRTH CERTIFICATE                                                                                                
+[P] City of Birth (THÀNH PHỐ nơi sinh):                                                                                                                        
+[P] State/Province of Birth (TỈNH / BANG nơi sinh):                                                                                                       
+[P] Country/Region of Birth (QUỐC GIA nơi sinh):                                                                                                         
+[P] Is your father still living? (Yes or No) (CÒN SỐNG hay ĐÃ MẤT):                                                                         
+[P] Year of death (Năm mấtDeath certificate
+[P] Current Address (ĐỊA CHỈ hiện tại):                                                                                                                            
+[P] City (THÀNH PHỐ):                                                                                                                                                    
+[P] State/Province (TỈNH / BANG):                                                                                                                                   
+[P] Postal zone/Zip Code (MÃ BƯU ĐIỆN):  ImmiPath sẽ điền nếu địa chỉ ở VN                                                           
+[P] Country/Region (QUỐC GIA):                                                                                                                                     
+[P] THÔNG TIN CỦA MẸ
+[P] Mother’s Surnames (HỌ của MẸ):   BIRTH CERTIFICATE                                                                                                                             
+[P] Mother’s Given Names (TÊN của MẸ):  BIRTH CERTIFICATE                                                                                                                     
+[P] Date of Birth (dd/mm/yyyy) (Ngày tháng năm sinh):  BIRTH CERTIFICATE                                                                                                 
+[P] City of Birth (THÀNH PHỐ nơi sinh):                                                                                                                         
+[P] State/Province of Birth (TỈNH / BANG nơi sinh):                                                                                                        
+[P] Country/Region of Birth (QUỐC GIA nơi sinh):                                                                                                          
+[P] Is your mother still living? (Yes or No) (CÒN SỐNG hay ĐÃ MẤT):                                                                        
+[P] Year of death (Năm mất): Death certificate                                                                                                                                             
+[P] Current Address (ĐỊA CHỈ hiện tại):                                                                                                                             
+[P] City (THÀNH PHỐ):                                                                                                                                                     
+[P] State/Province (TỈNH / BANG):                                                                                                                                    
+[P] Postal zone/Zip Code (MÃ BƯU ĐIỆN): ImmiPath sẽ điền nếu địa chỉ ở VN                                                             
+[P] Country/Region (QUỐC GIA):                                                                                                                                       
+[P] THÔNG TIN CỦA NGƯỜI PHỐI NGẪU
+
+PLACEHOLDERS:
+
+Total placeholders: 0

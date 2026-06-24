@@ -1,0 +1,66 @@
+PASSPORT: {
+  "full_name": "ĐẶNG VĂN HÙNG",
+  "family_name": "ĐẶNG",
+  "given_names": "VĂN HÙNG",
+  "date_of_birth": "1975-05-05",
+  "place_of_birth": "ĐÀ NẴNG",
+  "birth_city": "ĐÀ NẴNG",
+  "gender": "MALE",
+  "sex": "NAM / M",
+  "nationality": "VIỆT NAM / VIETNAMESE",
+  "id_card_number": "201319878",
+  "passport_type": "P",
+  "country_code": "VNM",
+  "passport_number": "C5059328",
+  "issue_date": "2018-05-16",
+  "expiration_date": "2028-05-16",
+  "expiry_date": "2028-05-16",
+  "place_of_issue": "CỤC QUẢN LÝ XUẤT NHẬP CẢNH",
+  "issuing_country": "VIỆT NAM",
+  "issuing_authority": "CỤC QUẢN LÝ XUẤT NHẬP CẢNH"
+}
+FILLED DS260 FIELDS: 44
+applicant_name = ĐẶNG VĂN HÙNG
+family_name = ĐẶNG
+given_names = VĂN HÙNG
+date_of_birth = 1975-05-05
+place_of_birth = ĐÀ NẴNG
+birth_city = ĐÀ NẴNG
+gender = MALE
+nationality = VIỆT NAM / VIETNAMESE
+id_card_number = 201319878
+passport_type = P
+country_code = VNM
+passport_number = C5059328
+passport_issue_date = 2018-05-16
+passport_expiration_date = 2028-05-16
+passport_place_of_issue = CỤC QUẢN LÝ XUẤT NHẬP CẢNH
+passport_issuing_country = VIỆT NAM
+birth_cert_full_name = DANG VAN HUNG
+birth_cert_date_of_birth = 1975-05-05
+birth_cert_place_of_birth = An Don, An Hai Bac, Da Nang City
+birth_cert_gender = MALE
+birth_cert_mother_name = DANG THI TIEM
+birth_cert_registration_number = 634
+judicial_full_name = DANG VAN HUNG
+judicial_date_of_birth = 1975-05-05
+judicial_nationality = Vietnamese
+judicial_certificate_number = 10609/LLTP-HSNV
+judicial_issue_date = 2025-06-25
+divorce_husband_name = MR. DANG VAN HUNG
+divorce_wife_name = MRS. MAI NGOC HOA
+divorce_marriage_date = 2006-12-21
+divorce_date = 2025-07-30
+divorce_document_number = 41/2025/QDST-HNGD
+death_deceased_name = TRAN TRUNG NGHIA
+death_date = 2011-07-13
+death_place = AT HOUSE NO. 350/1/6H HUYNH TAN PHAT, QUARTER 1, BINH THUAN WARD, DISTRICT 7
+death_document_number = 23
+military_full_name = HUYNH KIM TAN
+military_country = VIETNAM
+military_branch = AIR FORCE SERVICE
+military_rank = SERGEANT
+military_specialty = SIGNAL OPERATOR 15W
+military_service_start = 2024-02-01
+military_service_end = 2026-01-30
+military_document_number = 209/QD-TD

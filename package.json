@@ -1,0 +1,16 @@
+{
+  "name": "immigration-ai",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "concurrently -k -n BACKEND,FRONTEND -c blue,green \"npm run backend\" \"npm run frontend\"",
+    "dev": "npm start",
+    "backend": "cd backend && .venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "frontend": "npx wait-on -t 60000 http-get://127.0.0.1:8000/health && cd frontend && npm run dev",
+    "setup": "npm install && cd frontend && npm install && cd ../backend && python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "wait-on": "^8.0.5"
+  }
+}
