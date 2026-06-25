@@ -3,18 +3,28 @@
 import json
 from types import SimpleNamespace
 
-from app.services.ds260_mapping import enrich_children_section_from_birth_certs
+from app.services.ds260_mapping import (
+    enrich_children_section_from_birth_certs,
+    group_child_birth_luong1_pairs,
+)
 
 
-def _rec(raw: dict, doc_type: str = "birth_certificate_child", *, variant: str = "standard") -> SimpleNamespace:
+def _rec(
+    raw: dict,
+    doc_type: str = "birth_certificate_child",
+    *,
+    variant: str = "standard",
+    rec_id: str = "test",
+    source_document_id: str | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         doc_type=doc_type,
         variant=variant,
         form_data=json.dumps(raw),
         raw_data=json.dumps(raw),
         updated_at=None,
-        id="test",
-        source_document_id=None,
+        id=rec_id,
+        source_document_id=source_document_id,
     )
 
 
@@ -105,3 +115,98 @@ def test_union_worksheet_and_birth_certs_dedupe():
     assert by_key["child_1_full_name"] == "LE VAN A"
     assert by_key["child_2_full_name"] == "LE VAN B"
     assert by_key["child_3_full_name"] == "LE VAN C"
+
+
+def test_standard_and_new_same_child_count_as_one():
+    """2 con × (standard + _new) = 4 file nhưng chỉ 2 slot con trên Review."""
+    child_a_std = _rec(
+        {"child_full_name": "NGUYEN VAN A", "child_date_of_birth": "2015-01-10"},
+        rec_id="a-std",
+        source_document_id="doc-a-std",
+    )
+    child_a_new = _rec(
+        {"child_full_name": "NGUYEN VAN A", "child_date_of_birth": "2015-01-10"},
+        variant="exception",
+        rec_id="a-new",
+        source_document_id="doc-a-new",
+    )
+    child_b_std = _rec(
+        {"child_full_name": "NGUYEN VAN B", "child_date_of_birth": "2018-06-20"},
+        rec_id="b-std",
+        source_document_id="doc-b-std",
+    )
+    child_b_new = _rec(
+        {"child_full_name": "NGUYEN VAN B", "child_date_of_birth": "2018-06-20"},
+        variant="exception",
+        rec_id="b-new",
+        source_document_id="doc-b-new",
+    )
+    filename_map = {
+        "doc-a-std": "03_1 BIRTH CERTIFICATE CHILD A.pdf",
+        "doc-a-new": "03_1 BIRTH CERTIFICATE CHILD A_new.pdf",
+        "doc-b-std": "03_2 BIRTH CERTIFICATE CHILD B.pdf",
+        "doc-b-new": "03_2 BIRTH CERTIFICATE CHILD B_new.pdf",
+    }
+    fields = [
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+        {"key": "child_3_full_name", "value": "", "source": {}},
+        {"key": "child_4_full_name", "value": "", "source": {}},
+    ]
+    records = [child_a_std, child_a_new, child_b_std, child_b_new]
+    enrich_children_section_from_birth_certs(
+        fields, records, all_records=records, filename_map=filename_map
+    )
+    by_key = {f["key"]: f["value"] for f in fields}
+    hidden = {f["key"]: f.get("review_hidden") for f in fields if f["key"].startswith("child_")}
+    assert by_key["children_count"] == "2"
+    assert by_key["child_1_full_name"] == "NGUYEN VAN A"
+    assert by_key["child_2_full_name"] == "NGUYEN VAN B"
+    assert by_key["child_3_full_name"] == ""
+    assert by_key["child_4_full_name"] == ""
+    assert hidden.get("child_3_full_name") is True
+    assert hidden.get("child_4_full_name") is True
+    assert len(group_child_birth_luong1_pairs(records, filename_map)) == 2
+
+
+def test_worksheet_noise_slot_without_name_is_ignored():
+    ws = _rec(
+        {
+            "children_count": "3",
+            "child_1_full_name": "TRAN VAN A",
+            "child_1_date_of_birth": "2015-01-10",
+            "child_3_lives_with": "No",
+            "child_3_immigrating": "Yes",
+            "child_4_birth_country": "Vietnam",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+        {"key": "child_3_full_name", "value": "", "source": {}},
+        {"key": "child_4_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(fields, [], all_records=[ws])
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_count"] == "1"
+    assert by_key["child_1_full_name"] == "TRAN VAN A"
+    assert by_key["child_3_full_name"] == ""
+    assert by_key["child_4_full_name"] == ""
+
+
+def test_no_children_sets_no_and_hides_slots():
+    fields = [
+        {"key": "children_used", "value": "", "source": {}},
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "GHOST", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(fields, [], all_records=[])
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_used"] == "No"
+    assert by_key["children_count"] == "0"
+    assert by_key["child_1_full_name"] == ""

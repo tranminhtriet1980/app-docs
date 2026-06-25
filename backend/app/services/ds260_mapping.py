@@ -1297,10 +1297,145 @@ def enrich_marital_status_from_documents(
         field["source"]["derived"] = derived
 
 
-def list_child_birth_records(records: list[ApplicantDocRecord]) -> list[ApplicantDocRecord]:
-    """Tất cả giấy khai sinh con — mỗi file một dòng (standard + _new)."""
+_CHILD_YES_NO_VALUES = frozenset(
+    {"yes", "no", "y", "n", "có", "co", "không", "khong", "true", "false", "0", "1"}
+)
+
+
+def _normalize_child_file_stem(filename: str) -> str:
+    stem = Path(filename).stem.lower()
+    stem = re.sub(r"[_\-]+", " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return re.sub(r"\s+new$", "", stem).strip()
+
+
+def _child_has_meaningful_data(data: dict[str, str]) -> bool:
+    """Chỉ coi là một con khi có tên hợp lệ (tránh OCR rác / chỉ Có-Không / chỉ quốc gia)."""
+    name = re.sub(r"\s+", " ", (data.get("full_name") or "").strip())
+    if len(name) >= 2 and re.search(r"[A-Za-zÀ-ỹ]", name):
+        if name.lower() not in _CHILD_YES_NO_VALUES:
+            return True
+    dob = (data.get("date_of_birth") or "").strip()
+    if dob and name and len(name) >= 2:
+        return True
+    return False
+
+
+def _latest_child_variant(
+    recs: list[ApplicantDocRecord], variant: str
+) -> ApplicantDocRecord | None:
+    candidates = [r for r in recs if r.variant == variant]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: (r.updated_at or r.id, str(r.id)))
+
+
+def group_child_birth_luong1_pairs(
+    records: list[ApplicantDocRecord],
+    filename_map: dict[str, str] | None = None,
+) -> list[tuple[ApplicantDocRecord | None, ApplicantDocRecord | None]]:
+    """
+    Gộp standard + _new của cùng một giấy khai sinh con thành một cặp Luồng 1.
+    Tránh đếm 2 file (mẫu + đối chiếu) thành 2 con riêng.
+    """
     typed = [r for r in records if r.doc_type == "birth_certificate_child"]
-    return sorted(typed, key=lambda r: (r.updated_at or r.id, str(r.id)))
+    groups: dict[str, list[ApplicantDocRecord]] = {}
+    ungrouped: list[ApplicantDocRecord] = []
+
+    for rec in typed:
+        fname = ""
+        if rec.source_document_id and filename_map:
+            fname = filename_map.get(str(rec.source_document_id), "")
+        if fname:
+            key = _normalize_child_file_stem(fname)
+        else:
+            data = _child_data_from_record(rec)
+            name, dob = _child_dedupe_key(data)
+            key = f"{name}|{dob}" if (name or dob) else ""
+        if not key:
+            ungrouped.append(rec)
+            continue
+        groups.setdefault(key, []).append(rec)
+
+    pairs: list[tuple[ApplicantDocRecord | None, ApplicantDocRecord | None]] = []
+    for recs in groups.values():
+        pairs.append(
+            (
+                _latest_child_variant(recs, "standard"),
+                _latest_child_variant(recs, "exception"),
+            )
+        )
+
+    seen_ids: set[str] = set()
+    for std, exc in pairs:
+        for rec in (std, exc):
+            if rec:
+                seen_ids.add(str(rec.id))
+
+    for rec in ungrouped:
+        if str(rec.id) in seen_ids:
+            continue
+        if rec.variant == "standard":
+            pairs.append((rec, None))
+        else:
+            pairs.append((None, rec))
+
+    return pairs
+
+
+def list_child_birth_records(
+    records: list[ApplicantDocRecord],
+    *,
+    filename_map: dict[str, str] | None = None,
+) -> list[ApplicantDocRecord]:
+    """Mỗi con một bản đại diện (standard ưu tiên) — đã gộp cặp standard/_new."""
+    out: list[ApplicantDocRecord] = []
+    for std, exc in group_child_birth_luong1_pairs(records, filename_map):
+        rep = std or exc
+        if rep:
+            out.append(rep)
+    return sorted(out, key=lambda r: (r.updated_at or r.id, str(r.id)))
+
+
+def _child_data_from_luong1_pair(
+    standard: ApplicantDocRecord | None,
+    reference: ApplicantDocRecord | None,
+) -> dict[str, str]:
+    full = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_full_name", ("full_name", "name")
+    )
+    dob = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_date_of_birth", ("date_of_birth", "dob")
+    )
+    pob = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_place_of_birth", ("place_of_birth",)
+    )
+    city = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_birth_city", ("birth_city",)
+    )
+    state = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_birth_state", ("birth_state",)
+    )
+    country = _resolve_from_record_luong1_fallback(
+        standard, reference, "child_birth_country", ("birth_country",)
+    )
+    if not city and pob:
+        city = derive_city_from_place(pob) or pob
+    if not state and pob:
+        state = derive_birth_state_from_place(pob) or ""
+    if not country and pob:
+        country = derive_country_from_place(pob) or ""
+    return {
+        "full_name": full,
+        "date_of_birth": dob,
+        "birth_city": city,
+        "birth_state": state,
+        "birth_country": country,
+        "lives_with": "",
+        "current_address": "",
+        "immigrating": "",
+        "immigrating_future": "",
+    }
 
 
 def _child_data_from_record(rec: ApplicantDocRecord) -> dict[str, str]:
@@ -1382,9 +1517,39 @@ def _child_data_from_worksheet(rec: ApplicantDocRecord) -> list[dict[str, str]]:
             "immigrating": immigrating or "",
             "immigrating_future": immigrating_future or "",
         }
-        if any(data.values()):
+        if _child_has_meaningful_data(data):
             children.append(data)
     return children
+
+
+def _apply_children_review_visibility(fields_out: list[dict[str, Any]]) -> None:
+    """Ẩn slot con trống / vượt quá số con thực tế trên màn Review."""
+    filled_slots: set[int] = set()
+    children_used = ""
+    for field in fields_out:
+        key = field.get("key", "")
+        if key == "children_used":
+            children_used = (field.get("value") or "").strip()
+        m = re.match(r"^child_(\d+)_full_name$", key)
+        if m and (field.get("value") or "").strip():
+            filled_slots.add(int(m.group(1)))
+
+    max_slot = max(filled_slots) if filled_slots else 0
+    has_children = max_slot > 0 or children_used.lower() in {"yes", "có", "co"}
+
+    for field in fields_out:
+        key = field.get("key", "")
+        m = re.match(r"^child_(\d+)_", key)
+        if not m:
+            if key in {"children_used", "children_count"} and not has_children:
+                if not (field.get("value") or "").strip():
+                    field["value"] = "No" if key == "children_used" else "0"
+            continue
+        slot = int(m.group(1))
+        if slot > max_slot or not has_children:
+            field["value"] = ""
+            field["source"] = empty_ds260_field_source()
+            field["review_hidden"] = True
 
 
 def _dedupe_children(
@@ -1411,19 +1576,20 @@ def enrich_children_section_from_birth_certs(
     child_records: list[ApplicantDocRecord],
     *,
     all_records: list[ApplicantDocRecord] | None = None,
+    filename_map: dict[str, str] | None = None,
 ) -> None:
     """
-    Union giấy khai sinh con + worksheet DS-260, dedupe, điền tối đa 3 slot.
+    Union giấy khai sinh con + worksheet DS-260, dedupe, điền tối đa 4 slot.
+    Mỗi giấy khai sinh: gộp standard + _new thành một con (Luồng 1).
     """
     from app.services.ds260_conflicts import pick_latest_by_variant
 
-    items: list[tuple[dict[str, str], str, ApplicantDocRecord | None]] = []
-    for rec in child_records:
-        data = _child_data_from_record(rec)
-        if any(data.values()):
-            items.append((data, "birth_certificate_child", rec))
-
     records = all_records if all_records is not None else child_records
+    items: list[tuple[dict[str, str], str, ApplicantDocRecord | None]] = []
+    for std, ref in group_child_birth_luong1_pairs(records, filename_map):
+        data = _child_data_from_luong1_pair(std, ref)
+        if _child_has_meaningful_data(data):
+            items.append((data, "birth_certificate_child", std or ref))
     ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
         records, "ds260_customer_form"
     )
@@ -1446,12 +1612,15 @@ def enrich_children_section_from_birth_certs(
 
     derived: dict[str, str] = {}
     total = len(ordered)
-    if total or ws_declared_count:
-        derived["children_used"] = "Yes" if (total or ws_declared_count not in {"", "0"}) else ""
-        count_num = total
-        if ws_declared_count.isdigit():
-            count_num = max(count_num, int(ws_declared_count))
-        derived["children_count"] = str(count_num) if count_num else ws_declared_count
+    if total:
+        derived["children_used"] = "Yes"
+        derived["children_count"] = str(total)
+    elif ws_declared_count in {"", "0"}:
+        derived["children_used"] = "No"
+        derived["children_count"] = "0"
+    elif ws_declared_count.isdigit() and int(ws_declared_count) > 0:
+        derived["children_used"] = "Yes"
+        derived["children_count"] = ws_declared_count
 
     for idx, (data, source, rec) in enumerate(ordered[:4], start=1):
         prefix = f"child_{idx}_"
@@ -1498,6 +1667,8 @@ def enrich_children_section_from_birth_certs(
         }
         if val:
             field["source"]["derived"] = derived_tag
+
+    _apply_children_review_visibility(fields_out)
 
 
 def _resolve_parent_birth_cert_fallback(
@@ -1940,8 +2111,6 @@ def _attach_section_fill_stats(
     """Returns filled, total, applicable_filled, applicable_total."""
     present_docs = {r.doc_type for r in records}
     has_ref = any(r.variant == "exception" for r in records)
-    child_count = len([r for r in records if r.doc_type == "birth_certificate_child"])
-
     filled = 0
     total = 0
     applicable_filled = 0
@@ -1975,9 +2144,18 @@ def _attach_section_fill_stats(
             mapping = all_mappings.get(field.get("key", ""))
             applicable = section_active
             if applicable and sec["id"] == "section_children":
-                m = re.match(r"^child_(\d+)_", field.get("key", ""))
-                if m and int(m.group(1)) > max(child_count, 1):
+                if field.get("review_hidden"):
                     applicable = False
+                else:
+                    m = re.match(r"^child_(\d+)_", field.get("key", ""))
+                    if m:
+                        max_filled = 0
+                        for f in sec["fields"]:
+                            fm = re.match(r"^child_(\d+)_full_name$", f.get("key", ""))
+                            if fm and (f.get("value") or "").strip():
+                                max_filled = max(max_filled, int(fm.group(1)))
+                        if int(m.group(1)) > max(max_filled, 0):
+                            applicable = False
             if applicable and mapping and mapping.document in {"ds260_customer_form", "address_document"}:
                 applicable = (
                     "ds260_customer_form" in present_docs
@@ -2293,8 +2471,13 @@ async def resolve_ds260_form(
             divorce_rec = pick_latest_record(records, "divorce")
             enrich_previous_spouse_from_divorce(fields_out, divorce_rec, passport_rec)
         if sec.id == "section_children" and not is_child_member:
-            child_recs = list_child_birth_records(records)
-            enrich_children_section_from_birth_certs(fields_out, child_recs, all_records=records)
+            child_recs = list_child_birth_records(records, filename_map=filename_map)
+            enrich_children_section_from_birth_certs(
+                fields_out,
+                child_recs,
+                all_records=records,
+                filename_map=filename_map,
+            )
         sections_out.append(
             {
                 "id": sec.id,
