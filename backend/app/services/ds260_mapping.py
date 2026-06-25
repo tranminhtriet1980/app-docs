@@ -1577,6 +1577,7 @@ def enrich_children_section_from_birth_certs(
     *,
     all_records: list[ApplicantDocRecord] | None = None,
     filename_map: dict[str, str] | None = None,
+    case_members: list[Any] | None = None,
 ) -> None:
     """
     Union giấy khai sinh con + worksheet DS-260, dedupe, điền tối đa 4 slot.
@@ -1590,6 +1591,30 @@ def enrich_children_section_from_birth_certs(
         data = _child_data_from_luong1_pair(std, ref)
         if _child_has_meaningful_data(data):
             items.append((data, "birth_certificate_child", std or ref))
+
+    if case_members:
+        from app.services.family_case import pick_child_birth_cert_for_person
+
+        seen_keys = {_child_dedupe_key(x[0]) for x in items}
+        for member in case_members:
+            role = getattr(member, "role", None)
+            if role != "child" and str(role) != "child":
+                continue
+            name = (getattr(member, "display_name", None) or "").strip()
+            if not name:
+                continue
+            bc = pick_child_birth_cert_for_person(records, name)
+            if not bc:
+                continue
+            data = _child_data_from_record(bc)
+            if not _child_has_meaningful_data(data):
+                continue
+            key = _child_dedupe_key(data)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            items.append((data, "birth_certificate_child", bc))
+
     ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
         records, "ds260_customer_form"
     )
@@ -1982,6 +2007,44 @@ def resolve_customer_form_field(
     return "", mapping.field, None, {}
 
 
+def _section_primary_doc_present(
+    records: list[ApplicantDocRecord],
+    section_id: str,
+    *,
+    person_name: str | None = None,
+) -> bool:
+    """Có giấy tờ chính của section (vd. death_certificate) — tránh worksheet điền nhầm."""
+    primary = SECTION_PRIMARY_DOC.get(section_id)
+    if not primary:
+        return True
+    typed = [r for r in records if r.doc_type == primary]
+    if not typed:
+        return False
+    if not person_name:
+        return True
+    if primary in LUONG1_PERSON_SCOPED_DOC_TYPES or primary == "judicial_certificate":
+        std, ref = pick_luong1_pair_for_person(records, primary, person_name)
+        return bool(std or ref)
+    return True
+
+
+def clear_child_member_unscoped_sections(
+    sections_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    person_name: str,
+) -> None:
+    """Hồ sơ con — bỏ judicial/death/military nếu không có giấy tờ đúng người."""
+    for sec in sections_out:
+        sid = sec.get("id", "")
+        if sid not in ("section_judicial", "section_death", "section_military"):
+            continue
+        if _section_primary_doc_present(records, sid, person_name=person_name):
+            continue
+        for field in sec["fields"]:
+            field["value"] = ""
+            field["source"] = empty_ds260_field_source()
+
+
 def enrich_empty_fields_from_all_doc_records(
     sections_out: list[dict[str, Any]],
     records: list[ApplicantDocRecord],
@@ -2000,6 +2063,8 @@ def enrich_empty_fields_from_all_doc_records(
     mappings = flatten_ds260_mappings()
 
     for sec in sections_out:
+        section_id = sec.get("id", "")
+        primary_ok = _section_primary_doc_present(records, section_id, person_name=person_name)
         for field in sec["fields"]:
             if not _is_empty_for_fallback(field.get("value") or ""):
                 continue
@@ -2012,6 +2077,8 @@ def enrich_empty_fields_from_all_doc_records(
             eligible = [r for r in records if r.doc_type in allowed]
             if person_name:
                 eligible = _eligible_records_for_field_fill(eligible, person_name, field_key)
+            if not primary_ok:
+                eligible = [r for r in eligible if r.doc_type != "ds260_customer_form"]
             if not eligible:
                 continue
 
@@ -2285,6 +2352,10 @@ async def resolve_ds260_form(
 
     app_result = await db.execute(select(Applicant).where(Applicant.id == applicant_id))
     applicant = app_result.scalar_one_or_none()
+    case_members_all: list[Any] = []
+    if applicant:
+        case_members_all = await load_case_members(db, applicant_id)
+
     member_ctx: MemberContext | None = None
     if applicant:
         mid = member_id
@@ -2477,6 +2548,7 @@ async def resolve_ds260_form(
                 child_recs,
                 all_records=records,
                 filename_map=filename_map,
+                case_members=case_members_all,
             )
         sections_out.append(
             {
@@ -2501,6 +2573,9 @@ async def resolve_ds260_form(
     enrich_empty_fields_from_all_doc_records(
         sections_out, records, filename_map, person_name=person_name if member_ctx else None
     )
+
+    if is_child_member and person_name:
+        clear_child_member_unscoped_sections(sections_out, records, person_name)
 
     if is_child_member and not passport_rec:
         for sec in sections_out:

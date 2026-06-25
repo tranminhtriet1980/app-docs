@@ -646,10 +646,29 @@ def enrich_child_member_personal(
         if not val:
             continue
         field["value"] = val
+        child_source_fields: dict[str, str] = {
+            "applicant_name": "child_full_name",
+            "applicant_name_native": "child_full_name",
+            "family_name": "child_full_name",
+            "given_names": "child_full_name",
+            "date_of_birth": "child_date_of_birth",
+            "place_of_birth": "child_place_of_birth",
+            "birth_city": "child_birth_city",
+            "birth_state": "child_birth_state",
+            "birth_country": "child_birth_country",
+            "gender": "child_gender",
+            "nationality": "child_birth_country",
+            "father_full_name": "father_name",
+            "mother_full_name": "mother_name",
+        }
         if passport_rec and (key in passport_only_keys or _field_from_passport(passport_rec, mapped)):
             doc_type, rid, src_field = "passport", passport_rid, mapped
         else:
-            doc_type, rid, src_field = "birth_certificate_child", child_rid, "child_full_name"
+            doc_type, rid, src_field = (
+                "birth_certificate_child",
+                child_rid,
+                child_source_fields.get(key, "child_full_name"),
+            )
         field["source"] = {
             **empty_ds260_field_source(),
             "document_type": doc_type,

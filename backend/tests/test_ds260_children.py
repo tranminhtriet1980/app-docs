@@ -210,3 +210,37 @@ def test_no_children_sets_no_and_hides_slots():
     assert by_key["children_used"] == "No"
     assert by_key["children_count"] == "0"
     assert by_key["child_1_full_name"] == ""
+
+
+def test_enrich_children_from_case_members_when_grouped():
+    """Thành viên con trong gia đình → điền slot con dù gộp file OCR."""
+    child1 = _rec(
+        {"child_full_name": "HUYNH NHAT LONG", "child_date_of_birth": "2012-04-12"},
+        rec_id="long",
+        source_document_id="doc-long",
+    )
+    child2 = _rec(
+        {"child_full_name": "HUYNH NHA UYEN", "child_date_of_birth": "2019-06-22"},
+        rec_id="uyen",
+        source_document_id="doc-uyen",
+    )
+    members = [
+        SimpleNamespace(role="child", display_name="HUYNH NHAT LONG"),
+        SimpleNamespace(role="child", display_name="HUYNH NHA UYEN"),
+    ]
+    fields = [
+        {"key": "children_used", "value": "", "source": {}},
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+        {"key": "child_3_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(
+        fields, [], all_records=[child1, child2], case_members=members
+    )
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_used"] == "Yes"
+    assert by_key["children_count"] == "2"
+    assert by_key["child_1_full_name"] == "HUYNH NHAT LONG"
+    assert by_key["child_2_full_name"] == "HUYNH NHA UYEN"
+    assert by_key["child_3_full_name"] == ""
