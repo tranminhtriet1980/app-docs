@@ -46,8 +46,12 @@ DS260_CUSTOMER_KEY_REMAP: dict[str, str] = {
     "father_given_name": "father_given_names",
     "father_dob": "father_date_of_birth",
     "father_birth_date": "father_date_of_birth",
-    "father_city": "father_birth_city",
     "father_city_of_birth": "father_birth_city",
+    "father_birth_state": "father_birth_state",
+    "father_birth_country": "father_birth_country",
+    "father_address_line1": "father_address",
+    "father_death_year": "father_death_year",
+    "father_postal_code": "father_postal_code",
     "mother_name": "mother_full_name",
     "mother_family_name": "mother_surname",
     "mother_last_name": "mother_surname",
@@ -56,8 +60,12 @@ DS260_CUSTOMER_KEY_REMAP: dict[str, str] = {
     "mother_dob": "mother_date_of_birth",
     "mother_birth_date": "mother_date_of_birth",
     "mother_year_of_birth": "mother_date_of_birth",
-    "mother_city": "mother_birth_city",
     "mother_city_of_birth": "mother_birth_city",
+    "mother_birth_state": "mother_birth_state",
+    "mother_birth_country": "mother_birth_country",
+    "mother_address_line1": "mother_address",
+    "mother_death_year": "mother_death_year",
+    "mother_postal_code": "mother_postal_code",
     "wife_full_name": "spouse_full_name",
     "husband_full_name": "spouse_full_name",
     "spouse_name": "spouse_full_name",
@@ -326,6 +334,27 @@ def build_ds260_customer_extract_keys() -> frozenset[str]:
     return frozenset(k for k in keys if k)
 
 
+def _expand_family_prefixed_keys(raw: dict[str, str]) -> dict[str, str]:
+    """family.father_surname → father_surname (bảng khai ImmiPath / DS-160 legacy)."""
+    out = dict(raw)
+    for key, val in list(raw.items()):
+        if not val or not key.startswith("family."):
+            continue
+        short = key[7:].strip()
+        if short and short not in out:
+            out[short] = val
+        # family.father_name → father_full_name
+        if short == "father_name" and "father_full_name" not in out:
+            out["father_full_name"] = val
+        if short == "mother_name" and "mother_full_name" not in out:
+            out["mother_full_name"] = val
+        if short == "father_address_line1" and "father_address" not in out:
+            out["father_address"] = val
+        if short == "mother_address_line1" and "mother_address" not in out:
+            out["mother_address"] = val
+    return out
+
+
 def normalize_ds260_customer_raw(raw: dict[str, str]) -> dict[str, str]:
     """Gộp alias OCR → key DS-260 mapping (applicant_name, passport_issue_date, …)."""
     out: dict[str, str] = {}
@@ -336,6 +365,7 @@ def normalize_ds260_customer_raw(raw: dict[str, str]) -> dict[str, str]:
         if s:
             out[k] = s
 
+    out = _expand_family_prefixed_keys(out)
     for src, dst in DS260_CUSTOMER_KEY_REMAP.items():
         if out.get(dst):
             continue
@@ -385,6 +415,10 @@ def coerce_ds260_customer_extraction(extraction: dict[str, Any]) -> dict[str, An
             continue
         nk = re.sub(r"[^a-z0-9_]", "_", key.lower()).strip("_")
         targets = {key, nk}
+        if key.startswith("family."):
+            short = key[7:].strip()
+            if short:
+                targets.add(short)
         for src in (key, nk):
             dst = resolve_ds260_customer_key_remap(src, flat_so_far)
             if dst:

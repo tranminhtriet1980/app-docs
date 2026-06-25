@@ -20,6 +20,8 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     # --- A.1 Personal (passport primary; birth cert corroboration) ---
     "applicant_name": (_PASS, _BC, _WS),
     "applicant_name_native": (_PASS, _BC, _WS),
+    "other_name_used": (_WS,),
+    "other_names": (_WS,),
     "family_name": (_PASS, _BC, _WS),
     "given_names": (_PASS, _BC, _WS),
     "date_of_birth": (_PASS, _BC, _WS),
@@ -30,7 +32,7 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "gender": (_PASS, _BC, _WS),
     "nationality": (_PASS, _BC, _WS),
     "id_card_number": (_PASS, _WS),
-    "current_marital_status": (_DIV, _MARR, _PASS, _WS),
+    "current_marital_status": (_WS, _DIV, _MARR, _PASS),
     # --- A.2 Passport (strict — không cross-fill từ giấy tờ khác) ---
     "passport_type": (_PASS, _WS),
     "country_code": (_PASS, _WS),
@@ -39,6 +41,8 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "passport_expiration_date": (_PASS, _WS),
     "passport_place_of_issue": (_PASS, _WS),
     "passport_issuing_country": (_PASS, _WS),
+    "other_nationality_used": (_WS,),
+    "other_nationality_history": (_WS,),
     # --- Birth certificate section ---
     "birth_cert_full_name": (_BC, _PASS, _WS),
     "birth_cert_date_of_birth": (_BC, _PASS, _WS),
@@ -56,6 +60,12 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "father_birth_country": (_BC, _WS),
     "father_full_name": (_BC, _PASS, _WS),
     "father_is_living": (_BC, _WS),
+    "father_death_year": (_WS, _DEATH),
+    "father_address": (_WS,),
+    "father_city": (_WS,),
+    "father_state": (_WS,),
+    "father_postal_code": (_WS,),
+    "father_country": (_WS,),
     "mother_surname": (_BC, _PASS, _WS),
     "mother_given_names": (_BC, _PASS, _WS),
     "mother_date_of_birth": (_BC, _WS),
@@ -64,6 +74,12 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "mother_birth_country": (_BC, _WS),
     "mother_full_name": (_BC, _PASS, _WS),
     "mother_is_living": (_BC, _WS),
+    "mother_death_year": (_WS, _DEATH),
+    "mother_address": (_WS, _BC),
+    "mother_city": (_WS,),
+    "mother_state": (_WS,),
+    "mother_postal_code": (_WS,),
+    "mother_country": (_WS,),
     # --- Address (3): street có thể từ Passport_new; city/zip chỉ worksheet ---
     "current_address": (_WS, _PASS, _ADDR),
     "current_city": (_WS,),
@@ -73,10 +89,6 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "address_from_date": (_WS,),
     "other_addresses_used": (_WS,),
     "other_addresses_history": (_WS,),
-    "mother_address": (_BC, _WS),
-    "mother_city": (_BC, _WS),
-    "mother_state": (_BC, _WS),
-    "mother_country": (_BC, _WS),
     # --- Contact (4): chỉ worksheet ---
     "primary_phone": (_WS,),
     "secondary_phone": (_WS,),
@@ -151,7 +163,19 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "child_3_birth_city": (_CHILD, _WS),
     "child_3_birth_state": (_CHILD, _WS),
     "child_3_birth_country": (_CHILD, _WS),
+    "child_4_full_name": (_CHILD, _WS),
+    "child_4_date_of_birth": (_CHILD, _WS),
+    "child_4_birth_city": (_CHILD, _WS),
+    "child_4_birth_state": (_CHILD, _WS),
+    "child_4_birth_country": (_CHILD, _WS),
+    # --- Child worksheet-only (lives with / immigrating) ---
+    **{
+        f"child_{i}_{suffix}": (_WS,)
+        for i in range(1, 5)
+        for suffix in ("lives_with", "current_address", "immigrating", "immigrating_future")
+    },
     # --- Military ---
+    "military_served": (_WS, _MIL),
     "military_full_name": (_MIL, _WS),
     "military_country": (_MIL, _WS),
     "military_branch": (_MIL, _WS),

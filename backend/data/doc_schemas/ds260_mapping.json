@@ -9,6 +9,8 @@
       "fields": [
         {"key": "applicant_name", "label": "Applicant Name / Họ và tên", "document": "passport", "field": "full_name", "aliases": ["name"]},
         {"key": "applicant_name_native", "label": "Full Name in Native Language", "document": "passport", "field": "full_name", "aliases": ["full_name_native", "name_native_language", "native_full_name"]},
+        {"key": "other_name_used", "label": "Other Name Used? (Yes/No)", "document": "ds260_customer_form", "field": "other_name_used", "aliases": ["other_names_used"]},
+        {"key": "other_names", "label": "Other Names (details)", "document": "ds260_customer_form", "field": "other_names", "aliases": ["other_name_history"]},
         {"key": "family_name", "label": "Surname / Họ", "document": "passport", "field": "family_name", "aliases": ["surname", "last_name"]},
         {"key": "given_names", "label": "Given Names / Tên", "document": "passport", "field": "given_names", "aliases": ["given_name", "first_name"]},
         {"key": "date_of_birth", "label": "Date of Birth / Ngày sinh", "document": "passport", "field": "date_of_birth", "aliases": ["dob", "birth_date"]},
@@ -17,7 +19,7 @@
         {"key": "birth_state", "label": "State/Province of Birth", "document": "passport", "field": "place_of_birth", "derive": "copy"},
         {"key": "birth_country", "label": "Country of Birth", "document": "passport", "field": "place_of_birth", "derive": "country_from_location"},
         {"key": "gender", "label": "Sex / Giới tính", "document": "passport", "field": "gender", "aliases": ["sex"]},
-        {"key": "current_marital_status", "label": "Current Marital Status", "document": "divorce", "field": "marital_status", "aliases": ["current_marital_status"]},
+        {"key": "current_marital_status", "label": "Current Marital Status", "document": "ds260_customer_form", "field": "current_marital_status", "aliases": ["marital_status"]},
         {"key": "nationality", "label": "Nationality / Quốc tịch", "document": "passport", "field": "nationality", "aliases": ["country_of_nationality"]},
         {"key": "id_card_number", "label": "ID Card N° / Số CMND-CCCD", "document": "passport", "field": "id_card_number", "aliases": ["national_id", "cmnd", "cccd"]}
       ]
@@ -33,7 +35,9 @@
         {"key": "passport_issue_date", "label": "Date of Issue / Ngày cấp", "document": "passport", "field": "issue_date", "aliases": ["passport_issue_date", "date_of_issue"]},
         {"key": "passport_expiration_date", "label": "Date of Expiry / Có giá trị đến", "document": "passport", "field": "expiration_date", "aliases": ["expiry_date", "passport_expiry_date", "date_of_expiry"]},
         {"key": "passport_place_of_issue", "label": "Place of Issue / Nơi cấp", "document": "passport", "field": "place_of_issue", "aliases": ["issuing_authority", "authority"]},
-        {"key": "passport_issuing_country", "label": "Country of Issuance", "document": "passport", "field": "issuing_country", "aliases": ["passport_issuing_country", "country_of_issue"]}
+        {"key": "passport_issuing_country", "label": "Country of Issuance", "document": "passport", "field": "issuing_country", "aliases": ["passport_issuing_country", "country_of_issue"]},
+        {"key": "other_nationality_used", "label": "Other nationality held? (Yes/No)", "document": "ds260_customer_form", "field": "other_nationality_used", "aliases": ["other_nationality_used_last_5_years"]},
+        {"key": "other_nationality_history", "label": "Other nationality details", "document": "ds260_customer_form", "field": "other_nationality_history", "aliases": ["other_nationalities_history"]}
       ]
     },
     {
@@ -53,31 +57,43 @@
     {
       "id": "section_father",
       "title": "DS-260 — Father Information",
-      "subtitle": "Nguồn: Birth certificate (BIRTH CERTIFICATE)",
+      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
       "fields": [
         {"key": "father_surname", "label": "Father's Surnames / Họ cha", "document": "birth_certificate", "field": "father_surname", "aliases": ["father_family_name", "father_last_name"]},
         {"key": "father_given_names", "label": "Father's Given Names / Tên cha", "document": "birth_certificate", "field": "father_given_names", "aliases": ["father_first_name", "father_given_name"]},
         {"key": "father_date_of_birth", "label": "Father Date of Birth / Ngày sinh cha", "document": "birth_certificate", "field": "father_date_of_birth", "aliases": ["father_dob", "father_birth_date"]},
-        {"key": "father_birth_city", "label": "Father City of Birth / TP nơi sinh cha", "document": "birth_certificate", "field": "father_birth_city", "aliases": ["father_city_of_birth", "father_city"]},
-        {"key": "father_birth_state", "label": "Father State/Province of Birth / Tỉnh sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "copy", "aliases": ["father_birth_place", "father_address", "father_address_line1"]},
-        {"key": "father_birth_country", "label": "Father Country of Birth / Quốc gia sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "country_from_location", "aliases": ["father_birth_place", "father_address", "father_country"]},
+        {"key": "father_birth_city", "label": "Father City of Birth / TP nơi sinh cha", "document": "birth_certificate", "field": "father_birth_city", "aliases": ["father_city_of_birth"]},
+        {"key": "father_birth_state", "label": "Father State/Province of Birth / Tỉnh sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "copy", "aliases": ["father_birth_place", "father_birth_state"]},
+        {"key": "father_birth_country", "label": "Father Country of Birth / Quốc gia sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "country_from_location", "aliases": ["father_birth_place", "father_birth_country"]},
         {"key": "father_full_name", "label": "Father Full Name / Họ tên cha (gộp)", "document": "birth_certificate", "field": "father_name", "aliases": ["father_full_name"]},
-        {"key": "father_is_living", "label": "Is your father still living?", "document": "birth_certificate", "field": "father_is_living"}
+        {"key": "father_is_living", "label": "Is your father still living?", "document": "ds260_customer_form", "field": "father_is_living", "aliases": []},
+        {"key": "father_death_year", "label": "Father Year of Death / Năm mất cha", "document": "ds260_customer_form", "field": "father_death_year", "aliases": ["father_date_of_death"]},
+        {"key": "father_address", "label": "Father Current Address / Địa chỉ hiện tại cha", "document": "ds260_customer_form", "field": "father_address", "aliases": ["father_address_line1"]},
+        {"key": "father_city", "label": "Father Current City / Thành phố hiện tại cha", "document": "ds260_customer_form", "field": "father_city", "aliases": []},
+        {"key": "father_state", "label": "Father Current State / Tỉnh hiện tại cha", "document": "ds260_customer_form", "field": "father_state", "aliases": []},
+        {"key": "father_postal_code", "label": "Father Postal Code / Mã bưu điện cha", "document": "ds260_customer_form", "field": "father_postal_code", "aliases": []},
+        {"key": "father_country", "label": "Father Current Country / Quốc gia hiện tại cha", "document": "ds260_customer_form", "field": "father_country", "aliases": []}
       ]
     },
     {
       "id": "section_mother",
       "title": "DS-260 — Mother Information",
-      "subtitle": "Nguồn: Birth certificate (BIRTH CERTIFICATE)",
+      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
       "fields": [
         {"key": "mother_surname", "label": "Mother's Surnames / Họ mẹ", "document": "birth_certificate", "field": "mother_surname", "aliases": ["mother_family_name", "mother_last_name"]},
         {"key": "mother_given_names", "label": "Mother's Given Names / Tên mẹ", "document": "birth_certificate", "field": "mother_given_names", "aliases": ["mother_first_name", "mother_given_name"]},
         {"key": "mother_date_of_birth", "label": "Mother Date of Birth / Ngày sinh mẹ", "document": "birth_certificate", "field": "mother_date_of_birth", "aliases": ["mother_dob", "mother_birth_date", "mother_year_of_birth"]},
-        {"key": "mother_birth_city", "label": "Mother City of Birth / TP nơi sinh mẹ", "document": "birth_certificate", "field": "mother_birth_city", "aliases": ["mother_city_of_birth", "mother_city"]},
-        {"key": "mother_birth_state", "label": "Mother State/Province of Birth / Tỉnh sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "copy", "aliases": ["mother_birth_place", "mother_address", "mother_address_line1", "mother_residence"]},
-        {"key": "mother_birth_country", "label": "Mother Country of Birth / Quốc gia sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "country_from_location", "aliases": ["mother_birth_place", "mother_address", "mother_country", "mother_nationality"]},
+        {"key": "mother_birth_city", "label": "Mother City of Birth / TP nơi sinh mẹ", "document": "birth_certificate", "field": "mother_birth_city", "aliases": ["mother_city_of_birth"]},
+        {"key": "mother_birth_state", "label": "Mother State/Province of Birth / Tỉnh sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "copy", "aliases": ["mother_birth_place", "mother_birth_state"]},
+        {"key": "mother_birth_country", "label": "Mother Country of Birth / Quốc gia sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "country_from_location", "aliases": ["mother_birth_place", "mother_birth_country", "mother_nationality"]},
         {"key": "mother_full_name", "label": "Mother Full Name / Họ tên mẹ (gộp)", "document": "birth_certificate", "field": "mother_name", "aliases": ["mother_full_name"]},
-        {"key": "mother_is_living", "label": "Is your mother still living?", "document": "birth_certificate", "field": "mother_is_living"}
+        {"key": "mother_is_living", "label": "Is your mother still living?", "document": "ds260_customer_form", "field": "mother_is_living", "aliases": []},
+        {"key": "mother_death_year", "label": "Mother Year of Death / Năm mất mẹ", "document": "ds260_customer_form", "field": "mother_death_year", "aliases": ["mother_date_of_death"]},
+        {"key": "mother_address", "label": "Mother Current Address / Địa chỉ hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_address", "aliases": ["mother_address_line1", "mother_residence"]},
+        {"key": "mother_city", "label": "Mother Current City / Thành phố hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_city", "aliases": []},
+        {"key": "mother_state", "label": "Mother Current State / Tỉnh hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_state", "aliases": []},
+        {"key": "mother_postal_code", "label": "Mother Postal Code / Mã bưu điện mẹ", "document": "ds260_customer_form", "field": "mother_postal_code", "aliases": []},
+        {"key": "mother_country", "label": "Mother Current Country / Quốc gia hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_country", "aliases": []}
       ]
     },
     {
@@ -92,11 +108,7 @@
         {"key": "current_country", "label": "Country/Region", "document": "ds260_customer_form", "field": "address_country", "aliases": ["country", "contact_country"]},
         {"key": "address_from_date", "label": "From Date", "document": "ds260_customer_form", "field": "address_from_date", "aliases": ["from_date", "residence_from", "lived_since"]},
         {"key": "other_addresses_used", "label": "Lived elsewhere since age 16?", "document": "ds260_customer_form", "field": "other_addresses_since_16", "aliases": ["other_addresses_used", "lived_elsewhere_since_16"]},
-        {"key": "other_addresses_history", "label": "Prior address history", "document": "ds260_customer_form", "field": "other_addresses_history", "aliases": ["prior_addresses", "address_history", "previous_addresses"]},
-        {"key": "mother_address", "label": "Mother Current Address", "document": "birth_certificate", "field": "mother_address", "aliases": ["mother_place_of_birth", "mother_residence"]},
-        {"key": "mother_city", "label": "Mother City", "document": "birth_certificate", "field": "mother_city", "aliases": ["mother_birth_city"]},
-        {"key": "mother_state", "label": "Mother State", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "copy", "aliases": ["mother_address", "mother_residence"]},
-        {"key": "mother_country", "label": "Mother Country", "document": "birth_certificate", "field": "mother_country", "aliases": ["mother_nationality", "mother_birth_country"]}
+        {"key": "other_addresses_history", "label": "Prior address history", "document": "ds260_customer_form", "field": "other_addresses_history", "aliases": ["prior_addresses", "address_history", "previous_addresses"]}
       ]
     },
     {
@@ -213,16 +225,37 @@
         {"key": "child_1_birth_city", "label": "Child (1) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
         {"key": "child_1_birth_state", "label": "Child (1) State of Birth", "document": "birth_certificate_child", "field": "child_birth_state", "aliases": ["birth_state"]},
         {"key": "child_1_birth_country", "label": "Child (1) Country of Birth", "document": "birth_certificate_child", "field": "child_birth_country", "aliases": ["birth_country"]},
+        {"key": "child_1_lives_with", "label": "Child (1) Lives with you?", "document": "ds260_customer_form", "field": "child_1_lives_with", "aliases": ["child_lives_with"]},
+        {"key": "child_1_current_address", "label": "Child (1) Current address if not with you", "document": "ds260_customer_form", "field": "child_1_current_address", "aliases": ["child_1_address"]},
+        {"key": "child_1_immigrating", "label": "Child (1) Immigrating with you?", "document": "ds260_customer_form", "field": "child_1_immigrating", "aliases": []},
+        {"key": "child_1_immigrating_future", "label": "Child (1) Will join in future?", "document": "ds260_customer_form", "field": "child_1_immigrating_future", "aliases": []},
         {"key": "child_2_full_name", "label": "Child (2) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
         {"key": "child_2_date_of_birth", "label": "Child (2) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
         {"key": "child_2_birth_city", "label": "Child (2) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
         {"key": "child_2_birth_state", "label": "Child (2) State of Birth", "document": "birth_certificate_child", "field": "child_birth_state", "aliases": ["birth_state"]},
         {"key": "child_2_birth_country", "label": "Child (2) Country of Birth", "document": "birth_certificate_child", "field": "child_birth_country", "aliases": ["birth_country"]},
+        {"key": "child_2_lives_with", "label": "Child (2) Lives with you?", "document": "ds260_customer_form", "field": "child_2_lives_with", "aliases": []},
+        {"key": "child_2_current_address", "label": "Child (2) Current address if not with you", "document": "ds260_customer_form", "field": "child_2_current_address", "aliases": []},
+        {"key": "child_2_immigrating", "label": "Child (2) Immigrating with you?", "document": "ds260_customer_form", "field": "child_2_immigrating", "aliases": []},
+        {"key": "child_2_immigrating_future", "label": "Child (2) Will join in future?", "document": "ds260_customer_form", "field": "child_2_immigrating_future", "aliases": []},
         {"key": "child_3_full_name", "label": "Child (3) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
         {"key": "child_3_date_of_birth", "label": "Child (3) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
         {"key": "child_3_birth_city", "label": "Child (3) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
         {"key": "child_3_birth_state", "label": "Child (3) State of Birth", "document": "birth_certificate_child", "field": "child_birth_state", "aliases": ["birth_state"]},
-        {"key": "child_3_birth_country", "label": "Child (3) Country of Birth", "document": "birth_certificate_child", "field": "child_birth_country", "aliases": ["birth_country"]}
+        {"key": "child_3_birth_country", "label": "Child (3) Country of Birth", "document": "birth_certificate_child", "field": "child_birth_country", "aliases": ["birth_country"]},
+        {"key": "child_3_lives_with", "label": "Child (3) Lives with you?", "document": "ds260_customer_form", "field": "child_3_lives_with", "aliases": []},
+        {"key": "child_3_current_address", "label": "Child (3) Current address if not with you", "document": "ds260_customer_form", "field": "child_3_current_address", "aliases": []},
+        {"key": "child_3_immigrating", "label": "Child (3) Immigrating with you?", "document": "ds260_customer_form", "field": "child_3_immigrating", "aliases": []},
+        {"key": "child_3_immigrating_future", "label": "Child (3) Will join in future?", "document": "ds260_customer_form", "field": "child_3_immigrating_future", "aliases": []},
+        {"key": "child_4_full_name", "label": "Child (4) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
+        {"key": "child_4_date_of_birth", "label": "Child (4) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
+        {"key": "child_4_birth_city", "label": "Child (4) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
+        {"key": "child_4_birth_state", "label": "Child (4) State of Birth", "document": "birth_certificate_child", "field": "child_birth_state", "aliases": ["birth_state"]},
+        {"key": "child_4_birth_country", "label": "Child (4) Country of Birth", "document": "birth_certificate_child", "field": "child_birth_country", "aliases": ["birth_country"]},
+        {"key": "child_4_lives_with", "label": "Child (4) Lives with you?", "document": "ds260_customer_form", "field": "child_4_lives_with", "aliases": []},
+        {"key": "child_4_current_address", "label": "Child (4) Current address if not with you", "document": "ds260_customer_form", "field": "child_4_current_address", "aliases": []},
+        {"key": "child_4_immigrating", "label": "Child (4) Immigrating with you?", "document": "ds260_customer_form", "field": "child_4_immigrating", "aliases": []},
+        {"key": "child_4_immigrating_future", "label": "Child (4) Will join in future?", "document": "ds260_customer_form", "field": "child_4_immigrating_future", "aliases": []}
       ]
     },
     {
@@ -230,6 +263,7 @@
       "title": "Nghĩa vụ quân sự",
       "subtitle": "Nguồn: Military discharge",
       "fields": [
+        {"key": "military_served", "label": "Have you ever served in the military?", "document": "ds260_customer_form", "field": "military_served", "aliases": ["have_military_service"]},
         {"key": "military_full_name", "label": "Full Name", "document": "military_discharge", "field": "full_name"},
         {"key": "military_country", "label": "Country", "document": "military_discharge", "field": "military_country"},
         {"key": "military_branch", "label": "Branch", "document": "military_discharge", "field": "military_branch"},

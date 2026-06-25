@@ -138,6 +138,26 @@ def _resolve_from_record(
         extra = BIRTH_CERT_CANONICAL_ALIASES.get(source_field, ())
         aliases = tuple(dict.fromkeys((*aliases, *extra)))
 
+    if getattr(record, "doc_type", None) == "ds260_customer_form":
+        from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+
+        merged: dict[str, str] = {}
+        for src in (raw, form):
+            for k, v in src.items():
+                if v is not None and str(v).strip():
+                    merged[k] = str(v).strip()
+        merged = normalize_ds260_customer_raw(merged)
+        if merged.get(source_field, "").strip():
+            return merged[source_field].strip()
+        for alias in aliases:
+            if merged.get(alias, "").strip():
+                return merged[alias].strip()
+        eff = (source_field, *aliases, *((source_field,) if source_field not in aliases else ()))
+        for alias in dict.fromkeys(eff):
+            if merged.get(alias, "").strip():
+                return merged[alias].strip()
+        return ""
+
     if form.get(source_field, "").strip():
         return form[source_field].strip()
     if raw.get(source_field, "").strip():
@@ -351,8 +371,8 @@ _PARENT_BIRTH_CERT_CONFIG: dict[str, dict[str, Any]] = {
             ("father_given_names", ("father_first_name", "father_given_name")),
             ("father_name", ("father_full_name",)),
             ("father_date_of_birth", ("father_dob", "father_birth_date")),
-            ("father_birth_city", ("father_city_of_birth", "father_city")),
-            ("father_place_of_birth", ("father_birth_place", "father_address", "father_address_line1")),
+            ("father_birth_city", ("father_city_of_birth",)),
+            ("father_place_of_birth", ("father_birth_place",)),
             ("father_birth_state", ()),
             ("father_birth_country", ("father_country",)),
         ),
@@ -377,8 +397,8 @@ _PARENT_BIRTH_CERT_CONFIG: dict[str, dict[str, Any]] = {
             ("mother_given_names", ("mother_first_name", "mother_given_name")),
             ("mother_name", ("mother_full_name",)),
             ("mother_date_of_birth", ("mother_dob", "mother_birth_date")),
-            ("mother_birth_city", ("mother_city_of_birth", "mother_city")),
-            ("mother_place_of_birth", ("mother_birth_place", "mother_address", "mother_address_line1")),
+            ("mother_birth_city", ("mother_city_of_birth",)),
+            ("mother_place_of_birth", ("mother_birth_place",)),
             ("mother_birth_state", ()),
             ("mother_birth_country", ("mother_country",)),
         ),
@@ -462,6 +482,61 @@ def enrich_parent_is_living(
         field["source"]["document_type"] = "birth_certificate"
         field["source"]["source_field"] = key
         field["source"]["derived"] = f"{parent}_living_from_birth_cert"
+
+
+def _year_from_death_date(val: str) -> str:
+    from app.services.ds260_dates import format_partial_ds260_date, parse_full_date
+
+    v = (val or "").strip()
+    if not v:
+        return ""
+    if re.match(r"^\d{4}$", v):
+        return v
+    d = parse_full_date(v)
+    if d:
+        return str(d.year)
+    partial = format_partial_ds260_date(v)
+    if partial and partial.isdigit() and len(partial) == 4:
+        return partial
+    m = re.search(r"(19|20)\d{2}", v)
+    return m.group(0) if m else ""
+
+
+def enrich_parent_death_from_death_cert(
+    fields_out: list[dict[str, Any]],
+    death_rec: ApplicantDocRecord | None,
+    parent: str,
+    parent_full_name: str,
+) -> None:
+    """Giấy báo tử → năm mất cha/mẹ + is_living = No."""
+    if not death_rec or not parent_full_name:
+        return
+    merged = _merge_raw_dict(death_rec)
+    deceased = (merged.get("deceased_full_name") or merged.get("full_name") or "").strip()
+    rel = (merged.get("relationship_to_applicant") or "").strip().lower()
+    if not _names_match(deceased, parent_full_name) and parent not in rel:
+        return
+    year = _year_from_death_date(merged.get("date_of_death", ""))
+    death_key = f"{parent}_death_year"
+    living_key = f"{parent}_is_living"
+    for field in fields_out:
+        key = field.get("key", "")
+        if key == death_key and not (field.get("value") or "").strip() and year:
+            field["value"] = year
+            field["source"] = {
+                "document_type": "death_certificate",
+                "source_field": "date_of_death",
+                "record_id": str(death_rec.id),
+                "derived": f"{parent}_death_from_cert",
+            }
+        if key == living_key and not (field.get("value") or "").strip():
+            field["value"] = "No"
+            field["source"] = {
+                "document_type": "death_certificate",
+                "source_field": "date_of_death",
+                "record_id": str(death_rec.id),
+                "derived": f"{parent}_not_living_from_death_cert",
+            }
 
 
 def _normalize_person_name_key(name: str) -> str:
@@ -1292,12 +1367,20 @@ def _child_data_from_worksheet(rec: ApplicantDocRecord) -> list[dict[str, str]]:
         city = merged.get(f"{prefix}birth_city") or (merged.get("child_birth_city") if idx == 1 else "")
         state = merged.get(f"{prefix}birth_state") or (merged.get("child_birth_state") if idx == 1 else "")
         country = merged.get(f"{prefix}birth_country") or (merged.get("child_birth_country") if idx == 1 else "")
+        lives = merged.get(f"{prefix}lives_with", "")
+        address = merged.get(f"{prefix}current_address") or merged.get(f"{prefix}address", "")
+        immigrating = merged.get(f"{prefix}immigrating", "")
+        immigrating_future = merged.get(f"{prefix}immigrating_future", "")
         data = {
             "full_name": full or "",
             "date_of_birth": dob or "",
             "birth_city": city or "",
             "birth_state": state or "",
             "birth_country": country or "",
+            "lives_with": lives or "",
+            "current_address": address or "",
+            "immigrating": immigrating or "",
+            "immigrating_future": immigrating_future or "",
         }
         if any(data.values()):
             children.append(data)
@@ -1370,15 +1453,18 @@ def enrich_children_section_from_birth_certs(
             count_num = max(count_num, int(ws_declared_count))
         derived["children_count"] = str(count_num) if count_num else ws_declared_count
 
-    for idx, (data, source, rec) in enumerate(ordered[:3], start=1):
+    for idx, (data, source, rec) in enumerate(ordered[:4], start=1):
         prefix = f"child_{idx}_"
-        doc_id = str(rec.source_document_id) if rec and rec.source_document_id else None
         for suffix, val in (
             ("full_name", data["full_name"]),
             ("date_of_birth", data["date_of_birth"]),
             ("birth_city", data["birth_city"]),
             ("birth_state", data["birth_state"]),
             ("birth_country", data["birth_country"]),
+            ("lives_with", data.get("lives_with", "")),
+            ("current_address", data.get("current_address", "")),
+            ("immigrating", data.get("immigrating", "")),
+            ("immigrating_future", data.get("immigrating_future", "")),
         ):
             if val:
                 derived[f"{prefix}{suffix}"] = val
@@ -1395,7 +1481,7 @@ def enrich_children_section_from_birth_certs(
             slot = re.match(r"^child_(\d+)_", key)
             if slot:
                 slot_idx = int(slot.group(1)) - 1
-                if slot_idx < len(ordered[:3]):
+                if slot_idx < len(ordered[:4]):
                     source_type = ordered[slot_idx][1]
                     derived_tag = (
                         "children_from_worksheet"
@@ -1491,7 +1577,8 @@ def _resolve_ds260_field_value(
     if mapping.derive == "country_from_location":
         direct, sf = _direct_ds260_value(record, mapping)
         if direct.strip():
-            return direct, sf
+            mapped = derive_country_from_place(direct)
+            return mapped or direct, sf
         val = _resolve_place_text(record, mapping.field, aliases)
         country = derive_country_from_place(val)
         if country:
@@ -2138,6 +2225,12 @@ async def resolve_ds260_form(
             if bc_rec and not has_father_info_on_birth_cert(bc_rec):
                 apply_father_absent_rule(fields_out)
             enrich_parent_is_living(fields_out, bc_rec, "father")
+            death_rec = pick_latest_record(records, "death_certificate")
+            father_name = next(
+                (f.get("value") or "" for f in fields_out if f.get("key") == "father_full_name"),
+                "",
+            )
+            enrich_parent_death_from_death_cert(fields_out, death_rec, "father", father_name)
         if sec.id == "section_mother" and not is_child_member:
             if member_ctx and person_name:
                 bc_rec, bc_ref = pick_luong1_pair_for_person(
@@ -2149,6 +2242,12 @@ async def resolve_ds260_form(
             if bc_rec and not has_mother_info_on_birth_cert(bc_rec):
                 apply_mother_absent_rule(fields_out)
             enrich_parent_is_living(fields_out, bc_rec, "mother")
+            death_rec = pick_latest_record(records, "death_certificate")
+            mother_name = next(
+                (f.get("value") or "" for f in fields_out if f.get("key") == "mother_full_name"),
+                "",
+            )
+            enrich_parent_death_from_death_cert(fields_out, death_rec, "mother", mother_name)
         if sec.id == "section_a_personal":
             if not is_child_member:
                 divorce_rec = pick_latest_record(records, "divorce")
@@ -2271,6 +2370,10 @@ async def resolve_ds260_form(
     from app.services.ds260_dates import format_sections_date_display
 
     format_sections_date_display(sections_out)
+
+    from app.services.ds260_english_output import format_sections_english_output
+
+    format_sections_english_output(sections_out)
 
     filled, total, applicable_filled, applicable_total = _attach_section_fill_stats(
         sections_out, records, member_role=member_ctx.role if member_ctx else None
