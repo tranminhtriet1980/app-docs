@@ -695,11 +695,33 @@ CHILDREN: children_used (Yes/No), children_count,
 child_1_full_name, child_1_date_of_birth, child_1_birth_city, child_1_birth_state, child_1_birth_country,
 child_2_full_name, child_2_date_of_birth, child_3_full_name, child_3_date_of_birth.
 
+WORK / EDUCATION (section D): primary_occupation, occupation_other_specify, present_employer,
+employer_address, employer_city, employer_state, employer_postal_code, employer_country,
+job_title, employment_start_date, other_occupation_used, other_occupation_detail,
+prior_jobs_10_years_used, prior_jobs_history,
+middle_school_name, middle_school_address, middle_school_period,
+high_school_name, high_school_address, high_school_period,
+college_name, college_address, college_major, college_period.
+
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
 
 Use mapping keys above (English snake_case). Yes/No for yes-no questions.
-Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON.
+Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, CÔNG VIỆC/HỌC VẤN, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON.
+"""
+
+APPLICATION_FORM_EXTRACT_HINT = """
+IMMIGRATION APPLICATION FORM — DS-260 Part D (Work / Education / Training).
+
+WORK: primary_occupation, occupation_other_specify, present_employer, employer_name,
+employer_address, employer_city, employer_state, employer_postal_code, employer_country,
+job_title, employment_start_date, prior_jobs_history.
+
+EDUCATION: middle_school_name, middle_school_address, middle_school_period,
+high_school_name, high_school_address, high_school_period,
+college_name, college_address, college_major, college_period.
+
+Yes/No for yes-no questions. Dates as printed.
 """
 
 DOC_TYPE_EXTRACT_HINTS: dict[str, str] = {
@@ -712,6 +734,7 @@ DOC_TYPE_EXTRACT_HINTS: dict[str, str] = {
     "birth_certificate_child": CHILD_BIRTH_EXTRACT_HINT,
     "military_discharge": MILITARY_EXTRACT_HINT,
     "ds260_customer_form": DS260_CUSTOMER_FORM_EXTRACT_HINT,
+    "application_form": APPLICATION_FORM_EXTRACT_HINT,
 }
 
 
@@ -734,6 +757,7 @@ async def _openai_extract(
         "address_document",
         "financial",
         "employment_letter",
+        "application_form",
     }:
         extra = ADDRESS_EXTRACT_HINT + SOCIAL_EXTRACT_HINT
 

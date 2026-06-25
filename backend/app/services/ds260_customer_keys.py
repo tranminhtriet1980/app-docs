@@ -94,6 +94,89 @@ DS260_CUSTOMER_KEY_REMAP: dict[str, str] = {
     "from_date": "address_from_date",
     "residence_from": "address_from_date",
     "lived_since": "address_from_date",
+    # Work / Education (DS-260 D) — ImmiPath / DS-160 profile keys
+    "primary_occupation": "work_primary_occupation",
+    "occupation_other_specify": "work_occupation_other_specify",
+    "present_employer": "work_present_employer",
+    "employer_name": "work_present_employer",
+    "employer_address": "work_employer_address",
+    "employer_address_line1": "work_employer_address",
+    "employer_city": "work_employer_city",
+    "employer_state": "work_employer_state",
+    "employer_postal_code": "work_employer_postal_code",
+    "employer_country": "work_employer_country",
+    "job_title": "work_job_title",
+    "employment_start_date": "work_start_date",
+    "employment_start": "work_start_date",
+    "prior_jobs_10_years_used": "work_prior_jobs_used",
+    "prior_jobs_history": "work_prior_jobs_history",
+    "middle_school_name": "edu_middle_school_name",
+    "middle_school_address": "edu_middle_school_address",
+    "middle_school_period": "edu_middle_school_period",
+    "middle_school_dates": "edu_middle_school_period",
+    "high_school_name": "edu_high_school_name",
+    "highschool_name": "edu_high_school_name",
+    "high_school_address": "edu_high_school_address",
+    "high_school_period": "edu_high_school_period",
+    "high_school_dates": "edu_high_school_period",
+    "college_name": "edu_college_name",
+    "university_name": "edu_college_name",
+    "college_address": "edu_college_address",
+    "college_major": "edu_college_major",
+    "major": "edu_college_major",
+    "field_of_study": "edu_college_major",
+    "college_period": "edu_college_period",
+    "college_dates": "edu_college_period",
+}
+
+# education.* / employment.* (profile OCR) → DS-260 mapping keys
+_PROFILE_DOT_TO_DS260: dict[str, str] = {
+    "employment.primary_occupation": "work_primary_occupation",
+    "employment.occupation_other_specify": "work_occupation_other_specify",
+    "employment.present_employer": "work_present_employer",
+    "employment.employer_name": "work_present_employer",
+    "employment.employer_address_line1": "work_employer_address",
+    "employment.employer_city": "work_employer_city",
+    "employment.employer_state": "work_employer_state",
+    "employment.employer_postal_code": "work_employer_postal_code",
+    "employment.employer_country": "work_employer_country",
+    "employment.job_title": "work_job_title",
+    "employment.start_date": "work_start_date",
+    "employment.other_occupation_used": "work_other_occupation_used",
+    "employment.other_occupation_detail": "work_other_occupation_detail",
+    "employment.prior_jobs_10_years_used": "work_prior_jobs_used",
+    "employment.prior_jobs_history": "work_prior_jobs_history",
+    "education.middle_school_name": "edu_middle_school_name",
+    "education.middle_school_address": "edu_middle_school_address",
+    "education.middle_school_period": "edu_middle_school_period",
+    "education.high_school_name": "edu_high_school_name",
+    "education.high_school_address": "edu_high_school_address",
+    "education.high_school_period": "edu_high_school_period",
+    "education.college_name": "edu_college_name",
+    "education.college_address": "edu_college_address",
+    "education.college_major": "edu_college_major",
+    "education.college_period": "edu_college_period",
+}
+
+# ImmiPath worksheet labels (OCR snake_case) — Middle school (Cấp 2), etc.
+_IMMI_PATH_WORK_EDU_REMAP: dict[str, str] = {
+    "middle_school_cap_2": "edu_middle_school_name",
+    "middle_school_cap_2_name": "edu_middle_school_name",
+    "middle_school_cap_2_address": "edu_middle_school_address",
+    "middle_school_cap_2_period": "edu_middle_school_period",
+    "middle_school_grade_2": "edu_middle_school_name",
+    "high_school_cap_3": "edu_high_school_name",
+    "highschool_cap_3": "edu_high_school_name",
+    "high_school_cap_3_name": "edu_high_school_name",
+    "high_school_cap_3_address": "edu_high_school_address",
+    "high_school_cap_3_period": "edu_high_school_period",
+    "highschool_cap_3_name": "edu_high_school_name",
+    "college_university": "edu_college_name",
+    "college_university_name": "edu_college_name",
+    "college_university_address": "edu_college_address",
+    "college_university_major": "edu_college_major",
+    "college_university_period": "edu_college_period",
+    "university_college": "edu_college_name",
 }
 
 # Keys that indicate a document-number value belongs to a specific DS-260 section.
@@ -324,6 +407,23 @@ def build_ds260_customer_extract_keys() -> frozenset[str]:
             "child_2_birth_city",
             "child_3_full_name",
             "child_3_date_of_birth",
+            "primary_occupation",
+            "present_employer",
+            "prior_jobs_history",
+            "middle_school_name",
+            "middle_school_address",
+            "middle_school_period",
+            "high_school_name",
+            "high_school_address",
+            "high_school_period",
+            "college_name",
+            "college_address",
+            "college_major",
+            "college_period",
+            "work_primary_occupation",
+            "edu_middle_school_name",
+            "edu_high_school_name",
+            "edu_college_name",
             "id_card_number",
             "national_id",
             "passport_type",
@@ -355,6 +455,29 @@ def _expand_family_prefixed_keys(raw: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def _expand_profile_dotted_keys(raw: dict[str, str]) -> dict[str, str]:
+    """employment.* / education.* → work_* / edu_* mapping keys."""
+    out = dict(raw)
+    for src, dst in _PROFILE_DOT_TO_DS260.items():
+        if out.get(dst):
+            continue
+        val = (out.get(src) or "").strip()
+        if val:
+            out[dst] = val
+    return out
+
+
+def _expand_immipath_work_edu_keys(raw: dict[str, str]) -> dict[str, str]:
+    out = dict(raw)
+    for src, dst in _IMMI_PATH_WORK_EDU_REMAP.items():
+        if out.get(dst):
+            continue
+        val = (out.get(src) or "").strip()
+        if val:
+            out[dst] = val
+    return out
+
+
 def normalize_ds260_customer_raw(raw: dict[str, str]) -> dict[str, str]:
     """Gộp alias OCR → key DS-260 mapping (applicant_name, passport_issue_date, …)."""
     out: dict[str, str] = {}
@@ -366,6 +489,8 @@ def normalize_ds260_customer_raw(raw: dict[str, str]) -> dict[str, str]:
             out[k] = s
 
     out = _expand_family_prefixed_keys(out)
+    out = _expand_profile_dotted_keys(out)
+    out = _expand_immipath_work_edu_keys(out)
     for src, dst in DS260_CUSTOMER_KEY_REMAP.items():
         if out.get(dst):
             continue

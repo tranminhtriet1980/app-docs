@@ -220,6 +220,48 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         extract_keys=tuple(),  # dynamic — see get_extract_keys_for_doc_type()
         profile_keys=(),
     ),
+    DocTypeDef(
+        code="application_form",
+        display_name="Application form",
+        filename_tokens=(
+            "application form",
+            "immigrant application",
+            "don nop",
+            "don xin",
+            "application",
+        ),
+        form_section="DS-260 D — Work / Education / Training",
+        extract_keys=(
+            "primary_occupation",
+            "occupation_other_specify",
+            "present_employer",
+            "employer_name",
+            "employer_address",
+            "employer_address_line1",
+            "employer_city",
+            "employer_state",
+            "employer_postal_code",
+            "employer_country",
+            "job_title",
+            "employment_start_date",
+            "start_date",
+            "other_occupation_used",
+            "other_occupation_detail",
+            "prior_jobs_10_years_used",
+            "prior_jobs_history",
+            "middle_school_name",
+            "middle_school_address",
+            "middle_school_period",
+            "high_school_name",
+            "high_school_address",
+            "high_school_period",
+            "college_name",
+            "college_address",
+            "college_major",
+            "college_period",
+        ),
+        profile_keys=(),
+    ),
 )
 
 RECORDABLE_REGISTRY_BY_CODE: dict[str, DocTypeDef] = {
@@ -241,6 +283,10 @@ CANONICAL_FILENAME_EXAMPLES: dict[str, dict[str, str]] = {
 CANONICAL_FILENAME_EXAMPLES["ds260_customer_form"] = {
     "standard": "ds260.pdf",
     "exception": f"DS260{EXCEPTION_SUFFIX}",
+}
+CANONICAL_FILENAME_EXAMPLES["application_form"] = {
+    "standard": "Application form",
+    "exception": f"Application form{EXCEPTION_SUFFIX}",
 }
 
 
@@ -266,6 +312,12 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
     # DS-260 worksheet khách khai — luôn nguồn đối chiếu (exception)
     if re.search(r"\bds[\s\-]?260\b", stem) or stem.replace(" ", "") == "ds260":
         return "ds260_customer_form", True
+
+    # Application form (DS-260 D — công việc / học vấn) — Luồng 1 standard + _new
+    if re.search(r"\bapplication\s+form\b", stem) or "immigrant application" in stem:
+        return "application_form", is_exception
+    if re.search(r"\bdon\s+(nop|xin)\b", stem) and "ds" not in stem.replace(" ", ""):
+        return "application_form", is_exception
 
     # Longer tokens first (birth certificate child before birth certificate)
     ranked = sorted(DOCUMENT_REGISTRY, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)

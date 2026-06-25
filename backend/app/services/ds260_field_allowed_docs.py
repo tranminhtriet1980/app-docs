@@ -12,6 +12,7 @@ _MARR = "marriage_certificate"
 _DIV = "divorce"
 _DEATH = "death_certificate"
 _CHILD = "birth_certificate_child"
+_APP = "application_form"
 _MIL = "military_discharge"
 _ADDR = "address_document"
 
@@ -145,6 +146,31 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "death_place": (_DEATH, _WS),
     "death_relationship": (_DEATH, _WS),
     "death_document_number": (_DEATH, _WS),
+    # --- Work / Education (D) ---
+    "work_primary_occupation": (_APP, _WS),
+    "work_occupation_other_specify": (_APP, _WS),
+    "work_present_employer": (_APP, _WS),
+    "work_employer_address": (_APP, _WS),
+    "work_employer_city": (_APP, _WS),
+    "work_employer_state": (_APP, _WS),
+    "work_employer_postal_code": (_APP, _WS),
+    "work_employer_country": (_APP, _WS),
+    "work_job_title": (_APP, _WS),
+    "work_start_date": (_APP, _WS),
+    "work_other_occupation_used": (_WS,),
+    "work_other_occupation_detail": (_WS, _APP),
+    "work_prior_jobs_used": (_WS,),
+    "work_prior_jobs_history": (_APP, _WS),
+    "edu_middle_school_name": (_APP, _WS),
+    "edu_middle_school_address": (_APP, _WS),
+    "edu_middle_school_period": (_APP, _WS),
+    "edu_high_school_name": (_APP, _WS),
+    "edu_high_school_address": (_APP, _WS),
+    "edu_high_school_period": (_APP, _WS),
+    "edu_college_name": (_APP, _WS),
+    "edu_college_address": (_APP, _WS),
+    "edu_college_major": (_APP, _WS),
+    "edu_college_period": (_APP, _WS),
     # --- Children ---
     "children_used": (_CHILD, _WS),
     "children_count": (_CHILD, _WS),

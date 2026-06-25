@@ -30,6 +30,7 @@ LUONG1_DOC_TYPES: frozenset[str] = frozenset(
         "birth_certificate",
         "judicial_certificate",
         "marriage_certificate",
+        "application_form",
     }
 )
 

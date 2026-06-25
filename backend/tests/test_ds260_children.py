@@ -244,3 +244,59 @@ def test_enrich_children_from_case_members_when_grouped():
     assert by_key["child_1_full_name"] == "HUYNH NHAT LONG"
     assert by_key["child_2_full_name"] == "HUYNH NHA UYEN"
     assert by_key["child_3_full_name"] == ""
+
+
+def test_worksheet_no_children_rejects_applicant_name_bleed():
+    """CHIEM ANH HANG: không có con — worksheet khai No nhưng OCR điền tên chủ hồ sơ vào slot con."""
+    ws = _rec(
+        {
+            "children_used": "No",
+            "children_count": "0",
+            "child_1_full_name": "CHIEM ANH HANG",
+            "child_1_date_of_birth": "1980-05-15",
+            "child_1_birth_city": "Ho Chi Minh City",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_used", "value": "", "source": {}},
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "CHIEM ANH HANG", "source": {}},
+        {"key": "child_1_date_of_birth", "value": "1980-05-15", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(
+        fields, [], all_records=[ws], applicant_name="CHIEM ANH HANG"
+    )
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_used"] == "No"
+    assert by_key["children_count"] == "0"
+    assert by_key["child_1_full_name"] == ""
+    assert by_key["child_1_date_of_birth"] == ""
+
+
+def test_worksheet_children_count_without_real_children_does_not_force_yes():
+    """children_count > 0 trên worksheet không được ép Yes khi không có tên con hợp lệ."""
+    ws = _rec(
+        {
+            "children_count": "2",
+            "child_1_full_name": "CHIEM ANH HANG",
+            "child_2_immigrating": "Yes",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_used", "value": "", "source": {}},
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(
+        fields, [], all_records=[ws], applicant_name="CHIEM ANH HANG"
+    )
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_used"] == "No"
+    assert by_key["children_count"] == "0"
+    assert by_key["child_1_full_name"] == ""

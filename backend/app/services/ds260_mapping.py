@@ -635,6 +635,17 @@ def clear_spouse_section_fields(fields_out: list[dict[str, Any]]) -> None:
             field["source"] = empty_ds260_field_source()
 
 
+def _reset_divorce_section_fields(fields_out: list[dict[str, Any]]) -> None:
+    """Không có giấy ly hôn hợp lệ — previous_spouses_used=No, các trường khác trống."""
+    for field in fields_out:
+        key = field.get("key", "")
+        if key == "previous_spouses_used":
+            field["value"] = "No"
+        else:
+            field["value"] = ""
+        field["source"] = empty_ds260_field_source()
+
+
 @lru_cache(maxsize=1)
 def _child_excluded_section_ids() -> frozenset[str]:
     """Các mục DS-260 không áp dụng cho hồ sơ con (chỉ người lớn)."""
@@ -643,6 +654,7 @@ def _child_excluded_section_ids() -> frozenset[str]:
         "section_divorce",
         "section_previous_spouse",
         "section_children",
+        "section_work_education",
     })
 
 
@@ -1148,6 +1160,41 @@ def _ex_spouse_field_from_divorce(
     return ""
 
 
+def enrich_divorce_section_from_record(
+    fields_out: list[dict[str, Any]],
+    divorce_rec: ApplicantDocRecord | None,
+) -> None:
+    """Điền section ly hôn từ quyết định ly hôn (không lấy worksheet)."""
+    if not divorce_rec:
+        _reset_divorce_section_fields(fields_out)
+        return
+    derived = {
+        "divorce_husband_name": _strip_person_title(
+            _resolve_from_record(divorce_rec, "husband_full_name", ("husband_name",))
+        ),
+        "divorce_wife_name": _strip_person_title(
+            _resolve_from_record(divorce_rec, "wife_full_name", ("wife_name",))
+        ),
+        "divorce_marriage_date": _resolve_from_record(
+            divorce_rec, "marriage_date", ("date_of_marriage",)
+        ),
+        "divorce_date": _resolve_from_record(divorce_rec, "divorce_date", ()),
+        "divorce_document_number": _resolve_from_record(
+            divorce_rec, "document_number", ("certificate_number",)
+        ),
+    }
+    for field in fields_out:
+        key = field.get("key", "")
+        val = (derived.get(key) or "").strip()
+        if not val:
+            continue
+        field["value"] = val
+        field.setdefault("source", {})
+        field["source"]["document_type"] = "divorce"
+        field["source"]["source_field"] = key
+        field["source"]["derived"] = "divorce_from_decree"
+
+
 def enrich_previous_spouse_from_divorce(
     fields_out: list[dict[str, Any]],
     divorce_rec: ApplicantDocRecord | None,
@@ -1155,6 +1202,7 @@ def enrich_previous_spouse_from_divorce(
 ) -> None:
     """Điền section phối ngẫu cũ từ quyết định ly hôn — chọn vợ/chồng không trùng chủ hồ sơ."""
     if not divorce_rec:
+        _reset_divorce_section_fields(fields_out)
         return
 
     side = _pick_spouse_side_from_marriage(divorce_rec, passport_rec)
@@ -1185,6 +1233,13 @@ def enrich_previous_spouse_from_divorce(
                     continue
                 ex_full = _strip_person_title(part)
                 break
+
+    applicant = ""
+    if passport_rec:
+        applicant = _resolve_from_record(passport_rec, "full_name", ("name",))
+    if not ex_full or (applicant and _names_match(applicant, ex_full)):
+        _reset_divorce_section_fields(fields_out)
+        return
 
     marriage_date = _resolve_from_record(divorce_rec, "marriage_date", ("date_of_marriage",))
     divorce_date = _resolve_from_record(divorce_rec, "divorce_date", ())
@@ -1282,11 +1337,31 @@ def enrich_applicant_birth_city_state_equal(
 def enrich_marital_status_from_documents(
     fields_out: list[dict[str, Any]],
     divorce_rec: ApplicantDocRecord | None,
+    *,
+    marriage_rec: ApplicantDocRecord | None = None,
+    marriage_ref: ApplicantDocRecord | None = None,
+    passport_rec: ApplicantDocRecord | None = None,
+    passport_ref: ApplicantDocRecord | None = None,
 ) -> None:
-    """Có giấy ly hôn → Divorced; không có → Married."""
-    status = "Divorced" if divorce_rec else "Married"
-    derived = "marital_status_from_divorce" if divorce_rec else "marital_status_default_married"
-    doc_type = "divorce" if divorce_rec else "marriage_certificate"
+    """Có giấy ly hôn → Divorced; có giấy kết hôn hợp lệ → Married; không có → để trống."""
+    if divorce_rec:
+        status = "Divorced"
+        derived = "marital_status_from_divorce"
+        doc_type = "divorce"
+    elif has_applicable_marriage_certificate(
+        marriage_rec, marriage_ref, passport_rec, passport_ref
+    ):
+        status = "Married"
+        derived = "marital_status_from_marriage"
+        doc_type = "marriage_certificate"
+    else:
+        for field in fields_out:
+            if field.get("key") != "current_marital_status":
+                continue
+            field["value"] = ""
+            field["source"] = empty_ds260_field_source()
+        return
+
     for field in fields_out:
         if field.get("key") != "current_marital_status":
             continue
@@ -1319,6 +1394,31 @@ def _child_has_meaningful_data(data: dict[str, str]) -> bool:
     if dob and name and len(name) >= 2:
         return True
     return False
+
+
+def _worksheet_declares_no_children(ws_merged: dict[str, str]) -> bool:
+    """Worksheet khai không có con (children_used=No hoặc children_count=0)."""
+    used = (ws_merged.get("children_used") or "").strip().lower()
+    count = (ws_merged.get("children_count") or "").strip()
+    if used in {"no", "n", "không", "khong", "false"}:
+        return True
+    if count == "0":
+        return True
+    return False
+
+
+def _child_is_plausible(
+    data: dict[str, str],
+    *,
+    applicant_name: str = "",
+) -> bool:
+    """Loại tên trùng chủ hồ sơ / OCR rác trên form không có con."""
+    if not _child_has_meaningful_data(data):
+        return False
+    name = (data.get("full_name") or "").strip()
+    if applicant_name and _names_same_person(name, applicant_name):
+        return False
+    return True
 
 
 def _latest_child_variant(
@@ -1578,6 +1678,7 @@ def enrich_children_section_from_birth_certs(
     all_records: list[ApplicantDocRecord] | None = None,
     filename_map: dict[str, str] | None = None,
     case_members: list[Any] | None = None,
+    applicant_name: str = "",
 ) -> None:
     """
     Union giấy khai sinh con + worksheet DS-260, dedupe, điền tối đa 4 slot.
@@ -1589,7 +1690,7 @@ def enrich_children_section_from_birth_certs(
     items: list[tuple[dict[str, str], str, ApplicantDocRecord | None]] = []
     for std, ref in group_child_birth_luong1_pairs(records, filename_map):
         data = _child_data_from_luong1_pair(std, ref)
-        if _child_has_meaningful_data(data):
+        if _child_is_plausible(data, applicant_name=applicant_name):
             items.append((data, "birth_certificate_child", std or ref))
 
     if case_members:
@@ -1607,7 +1708,7 @@ def enrich_children_section_from_birth_certs(
             if not bc:
                 continue
             data = _child_data_from_record(bc)
-            if not _child_has_meaningful_data(data):
+            if not _child_is_plausible(data, applicant_name=applicant_name):
                 continue
             key = _child_dedupe_key(data)
             if key in seen_keys:
@@ -1619,11 +1720,16 @@ def enrich_children_section_from_birth_certs(
         records, "ds260_customer_form"
     )
     ws_declared_count = ""
+    ws_declares_no = False
     if ws_rec:
         ws_merged = _merge_raw_dict(ws_rec)
         ws_declared_count = (ws_merged.get("children_count") or "").strip()
-        for data in _child_data_from_worksheet(ws_rec):
-            items.append((data, "ds260_customer_form", ws_rec))
+        ws_declares_no = _worksheet_declares_no_children(ws_merged)
+        birth_cert_count = sum(1 for _, src, _ in items if src == "birth_certificate_child")
+        if not (ws_declares_no and birth_cert_count == 0):
+            for data in _child_data_from_worksheet(ws_rec):
+                if _child_is_plausible(data, applicant_name=applicant_name):
+                    items.append((data, "ds260_customer_form", ws_rec))
 
     merged = _dedupe_children(items)
     ordered = sorted(
@@ -1640,12 +1746,9 @@ def enrich_children_section_from_birth_certs(
     if total:
         derived["children_used"] = "Yes"
         derived["children_count"] = str(total)
-    elif ws_declared_count in {"", "0"}:
+    elif ws_declares_no or ws_declared_count in {"", "0"}:
         derived["children_used"] = "No"
         derived["children_count"] = "0"
-    elif ws_declared_count.isdigit() and int(ws_declared_count) > 0:
-        derived["children_used"] = "Yes"
-        derived["children_count"] = ws_declared_count
 
     for idx, (data, source, rec) in enumerate(ordered[:4], start=1):
         prefix = f"child_{idx}_"
@@ -2007,6 +2110,13 @@ def resolve_customer_form_field(
     return "", mapping.field, None, {}
 
 
+_SECTIONS_BLOCK_WORKSHEET_WITHOUT_PRIMARY = frozenset({
+    "section_death",
+    "section_military",
+    "section_judicial",
+})
+
+
 def _section_primary_doc_present(
     records: list[ApplicantDocRecord],
     section_id: str,
@@ -2064,11 +2174,15 @@ def enrich_empty_fields_from_all_doc_records(
 
     for sec in sections_out:
         section_id = sec.get("id", "")
+        if section_id in ("section_children", "section_previous_spouse", "section_divorce"):
+            continue
         primary_ok = _section_primary_doc_present(records, section_id, person_name=person_name)
         for field in sec["fields"]:
             if not _is_empty_for_fallback(field.get("value") or ""):
                 continue
             field_key = field.get("key", "")
+            if field_key == "current_marital_status":
+                continue
             mapping = mappings.get(field_key)
             if not mapping or mapping.document == "spouse_applicant_profile":
                 continue
@@ -2077,7 +2191,7 @@ def enrich_empty_fields_from_all_doc_records(
             eligible = [r for r in records if r.doc_type in allowed]
             if person_name:
                 eligible = _eligible_records_for_field_fill(eligible, person_name, field_key)
-            if not primary_ok:
+            if not primary_ok and section_id in _SECTIONS_BLOCK_WORKSHEET_WITHOUT_PRIMARY:
                 eligible = [r for r in eligible if r.doc_type != "ds260_customer_form"]
             if not eligible:
                 continue
@@ -2106,6 +2220,71 @@ def enrich_empty_fields_from_all_doc_records(
                     "derived": derived,
                 }
                 break
+
+
+def enrich_work_education_from_worksheet(
+    fields_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    filename_map: dict[str, str] | None = None,
+) -> None:
+    """Bổ sung Phần D từ DS-260 khách khai khi Application form thiếu hoặc chưa upload."""
+    from app.services.ds260_conflicts import pick_latest_by_variant
+    from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+
+    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
+        records, "ds260_customer_form"
+    )
+    if not ws_rec:
+        return
+
+    merged = normalize_ds260_customer_raw(_merge_raw_dict(ws_rec))
+    if not merged:
+        return
+
+    mappings = flatten_ds260_mappings()
+    doc_id = str(ws_rec.source_document_id) if ws_rec.source_document_id else None
+
+    for field in fields_out:
+        if not _is_empty_for_fallback(field.get("value") or ""):
+            continue
+        key = field.get("key", "")
+        mapping = mappings.get(key)
+        if not mapping:
+            continue
+
+        candidates: list[str] = []
+        if key in merged:
+            candidates.append(key)
+        if mapping.field and mapping.field in merged:
+            candidates.append(mapping.field)
+        for alias in mapping.aliases or ():
+            if alias in merged:
+                candidates.append(alias)
+        for alias in _effective_aliases(mapping):
+            if alias in merged and alias not in candidates:
+                candidates.append(alias)
+
+        val = ""
+        source_field = mapping.field
+        for cand in candidates:
+            v = (merged.get(cand) or "").strip()
+            if not _is_empty_for_fallback(v):
+                val = v
+                source_field = cand
+                break
+        if not val:
+            continue
+
+        field["value"] = val
+        field["source"] = {
+            "document_type": "ds260_customer_form",
+            "source_field": source_field,
+            "document_id": doc_id,
+            "document_filename": (filename_map or {}).get(doc_id or "", "") if doc_id else "",
+            "variant": ws_rec.variant,
+            "record_id": str(ws_rec.id),
+            "derived": "ds260_worksheet_fill",
+        }
 
 
 def enrich_empty_fields_from_ds260_customer_worksheet(
@@ -2166,6 +2345,7 @@ SECTION_PRIMARY_DOC: dict[str, str] = {
     "section_death": "death_certificate",
     "section_military": "military_discharge",
     "section_children": "birth_certificate_child",
+    "section_work_education": "application_form",
 }
 
 
@@ -2397,7 +2577,15 @@ async def resolve_ds260_form(
                     }
                 )
                 continue
-            if sec.id == "section_children" and (
+            if sec.id == "section_a_personal" and mapping.key == "current_marital_status":
+                rec = None
+                value, source_field = "", mapping.field
+                src_extra = {}
+            elif sec.id == "section_previous_spouse":
+                rec = None
+                value, source_field = "", mapping.field
+                src_extra = {}
+            elif sec.id == "section_children" and (
                 mapping.key.startswith("children_") or re.match(r"^child_\d+_", mapping.key)
             ):
                 rec = None
@@ -2430,7 +2618,9 @@ async def resolve_ds260_form(
                     chosen = (resolutions.get(wk_fk) or "").strip()
                     if chosen and not is_child_member:
                         apply_ws = True
-                        if mapping.key in {
+                        if mapping.key == "current_marital_status":
+                            apply_ws = False
+                        elif mapping.key in {
                             "applicant_name",
                             "date_of_birth",
                             "passport_number",
@@ -2500,7 +2690,15 @@ async def resolve_ds260_form(
         if sec.id == "section_a_personal":
             if not is_child_member:
                 divorce_rec = pick_latest_record(records, "divorce")
-                enrich_marital_status_from_documents(fields_out, divorce_rec)
+                marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+                enrich_marital_status_from_documents(
+                    fields_out,
+                    divorce_rec,
+                    marriage_rec=marriage_rec,
+                    marriage_ref=marriage_ref,
+                    passport_rec=passport_rec,
+                    passport_ref=passport_ref,
+                )
             enrich_applicant_birth_city_state_equal(
                 fields_out, passport_rec, passport_ref=passport_ref
             )
@@ -2516,6 +2714,9 @@ async def resolve_ds260_form(
                 _overwrite_section_from_luong1_doc(
                     fields_out, "judicial_certificate", jud_rec, jud_ref
                 )
+        if sec.id == "section_divorce" and not is_child_member:
+            divorce_rec = pick_latest_record(records, "divorce")
+            enrich_divorce_section_from_record(fields_out, divorce_rec)
         if sec.id == "section_spouse" and not is_child_member:
             marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
             if has_applicable_marriage_certificate(
@@ -2549,6 +2750,7 @@ async def resolve_ds260_form(
                 all_records=records,
                 filename_map=filename_map,
                 case_members=case_members_all,
+                applicant_name=person_name,
             )
         sections_out.append(
             {
@@ -2573,6 +2775,11 @@ async def resolve_ds260_form(
     enrich_empty_fields_from_all_doc_records(
         sections_out, records, filename_map, person_name=person_name if member_ctx else None
     )
+
+    if not is_child_member:
+        for sec in sections_out:
+            if sec["id"] == "section_work_education":
+                enrich_work_education_from_worksheet(sec["fields"], records, filename_map)
 
     if is_child_member and person_name:
         clear_child_member_unscoped_sections(sections_out, records, person_name)

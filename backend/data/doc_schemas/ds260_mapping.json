@@ -259,6 +259,37 @@
       ]
     },
     {
+      "id": "section_work_education",
+      "title": "DS-260 D — Work / Education / Training",
+      "subtitle": "Nguồn chính: Application form (Luồng 1); bổ sung DS-260 khách khai (01_6) nếu thiếu",
+      "fields": [
+        {"key": "work_primary_occupation", "label": "Primary Occupation / Nghề nghiệp chính", "document": "application_form", "field": "primary_occupation", "aliases": ["occupation", "job_category"]},
+        {"key": "work_occupation_other_specify", "label": "Specify Other Occupation / Ghi rõ nghề khác", "document": "application_form", "field": "occupation_other_specify", "aliases": ["occupation_other"]},
+        {"key": "work_present_employer", "label": "Present Employer or School / Công ty hoặc trường hiện tại", "document": "application_form", "field": "present_employer", "aliases": ["employer_name", "current_employer"]},
+        {"key": "work_employer_address", "label": "Employer Address / Địa chỉ công ty", "document": "application_form", "field": "employer_address", "aliases": ["employer_address_line1", "employer_street"]},
+        {"key": "work_employer_city", "label": "Employer City / Thành phố", "document": "application_form", "field": "employer_city", "aliases": []},
+        {"key": "work_employer_state", "label": "Employer State/Province / Tỉnh-Bang", "document": "application_form", "field": "employer_state", "aliases": ["employer_province"]},
+        {"key": "work_employer_postal_code", "label": "Employer Postal Code / Mã bưu điện", "document": "application_form", "field": "employer_postal_code", "aliases": ["employer_zip"]},
+        {"key": "work_employer_country", "label": "Employer Country / Quốc gia", "document": "application_form", "field": "employer_country", "aliases": []},
+        {"key": "work_job_title", "label": "Job Title / Chức danh", "document": "application_form", "field": "job_title", "aliases": ["position", "title"]},
+        {"key": "work_start_date", "label": "Employment Start Date / Ngày bắt đầu làm việc", "document": "application_form", "field": "employment_start_date", "aliases": ["start_date", "employment_start"]},
+        {"key": "work_other_occupation_used", "label": "Other occupation in last 5 years? (Yes/No)", "document": "ds260_customer_form", "field": "other_occupation_used", "aliases": ["other_occupation_in_last_5_years"]},
+        {"key": "work_other_occupation_detail", "label": "Other occupation details / Chi tiết nghề khác", "document": "ds260_customer_form", "field": "other_occupation_detail", "aliases": []},
+        {"key": "work_prior_jobs_used", "label": "Employed elsewhere in last 10 years? (Yes/No)", "document": "ds260_customer_form", "field": "prior_jobs_10_years_used", "aliases": ["prior_employment_used"]},
+        {"key": "work_prior_jobs_history", "label": "Prior employment history (10 years) / Lịch sử việc làm", "document": "application_form", "field": "prior_jobs_history", "aliases": ["employment_history", "prior_jobs"]},
+        {"key": "edu_middle_school_name", "label": "Middle School Name / Trường THCS", "document": "application_form", "field": "middle_school_name", "aliases": ["edu_middle_school_name", "middle_school_cap_2_name"]},
+        {"key": "edu_middle_school_address", "label": "Middle School Address / Địa chỉ THCS", "document": "application_form", "field": "middle_school_address", "aliases": ["edu_middle_school_address", "middle_school_cap_2_address"]},
+        {"key": "edu_middle_school_period", "label": "Middle School Attendance / Thời gian học THCS", "document": "application_form", "field": "middle_school_period", "aliases": ["edu_middle_school_period", "middle_school_dates", "middle_school_cap_2_period"]},
+        {"key": "edu_high_school_name", "label": "High School Name / Trường THPT", "document": "application_form", "field": "high_school_name", "aliases": ["edu_high_school_name", "highschool_name", "high_school_cap_3_name"]},
+        {"key": "edu_high_school_address", "label": "High School Address / Địa chỉ THPT", "document": "application_form", "field": "high_school_address", "aliases": ["edu_high_school_address", "high_school_cap_3_address"]},
+        {"key": "edu_high_school_period", "label": "High School Attendance / Thời gian học THPT", "document": "application_form", "field": "high_school_period", "aliases": ["edu_high_school_period", "high_school_dates", "high_school_cap_3_period"]},
+        {"key": "edu_college_name", "label": "College/University Name / Trường ĐH-CĐ", "document": "application_form", "field": "college_name", "aliases": ["edu_college_name", "university_name", "college_university_name"]},
+        {"key": "edu_college_address", "label": "College Address / Địa chỉ trường ĐH", "document": "application_form", "field": "college_address", "aliases": ["edu_college_address", "college_university_address"]},
+        {"key": "edu_college_major", "label": "College Major / Chuyên ngành", "document": "application_form", "field": "college_major", "aliases": ["edu_college_major", "major", "field_of_study", "college_university_major"]},
+        {"key": "edu_college_period", "label": "College Attendance / Thời gian học ĐH", "document": "application_form", "field": "college_period", "aliases": ["edu_college_period", "college_dates", "college_university_period"]}
+      ]
+    },
+    {
       "id": "section_military",
       "title": "Nghĩa vụ quân sự",
       "subtitle": "Nguồn: Military discharge",
@@ -311,6 +342,7 @@
       "address_from_date",
       "death_date",
       "child_date_of_birth",
+      "work_start_date",
       "military_service_start",
       "military_service_end"
     ],
@@ -320,7 +352,8 @@
       "birth_certificate_child": ["section_children"],
       "marriage_certificate": ["section_spouse"],
       "divorce": ["section_previous_spouse", "section_divorce"],
-      "military_discharge": ["section_military"]
+      "military_discharge": ["section_military"],
+      "application_form": ["section_work_education"]
     }
   }
 }

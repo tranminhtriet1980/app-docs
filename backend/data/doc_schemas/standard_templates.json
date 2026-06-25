@@ -161,6 +161,27 @@
         "service_to_date": {"label": "Đến ngày", "format": "YYYY-MM-DD"},
         "document_number": {"label": "Số giấy", "format": "AS_PRINTED"}
       }
+    },
+    "application_form": {
+      "display_name": "Application form",
+      "sample_file": "Application form.pdf",
+      "exception_example": "Application form_new.pdf",
+      "form_section": "DS-260 D — Work / Education / Training",
+      "fields": {
+        "primary_occupation": {"label": "Nghề nghiệp chính", "format": "AS_PRINTED"},
+        "present_employer": {"label": "Công ty / trường hiện tại", "format": "AS_PRINTED"},
+        "employer_address": {"label": "Địa chỉ công ty", "format": "AS_PRINTED"},
+        "employer_city": {"label": "Thành phố", "format": "AS_PRINTED"},
+        "employer_state": {"label": "Tỉnh/Bang", "format": "AS_PRINTED"},
+        "employer_postal_code": {"label": "Mã bưu điện", "format": "AS_PRINTED"},
+        "employer_country": {"label": "Quốc gia", "format": "AS_PRINTED"},
+        "job_title": {"label": "Chức danh", "format": "AS_PRINTED"},
+        "employment_start_date": {"label": "Ngày bắt đầu", "format": "YYYY-MM-DD"},
+        "prior_jobs_history": {"label": "Lịch sử việc làm 10 năm", "format": "AS_PRINTED"},
+        "high_school_name": {"label": "Trường THPT", "format": "AS_PRINTED"},
+        "college_name": {"label": "Trường ĐH", "format": "AS_PRINTED"},
+        "college_major": {"label": "Chuyên ngành", "format": "AS_PRINTED"}
+      }
     }
   }
 }

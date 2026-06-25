@@ -76,6 +76,7 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
   "section_divorce",
   "section_previous_spouse",
   "section_children",
+  "section_work_education",
 ]);
 
 function memberPanelClass(role: CaseMember["role"]) {
