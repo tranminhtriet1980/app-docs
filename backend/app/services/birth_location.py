@@ -116,6 +116,129 @@ def _match_location(segment: str) -> str:
     return ""
 
 
+# Thành phố trực thuộc trung ương — DS-260: ghi vào ô City, ô State = N/A.
+# Tỉnh — ghi vào ô State, ô City = N/A (theo quy ước điền tay của nghiệp vụ).
+VN_MUNICIPALITIES = frozenset(
+    {"Ho Chi Minh", "Ha Noi", "Da Nang", "Hai Phong", "Can Tho"}
+)
+
+PROVINCE_MAP_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "province_to_postal_code.json"
+)
+
+# Cơ sở y tế / cơ quan / địa chỉ — KHÔNG phải tên thành phố/tỉnh nơi sinh.
+_FACILITY_RE = re.compile(
+    r"(?i)(benh vien|bệnh viện|hospital|tram y te|trạm y tế|nha ho sinh|nhà hộ sinh|"
+    r"nha bao sanh|nhà bảo sanh|khoa san|khoa sản|clinic|ubnd|uy ban|ủy ban|"
+    r"benh xa|bệnh xá|y te|trung tam)"
+)
+_ADDRESS_RE = re.compile(
+    r"(?i)(\d+/\d+|^\s*\d+\s|\bto\s+\d+\b|\btổ\s+\d+\b|\bso\s+\d+\b|\bsố\s+\d+\b|"
+    r"\bap\s|\bấp\s|\bhamlet\b|\bstreet\b|\bst\.|\bduong\b|\bđường\b|\bkhu pho\b|\bkhu phố\b)"
+)
+_CITY_MARKER_RE = re.compile(r"(?i)\b(thanh pho|thành phố|tp\.?|city)\b")
+
+
+@lru_cache(maxsize=1)
+def _locality_index() -> list[tuple[str, str, bool]]:
+    """(alias_norm, canonical_province, is_municipality) — sorted dài→ngắn."""
+    with PROVINCE_MAP_PATH.open(encoding="utf-8") as f:
+        data = json.load(f)
+    idx: list[tuple[str, str, bool]] = []
+    seen: set[str] = set()
+    for prov in data.get("provinces") or []:
+        name = (prov.get("name") or "").strip()
+        if not name:
+            continue
+        is_muni = name in VN_MUNICIPALITIES
+        for alias in (name, *(prov.get("aliases") or [])):
+            norm = normalize_location(alias)
+            if len(norm) >= 3 and norm not in seen:
+                seen.add(norm)
+                idx.append((norm, name, is_muni))
+    idx.sort(key=lambda x: -len(x[0]))
+    return idx
+
+
+def find_vn_locality(text: str, *, only_municipality: bool = False) -> str:
+    """Tên tỉnh/TP trực thuộc TW chuẩn nếu nhận diện được trong chuỗi, else ''."""
+    norm = normalize_location(text)
+    if not norm:
+        return ""
+    for alias, name, is_muni in _locality_index():
+        if only_municipality and not is_muni:
+            continue
+        if alias in norm:
+            return name
+    return ""
+
+
+@lru_cache(maxsize=1)
+def _municipality_alias_set() -> dict[str, str]:
+    """alias_norm → tên TP trực thuộc TW (khớp CHÍNH XÁC cả chuỗi)."""
+    out: dict[str, str] = {}
+    for alias, name, is_muni in _locality_index():
+        if is_muni:
+            out[alias] = name
+    return out
+
+
+def canonical_vn_city(text: str) -> str:
+    """
+    Chuẩn hóa tên TP trực thuộc TW (vd. 'Hcm'/'HCMC'/'Go Vap' → 'Ho Chi Minh').
+    CHỈ khớp chính xác alias municipality để KHÔNG biến 'Hue' thành tên tỉnh.
+    """
+    norm = normalize_location(text)
+    if not norm:
+        return ""
+    return _municipality_alias_set().get(norm, "")
+
+
+def looks_like_address_or_facility(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    return bool(_FACILITY_RE.search(raw) or _ADDRESS_RE.search(raw))
+
+
+def split_birthplace_city_state(*blobs: str) -> tuple[str, str] | None:
+    """
+    Quy ước DS-260 (nơi sinh VN):
+      - TP trực thuộc TW  → (City=TP, State='N/A')
+      - Tỉnh              → (City='N/A', State=Tỉnh)
+      - Bệnh viện/địa chỉ → ('N/A', 'N/A')
+      - Không nhận diện được & rỗng → None (giữ nguyên)
+    """
+    text = " , ".join(b for b in blobs if (b or "").strip())
+    if not text.strip():
+        return None
+    muni = find_vn_locality(text, only_municipality=True)
+    if muni:
+        return muni, "N/A"
+    prov = find_vn_locality(text)
+    if prov:
+        return "N/A", prov
+    if looks_like_address_or_facility(text):
+        return "N/A", "N/A"
+    return None
+
+
+def extract_city_token(raw: str) -> str:
+    """Lấy tên thành phố từ chuỗi nơi đăng ký/kết hôn (vd. 'UBND Phường X, Thành Phố Huế' → 'Hue')."""
+    segments = [s.strip() for s in (raw or "").split(",") if s.strip()]
+    for seg in segments:
+        if _CITY_MARKER_RE.search(seg) and not _FACILITY_RE.search(seg):
+            token = _CITY_MARKER_RE.sub(" ", seg)
+            token = re.sub(r"(?i)\b(tinh|tỉnh|province)\b", " ", token)
+            token = re.sub(r"\s+", " ", token).strip(" ,.-")
+            if token:
+                return format_place_name_title(token)
+    muni = find_vn_locality(raw, only_municipality=True)
+    if muni:
+        return muni
+    return ""
+
+
 def derive_birth_state_from_place(place_of_birth: str) -> str:
     """State/Province of Birth = copy PlaceOfBirth directly."""
     return (place_of_birth or "").strip()

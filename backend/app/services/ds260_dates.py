@@ -58,8 +58,9 @@ def parse_full_date(val: str) -> date | None:
     return None
 
 
-def _month_abbr(month: int) -> str:
-    return date(2000, month, 1).strftime("%b")
+def _month_name(month: int) -> str:
+    """Tên tháng đầy đủ tiếng Anh (vd. November) — theo mẫu DS-260 điền tay."""
+    return date(2000, month, 1).strftime("%B")
 
 
 def format_partial_ds260_date(val: str) -> str | None:
@@ -75,24 +76,24 @@ def format_partial_ds260_date(val: str) -> str | None:
     if m:
         y, mo = int(m.group(1)), int(m.group(2))
         if 1 <= mo <= 12:
-            return f"{_month_abbr(mo)} {y}"
+            return f"{_month_name(mo)} {y}"
 
     m = re.match(r"^(\d{1,2})[/.-](\d{4})$", val)
     if m:
         mo, y = int(m.group(1)), int(m.group(2))
         if 1 <= mo <= 12:
-            return f"{_month_abbr(mo)} {y}"
+            return f"{_month_name(mo)} {y}"
 
     m = re.match(r"^([A-Za-z]+)\s+(\d{4})$", val)
     if m:
         month_raw, year = m.group(1), m.group(2)
         try:
             mo = datetime.strptime(month_raw[:3], "%b").month
-            return f"{_month_abbr(mo)} {year}"
+            return f"{_month_name(mo)} {year}"
         except ValueError:
             try:
                 mo = datetime.strptime(month_raw, "%B").month
-                return f"{_month_abbr(mo)} {year}"
+                return f"{_month_name(mo)} {year}"
             except ValueError:
                 return f"{month_raw.title()} {year}"
 
@@ -117,7 +118,7 @@ def format_ds260_display_date(val: str) -> str:
     """Full date → 01 May 2026; partial → May 2023 / 2023; else empty."""
     d = parse_full_date(val)
     if d:
-        return f"{d.day:02d} {_month_abbr(d.month)} {d.year}"
+        return f"{d.day:02d} {_month_name(d.month)} {d.year}"
     partial = format_partial_ds260_date(val)
     return partial or ""
 

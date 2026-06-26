@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from app.services.birth_location import (
+    canonical_vn_city,
     derive_country_from_place,
     format_birth_city_display,
     format_person_name_ascii,
@@ -134,6 +135,14 @@ def format_yes_no(value: str) -> str:
         return "Yes"
     if token in _NO_MARKERS or token.startswith("no"):
         return "No"
+    # Câu trả lời khẳng định kiểu VN cho "sống cùng/nhập cư" (vd. "đang ở cùng bố mẹ").
+    if any(t in token for t in ("dang o", "o cung", "song chung", "o voi", "cung bo me", "cung gia dinh")):
+        return "Yes"
+    # Còn sống / đã mất (Is your father/mother still living?).
+    if "con song" in token:
+        return "Yes"
+    if any(t in token for t in ("da mat", "qua doi", "da chet", "mat roi")):
+        return "No"
     if v.lower() in {"yes", "no"}:
         return v.title()
     return format_place_name_title(v)
@@ -154,6 +163,11 @@ def format_marital_status(value: str) -> str:
     return format_place_name_title(value)
 
 
+def format_native_name(value: str) -> str:
+    """Họ tên bản ngữ (Full Name in Native Language) — GIỮ dấu tiếng Việt, chuẩn hóa khoảng trắng + IN HOA."""
+    return " ".join((value or "").split()).upper()
+
+
 def format_country_value(value: str) -> str:
     v = (value or "").strip()
     if not v:
@@ -172,6 +186,9 @@ def format_ds260_field_value(key: str, value: str) -> str:
     if "date" in key.lower() or key.endswith("_dob") or key.endswith("_death_year"):
         return v
 
+    if key.endswith("_native"):
+        return format_native_name(v)
+
     if key in {"nationality", "judicial_nationality"}:
         token = _norm_token(v)
         if token in {"vietnam", "viet nam", "vietnamese"}:
@@ -188,6 +205,9 @@ def format_ds260_field_value(key: str, value: str) -> str:
     if _COUNTRY_KEY_RE.search(key):
         return format_country_value(v)
     if _CITY_KEY_RE.search(key):
+        canon = canonical_vn_city(v)
+        if canon:
+            return canon
         if "birth_city" in key:
             return format_birth_city_display(v)
         return format_place_name_title(v)

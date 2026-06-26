@@ -103,7 +103,7 @@ APPLICANT_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 _SECTION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"personal information|thông tin cá nhân", re.I), "applicant"),
-    (re.compile(r"^address\s|address\s*-\s*địa chỉ", re.I), "address"),
+    (re.compile(r"address\s*[-–]\s*địa chỉ", re.I), "address"),
     (re.compile(r"contact information|thông tin liên lạc", re.I), "contact"),
     (re.compile(r"social media|mạng xã hội", re.I), "social"),
     (re.compile(r"thông tin của cha|father.?s information", re.I), "father"),
@@ -111,7 +111,54 @@ _SECTION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"thông tin người phối ngẫu cũ|previous spouse", re.I), "previous_spouse"),
     (re.compile(r"thông tin của người phối ngẫu", re.I), "current_spouse"),
     (re.compile(r"thông tin của con cái", re.I), "children"),
+    # Work / Education (Section D) — sub-context theo cấp học.
+    (re.compile(r"middle school|seconday school|secondary school|cấp 2", re.I), "edu_middle"),
+    (re.compile(r"highschool|high school|cấp 3", re.I), "edu_high"),
+    (re.compile(r"college\s*/?\s*univer|cao đẳng|đại học", re.I), "edu_college"),
+    (re.compile(r"work\s*/?\s*education|primary occupation|nghề nghiệp chính", re.I), "work"),
+    # Reset context khi sang phần khác để không kẹt ở work/edu.
+    (re.compile(r"military service|nghĩa vụ quân sự|additional information|security and background", re.I), "applicant"),
 ]
+
+# Section D — Work
+WORK_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"primary occupation|nghề nghiệp chính", re.I), "work_primary_occupation"),
+    (re.compile(r"specific other|specify other|ngành nghề gì ghi rõ", re.I), "work_occupation_other_specify"),
+    (re.compile(r"present employer|công ty hiện tại", re.I), "work_present_employer"),
+    (re.compile(r"do you have other occupation|công việc nào khác", re.I), "work_other_occupation_used"),
+    (re.compile(r"previously employed|trong vòng 10 năm", re.I), "work_prior_jobs_used"),
+    (re.compile(r"postal zone|zip code|mã bưu điện", re.I), "work_employer_postal_code"),
+    (re.compile(r"state/province|tỉnh\s*/?\s*bang", re.I), "work_employer_state"),
+    (re.compile(r"country/region|quốc gia", re.I), "work_employer_country"),
+    (re.compile(r"^\s*city|thành phố", re.I), "work_employer_city"),
+    (re.compile(r"address|địa chỉ", re.I), "work_employer_address"),
+]
+
+# Section D — Education. Key middle/high là edu_{level}_school_*, riêng college là edu_college_*.
+EDU_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"school name|tên trường", re.I), "name"),
+    (re.compile(r"major|ngành học", re.I), "major"),
+    (re.compile(r"address|địa chỉ", re.I), "address"),
+    (re.compile(r"period|thời gian học", re.I), "period"),
+]
+_EDU_CONTEXT_KEYS: dict[str, dict[str, str]] = {
+    "edu_middle": {
+        "name": "edu_middle_school_name",
+        "address": "edu_middle_school_address",
+        "period": "edu_middle_school_period",
+    },
+    "edu_high": {
+        "name": "edu_high_school_name",
+        "address": "edu_high_school_address",
+        "period": "edu_high_school_period",
+    },
+    "edu_college": {
+        "name": "edu_college_name",
+        "address": "edu_college_address",
+        "major": "edu_college_major",
+        "period": "edu_college_period",
+    },
+}
 
 _CHILD_INDEX_CONTEXT = re.compile(r"child.?s name\s*\((\d+)\)|con thứ\s*(\d+)", re.I)
 
@@ -298,6 +345,13 @@ def _enrich_postal_codes(out: dict[str, str]) -> None:
         country=out.get("spouse_country") or out.get("spouse_birth_country", ""),
         address=out.get("spouse_address") or "",
     )
+    _set_postal(
+        "work_employer_postal_code",
+        state=out.get("work_employer_state", ""),
+        city=out.get("work_employer_city", ""),
+        country=out.get("work_employer_country", ""),
+        address=out.get("work_employer_address", ""),
+    )
 
 
 def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
@@ -314,13 +368,11 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
         out["applicant_name_native"] = native
     if raw_name:
         out["applicant_name"] = format_person_name_ascii(raw_name)
+    # City/State nơi sinh đã được chuẩn hóa theo quy ước DS-260 ở resolve
+    # (TP trực thuộc TW → City; tỉnh → State; cái còn lại → N/A) — không ép bằng nhau.
     for key in ("birth_city", "birth_state"):
         if out.get(key):
             out[key] = format_birth_city_display(out[key])
-    if out.get("birth_city"):
-        out["birth_state"] = out["birth_city"]
-    elif out.get("birth_state"):
-        out["birth_city"] = out["birth_state"]
     if out.get("mother_birth_city"):
         out["mother_birth_city"] = format_birth_city_display(out["mother_birth_city"])
     if out.get("mother_city"):
@@ -461,16 +513,36 @@ def _update_section_context(text: str, context: str) -> str:
 
 
 def _match_ds260_key(text: str, context: str = "applicant") -> str:
-    for pattern, key in DS260_LABEL_PATTERNS:
-        if pattern.search(text):
-            return key
+    # Work / Education (Section D) — gate theo context để nhãn dùng chung
+    # ("Address", "City", "nghề nghiệp"…) không lọt sang field phối ngẫu/cá nhân.
+    if context == "work":
+        for pattern, key in WORK_LABEL_PATTERNS:
+            if pattern.search(text):
+                return key
+        return ""
+    if context in _EDU_CONTEXT_KEYS:
+        keys = _EDU_CONTEXT_KEYS[context]
+        for pattern, suffix in EDU_LABEL_PATTERNS:
+            if pattern.search(text):
+                return keys.get(suffix, "")
+        return ""
 
+    # Children — gate TRƯỚC DS260_LABEL_PATTERNS để dòng "immigrating to the U.S" của con
+    # không bị nhận nhầm là spouse_immigrating.
     if context.startswith("child_"):
         idx_match = re.match(r"child_(\d+)$", context)
         if idx_match:
             idx = int(idx_match.group(1))
             if re.search(r"child.?s name|họ và tên con", text, re.I):
                 return f"child_{idx}_full_name"
+            if re.search(r"live with you|đang ở với", text, re.I):
+                return f"child_{idx}_lives_with"
+            if re.search(r"join you in the future|định cư trong tương lai", text, re.I):
+                return f"child_{idx}_immigrating_future"
+            if re.search(r"immigrating to the u\.s|nhập cư sang mỹ", text, re.I):
+                return f"child_{idx}_immigrating"
+            if re.search(r"current address|địa chỉ hiện tại", text, re.I):
+                return f"child_{idx}_current_address"
             ctx_map = _child_birth_key_map(idx)
             for pattern, generic_key in GENERIC_BIRTH_LABEL_PATTERNS:
                 if pattern.search(text):
@@ -478,6 +550,10 @@ def _match_ds260_key(text: str, context: str = "applicant") -> str:
                     if mapped:
                         return mapped
             return ""
+
+    for pattern, key in DS260_LABEL_PATTERNS:
+        if pattern.search(text):
+            return key
 
     ctx_map = _CONTEXT_BIRTH_KEY.get(context, {})
     for pattern, generic_key in GENERIC_BIRTH_LABEL_PATTERNS:
@@ -517,8 +593,42 @@ def _match_ds260_key(text: str, context: str = "applicant") -> str:
     return ""
 
 
+_PERIOD_FROM_TO_RE = re.compile(r"(?i)(from\s*\(t[uừ]\))(.*?)(to\s*\(đ[eế]n\)\s*:?)")
+
+
+def _fill_period_from_to(text: str, value: str) -> str | None:
+    """Tách 'Period: from (từ) ... to (đến):' thành 2 mốc ngày (vd. '05/09/1991 - 30/05/1994')."""
+    if not _PERIOD_FROM_TO_RE.search(text):
+        return None
+    parts = re.split(r"\s+[-–—]\s+|\s+to\s+|\s+đến\s+|\s*->\s*|\s*→\s*", value, maxsplit=1, flags=re.I)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) < 2:
+        return None
+    d_from = format_ds260_display_date(parts[0]) or parts[0]
+    d_to = format_ds260_display_date(parts[1]) or parts[1]
+    return _PERIOD_FROM_TO_RE.sub(
+        lambda m: f"{m.group(1)} {d_from}   {m.group(3)} {d_to}", text, count=1
+    )
+
+
+# Field câu hỏi Yes/No thường KHÔNG có dấu ':' trên mẫu — đáp án gắn cuối dòng.
+_QUESTION_FILL_KEYS = frozenset({"spouse_immigrating"})
+_QUESTION_FILL_KEY_RE = re.compile(r"^child_\d+_(immigrating|immigrating_future|lives_with)$")
+
+
+def _is_question_fill_key(key: str) -> bool:
+    return key in _QUESTION_FILL_KEYS or bool(_QUESTION_FILL_KEY_RE.match(key))
+
+
+def _fill_question_line(text: str, value: str) -> str:
+    """Dòng câu hỏi Yes/No không có dấu ':' (vd. 'Does this child live with you? (...?)') — gắn đáp án ở cuối."""
+    if value and value in text:
+        return text
+    return f"{text.rstrip()}   {value}"
+
+
 def _smart_fill_ds260_line(text: str, values: dict[str, str], context: str = "applicant") -> str:
-    if "{{" in text or ":" not in text:
+    if "{{" in text:
         return text
     key = _match_ds260_key(text, context)
     if not key:
@@ -526,6 +636,14 @@ def _smart_fill_ds260_line(text: str, values: dict[str, str], context: str = "ap
     value = (values.get(key) or "").strip()
     if not value:
         return text
+    if ":" not in text:
+        if _is_question_fill_key(key):
+            return _fill_question_line(text, value)
+        return text
+    if key.endswith("_period"):
+        split = _fill_period_from_to(text, value)
+        if split is not None:
+            return split
     updated = text
     idx = updated.rfind(":")
     if idx >= 0:

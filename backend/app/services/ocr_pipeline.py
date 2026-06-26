@@ -695,13 +695,21 @@ CHILDREN: children_used (Yes/No), children_count,
 child_1_full_name, child_1_date_of_birth, child_1_birth_city, child_1_birth_state, child_1_birth_country,
 child_2_full_name, child_2_date_of_birth, child_3_full_name, child_3_date_of_birth.
 
-WORK / EDUCATION (section D): primary_occupation, occupation_other_specify, present_employer,
+WORK / EDUCATION (section D) — Vietnamese header "CÔNG VIỆC / HỌC VẤN", "Work /Education /Training":
+primary_occupation (NGHỀ NGHIỆP CHÍNH, e.g. Owner/Manager/Student),
+occupation_other_specify (NGÀNH NGHỀ ghi rõ, e.g. Tailor),
+present_employer (CÔNG TY hiện tại / trường học hiện tại, e.g. Self-employed),
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
-job_title, employment_start_date, other_occupation_used, other_occupation_detail,
-prior_jobs_10_years_used, prior_jobs_history,
-middle_school_name, middle_school_address, middle_school_period,
-high_school_name, high_school_address, high_school_period,
-college_name, college_address, college_major, college_period.
+job_title, employment_start_date,
+other_occupation_used (Yes/No), other_occupation_detail,
+prior_jobs_10_years_used (Yes/No),
+prior_jobs_history = FULL narrative of past 10 years employment exactly as written, keep every line
+  (e.g. "From 01 January 2009 to 31 December 2023 / Occupation: Manager / Company name: ... /
+   Company address: ... / Supervisor name: ... / Supervisor phone number: ...").
+EDUCATION (cấp 2/cấp 3/đại học) — for each level capture name, address and period "from ... to ...":
+middle_school_name (Cấp 2 / Secondary), middle_school_address, middle_school_period,
+high_school_name (Cấp 3 / Highschool), high_school_address, high_school_period,
+college_name (Cao đẳng/Đại học), college_address, college_major, college_period.
 
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
