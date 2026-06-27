@@ -158,13 +158,16 @@ def format_member_number(index: int) -> str:
 def member_number_map(members: list[CaseMember]) -> dict[uuid.UUID, str]:
     """
     CaseMember.id → mã cố định theo vai trò:
-    01 chủ hồ sơ · 02 phối ngẫu · 03–06 con 1–4 (bỏ qua 02 nếu không có vợ/chồng).
+    01 chủ hồ sơ · 02 phối ngẫu · 03+ các con · rồi đến cháu nội/ngoại ·
+    rồi đến anh/chị/em được bảo lãnh (bỏ qua 02 nếu không có vợ/chồng).
     """
     ordered = sorted(members, key=lambda m: (m.sort_order, m.created_at))
     result: dict[uuid.UUID, str] = {}
     principal = next((m for m in ordered if m.role == PersonRole.principal.value), None)
     spouse = next((m for m in ordered if m.role == PersonRole.spouse.value), None)
     children = [m for m in ordered if m.role == PersonRole.child.value]
+    grandchildren = [m for m in ordered if m.role == PersonRole.grandchild.value]
+    siblings = [m for m in ordered if m.role == PersonRole.sibling.value]
 
     if principal:
         result[principal.id] = "01"
@@ -172,6 +175,13 @@ def member_number_map(members: list[CaseMember]) -> dict[uuid.UUID, str]:
         result[spouse.id] = "02"
     for i, child in enumerate(children):
         result[child.id] = format_member_number(3 + i)
+    # Cháu nội/ngoại rồi đến anh/chị/em đứng sau các con — số cố định theo cây gia phả.
+    next_num = 3 + len(children)
+    for i, grandchild in enumerate(grandchildren):
+        result[grandchild.id] = format_member_number(next_num + i)
+    next_num += len(grandchildren)
+    for i, sibling in enumerate(siblings):
+        result[sibling.id] = format_member_number(next_num + i)
 
     for m in ordered:
         if m.id in result:
@@ -470,8 +480,15 @@ def _resolve_child_parent_name_for_fill(
     child_rec: ApplicantDocRecord | None,
     parent: str,
     members: list[CaseMember] | None,
+    role: str = PersonRole.child.value,
 ) -> str:
-    """Tên cha/mẹ trên DS-260 con: GKS con → fallback chủ hồ sơ (cha) / phối ngẫu (mẹ)."""
+    """
+    Tên cha/mẹ trên DS-260 con: ưu tiên GKS con.
+
+    - Con (child): fallback chủ hồ sơ (cha) / phối ngẫu (mẹ).
+    - Cháu (grandchild): chỉ lấy từ GKS của cháu — cha/mẹ là một thành viên 'con'
+      trong hồ sơ, khớp tên ở bước enrich (cây gia phả), không fallback ông/bà.
+    """
     from app.services.ds260_mapping import _resolve_from_record
 
     aliases = ("father_full_name",) if parent == "father" else ("mother_full_name",)
@@ -480,7 +497,7 @@ def _resolve_child_parent_name_for_fill(
         if name.strip():
             return name.strip()
 
-    if not members:
+    if not members or role == PersonRole.grandchild.value:
         return ""
 
     if parent == "father":
@@ -835,12 +852,14 @@ def enrich_child_parent_details_from_case(
     if not (parent_full_name or "").strip():
         return
 
-    principal = next((m for m in members if m.role == PersonRole.principal.value), None)
-    spouse = next((m for m in members if m.role == PersonRole.spouse.value), None)
-
-    for member, label in ((principal, "principal"), (spouse, "spouse")):
-        if not member or not _names_same_person(parent_full_name, member.display_name):
+    # Cây gia phả: khớp tên cha/mẹ với BẤT KỲ thành viên nào trong hồ sơ.
+    # - Hồ sơ con: cha/mẹ khớp chủ hồ sơ / phối ngẫu.
+    # - Hồ sơ cháu: cha/mẹ khớp một thành viên 'con' (nhánh con) → lấy giấy tờ của con đó.
+    for member in members:
+        if not _names_same_person(parent_full_name, member.display_name):
             continue
+        label = member.role
+
         passport_rec, _ = pick_luong1_pair_for_person(records, "passport", member.display_name)
         if passport_rec:
             rid = str(passport_rec.id)
@@ -880,31 +899,33 @@ def enrich_child_parent_details_from_case(
                         derived=f"child_{parent}_from_{label}_passport",
                     )
 
-    if principal and _names_same_person(parent_full_name, principal.display_name):
-        bc, _ = pick_luong1_pair_for_person(
-            records, "birth_certificate", principal.display_name
-        )
+        # GKS của thành viên đó — chủ hồ sơ dùng birth_certificate, con dùng birth_certificate_child.
+        bc = pick_child_birth_cert_for_person(records, member.display_name)
         if bc:
             rid = str(bc.id)
-            dob = _resolve_from_record(bc, "date_of_birth", ())
-            pob = _resolve_from_record(bc, "place_of_birth", ())
+            dob = _resolve_from_record(
+                bc, "date_of_birth", ("dob", "child_date_of_birth")
+            )
+            pob = _resolve_from_record(
+                bc, "place_of_birth", ("birth_place", "child_birth_city", "birth_city")
+            )
             _fill_empty_parent_ds260_field(
                 fields_out,
                 f"{parent}_date_of_birth",
                 dob,
-                document_type="birth_certificate",
+                document_type=bc.doc_type or "birth_certificate",
                 source_field="date_of_birth",
                 record_id=rid,
-                derived="child_parent_from_principal_birth_cert",
+                derived=f"child_{parent}_from_{label}_birth_cert",
             )
             _enrich_parent_place_from_record(
                 fields_out,
                 parent,
                 pob,
-                document_type="birth_certificate",
+                document_type=bc.doc_type or "birth_certificate",
                 source_field="place_of_birth",
                 record_id=rid,
-                derived="child_parent_from_principal_birth_cert",
+                derived=f"child_{parent}_from_{label}_birth_cert",
             )
 
     divorce_rec = pick_latest_record(records, "divorce")
@@ -1070,9 +1091,13 @@ def apply_child_sections_from_birth_cert(
     *,
     records: list[ApplicantDocRecord] | None = None,
     members: list[CaseMember] | None = None,
+    role: str = PersonRole.child.value,
 ) -> None:
     """
-    Ghi đè section cha/mẹ/GKS cho hồ sơ con — sau enrich_empty để không bị GKS chủ hồ sơ lấn.
+    Ghi đè section cha/mẹ/GKS cho hồ sơ con/cháu — sau enrich_empty để không bị GKS chủ hồ sơ lấn.
+
+    Với cháu (grandchild), cha/mẹ lấy từ GKS của cháu; chi tiết DOB/nơi sinh của cha/mẹ
+    được bổ sung từ giấy tờ của thành viên 'con' trùng tên (nhánh con — cây gia phả).
     """
     from app.services.ds260_mapping import (
         _resolve_from_record,
@@ -1081,8 +1106,8 @@ def apply_child_sections_from_birth_cert(
         empty_ds260_field_source,
     )
 
-    father_name = _resolve_child_parent_name_for_fill(child_rec, "father", members)
-    mother_name = _resolve_child_parent_name_for_fill(child_rec, "mother", members)
+    father_name = _resolve_child_parent_name_for_fill(child_rec, "father", members, role)
+    mother_name = _resolve_child_parent_name_for_fill(child_rec, "mother", members, role)
 
     for sec in sections_out:
         if sec["id"] not in ("section_father", "section_mother", "section_birth_certificate"):
@@ -1177,3 +1202,66 @@ def apply_child_sections_from_birth_cert(
                         record_id=rid,
                         derived=derived,
                     )
+
+
+def apply_sibling_parent_fallback(
+    sections_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    members: list[CaseMember],
+    person_name: str,
+) -> None:
+    """
+    Anh/chị/em được bảo lãnh dùng chung cha/mẹ với đương đơn chính (cây gia phả).
+
+    Form anh/chị/em là bản đầy đủ; cha/mẹ ưu tiên lấy từ GKS riêng của họ. Khi GKS
+    riêng thiếu tên cha/mẹ, kế thừa cha/mẹ từ GKS của đương đơn chính và bổ sung
+    ngày sinh / nơi sinh từ giấy tờ trùng tên trong hồ sơ.
+    """
+    from app.services.ds260_mapping import (
+        _names_same_person,
+        _resolve_from_record,
+        pick_luong1_pair_for_person,
+    )
+
+    principal = next((m for m in members if m.role == PersonRole.principal.value), None)
+    if not principal:
+        return
+    # Chính đương đơn chính thì không cần kế thừa.
+    if _names_same_person(person_name, principal.display_name):
+        return
+
+    bc, bc_ref = pick_luong1_pair_for_person(records, "birth_certificate", principal.display_name)
+    principal_bc = bc or bc_ref
+    if not principal_bc:
+        return
+
+    aliases = {"father": ("father_full_name",), "mother": ("mother_full_name",)}
+    for sec in sections_out:
+        parent = (
+            "father"
+            if sec.get("id") == "section_father"
+            else "mother"
+            if sec.get("id") == "section_mother"
+            else None
+        )
+        if not parent:
+            continue
+        slot = next(
+            (f for f in sec["fields"] if f.get("key") == f"{parent}_full_name"), None
+        )
+        # GKS riêng của anh/chị/em đã có cha/mẹ → giữ nguyên, không kế thừa.
+        if slot and (slot.get("value") or "").strip():
+            continue
+        name = _resolve_from_record(principal_bc, f"{parent}_name", aliases[parent])
+        if not name.strip():
+            continue
+        _fill_child_parent_identity(
+            sec["fields"],
+            parent,
+            name,
+            document_type=principal_bc.doc_type or "birth_certificate",
+            source_field=f"{parent}_name",
+            record_id=str(principal_bc.id),
+            derived="sibling_parent_from_principal_birth_cert",
+        )
+        enrich_child_parent_details_from_case(sec["fields"], parent, name, records, members)

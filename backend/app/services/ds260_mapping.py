@@ -1531,12 +1531,20 @@ def _child_data_from_luong1_pair(
         state = derive_birth_state_from_place(pob) or ""
     if not country and pob:
         country = derive_country_from_place(pob) or ""
+    father = _resolve_from_record_luong1_fallback(
+        standard, reference, "father_name", ("father_full_name",)
+    )
+    mother = _resolve_from_record_luong1_fallback(
+        standard, reference, "mother_name", ("mother_full_name",)
+    )
     return {
         "full_name": full,
         "date_of_birth": dob,
         "birth_city": city,
         "birth_state": state,
         "birth_country": country,
+        "father_name": father,
+        "mother_name": mother,
         "lives_with": "",
         "current_address": "",
         "immigrating": "",
@@ -1563,6 +1571,8 @@ def _child_data_from_record(rec: ApplicantDocRecord) -> dict[str, str]:
         "birth_city": city,
         "birth_state": state,
         "birth_country": country,
+        "father_name": _resolve_from_record(rec, "father_name", ("father_full_name",)),
+        "mother_name": _resolve_from_record(rec, "mother_name", ("mother_full_name",)),
     }
 
 
@@ -1694,21 +1704,59 @@ def enrich_children_section_from_birth_certs(
     filename_map: dict[str, str] | None = None,
     case_members: list[Any] | None = None,
     applicant_name: str = "",
+    member_role: str | None = None,
 ) -> None:
     """
     Union giấy khai sinh con + worksheet DS-260, dedupe, điền tối đa 4 slot.
     Mỗi giấy khai sinh: gộp standard + _new thành một con (Luồng 1).
+
+    Cây gia phả: khi hồ sơ có nhánh phụ (cháu nội/ngoại hoặc anh/chị/em được bảo lãnh),
+    GKS con chỉ tính cho người mà tên cha/mẹ trên GKS khớp với người đang xét — tránh
+    con của người này hiển thị nhầm sang form người khác.
     """
     from app.services.ds260_conflicts import pick_latest_by_variant
 
     records = all_records if all_records is not None else child_records
+
+    # Cây gia phả: GKS của cháu (nội/ngoại) cũng là birth_certificate_child — loại khỏi
+    # mục "con" của chủ hồ sơ, vì cháu là con của thành viên 'child', không phải của chủ hồ sơ.
+    grandchild_names = [
+        (getattr(m, "display_name", None) or "").strip()
+        for m in (case_members or [])
+        if str(getattr(m, "role", "")) == "grandchild"
+        and (getattr(m, "display_name", None) or "").strip()
+    ]
+
+    def _is_grandchild_record(data: dict[str, str]) -> bool:
+        name = (data.get("full_name") or "").strip()
+        return bool(name) and any(_names_same_person(name, gc) for gc in grandchild_names)
+
+    # Có nhánh phụ → bắt buộc gán con theo tên cha/mẹ trên GKS để không lẫn nhánh.
+    has_extra_branches = any(
+        str(getattr(m, "role", "")) in ("grandchild", "sibling") for m in (case_members or [])
+    )
+
+    def _child_parent_matches(data: dict[str, str]) -> bool:
+        if not applicant_name:
+            return False
+        return any(
+            _names_same_person(data.get(key) or "", applicant_name)
+            for key in ("father_name", "mother_name")
+        )
+
     items: list[tuple[dict[str, str], str, ApplicantDocRecord | None]] = []
     for std, ref in group_child_birth_luong1_pairs(records, filename_map):
         data = _child_data_from_luong1_pair(std, ref)
+        if _is_grandchild_record(data):
+            continue
+        if has_extra_branches and not _child_parent_matches(data):
+            continue
         if _child_is_plausible(data, applicant_name=applicant_name):
             items.append((data, "birth_certificate_child", std or ref))
 
-    if case_members:
+    # Con khai báo sẵn (case member role='child') chỉ thuộc chủ hồ sơ + phối ngẫu;
+    # anh/chị/em hay cháu không nhận các con này vào form của họ.
+    if case_members and member_role in (None, "principal", "spouse"):
         from app.services.family_case import pick_child_birth_cert_for_person
 
         seen_keys = {_child_dedupe_key(x[0]) for x in items}
@@ -1743,6 +1791,8 @@ def enrich_children_section_from_birth_certs(
         birth_cert_count = sum(1 for _, src, _ in items if src == "birth_certificate_child")
         if not (ws_declares_no and birth_cert_count == 0):
             for data in _child_data_from_worksheet(ws_rec):
+                if _is_grandchild_record(data):
+                    continue
                 if _child_is_plausible(data, applicant_name=applicant_name):
                     items.append((data, "ds260_customer_form", ws_rec))
 
@@ -2423,7 +2473,7 @@ def _attach_section_fill_stats(
             m_rec, m_ref = pick_luong1_pair(records, "marriage_certificate")
             p_rec, p_ref = pick_luong1_pair(records, "passport")
             section_active = has_applicable_marriage_certificate(m_rec, m_ref, p_rec, p_ref)
-        if member_role == "child" and sec["id"] in _child_excluded_section_ids():
+        if member_role in ("child", "grandchild") and sec["id"] in _child_excluded_section_ids():
             section_active = False
 
         for field in sec["fields"]:
@@ -2457,7 +2507,11 @@ def _attach_section_fill_stats(
                     or "address_document" in present_docs
                     or has_ref
                 )
-            if applicable and member_role == "child" and field.get("key") == "current_marital_status":
+            if (
+                applicable
+                and member_role in ("child", "grandchild")
+                and field.get("key") == "current_marital_status"
+            ):
                 applicable = False
             if applicable:
                 applicable_total += 1
@@ -2782,7 +2836,9 @@ async def resolve_ds260_form(
     person_name = member_ctx.display_name if member_ctx else (applicant.display_name if applicant else "")
     # Hồ sơ gia đình: chỉ dùng worksheet DS-260 đúng người (tránh lấy nhầm của thành viên khác).
     records = scope_worksheets_to_person(records, person_name)
-    is_child_member = member_ctx is not None and member_ctx.role == "child"
+    # Con và cháu (nội/ngoại) dùng chung luồng "thành viên phụ thuộc": thông tin cá nhân
+    # lấy từ GKS/hộ chiếu của chính họ, ẩn các section vợ/chồng/ly hôn/con.
+    is_child_member = member_ctx is not None and member_ctx.role in ("child", "grandchild")
     child_bc: ApplicantDocRecord | None = None
     if is_child_member:
         child_bc = pick_child_birth_cert_for_person(records, person_name)
@@ -2989,6 +3045,7 @@ async def resolve_ds260_form(
                 filename_map=filename_map,
                 case_members=case_members_all,
                 applicant_name=person_name,
+                member_role=member_ctx.role if member_ctx else None,
             )
         sections_out.append(
             {
@@ -3062,11 +3119,20 @@ async def resolve_ds260_form(
         clear_child_adult_only_ds260_sections(sections_out)
         case_members = await load_case_members(db, applicant_id)
         apply_child_sections_from_birth_cert(
-            sections_out, child_bc, records=records, members=case_members
+            sections_out,
+            child_bc,
+            records=records,
+            members=case_members,
+            role=member_ctx.role if member_ctx else "child",
         )
         if child_bc:
             for sec in sections_out:
                 enrich_child_member_personal(sec["fields"], child_bc, passport_rec)
+
+    if member_ctx is not None and member_ctx.role == "sibling":
+        from app.services.family_case import apply_sibling_parent_fallback
+
+        apply_sibling_parent_fallback(sections_out, records, case_members_all, person_name)
 
     apply_ds260_manual_overrides(sections_out, manual_overrides)
 

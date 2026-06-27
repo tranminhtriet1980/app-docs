@@ -68,6 +68,8 @@ function ds260FormForMember(
 function memberRoleLabel(role: CaseMember["role"]) {
   if (role === "principal") return "Chủ hồ sơ";
   if (role === "spouse") return "Phối ngẫu";
+  if (role === "grandchild") return "Cháu";
+  if (role === "sibling") return "Anh/Chị/Em";
   return "Con";
 }
 
@@ -82,11 +84,13 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
 function memberPanelClass(role: CaseMember["role"]) {
   if (role === "principal") return "border-brand-300 bg-brand-50/30 ring-brand-100";
   if (role === "spouse") return "border-violet-300 bg-violet-50/30 ring-violet-100";
+  if (role === "grandchild") return "border-teal-300 bg-teal-50/30 ring-teal-100";
+  if (role === "sibling") return "border-sky-300 bg-sky-50/30 ring-sky-100";
   return "border-amber-300 bg-amber-50/30 ring-amber-100";
 }
 
 function visibleDs260Sections(sections: Ds260Form["sections"], role: CaseMember["role"]) {
-  if (role !== "child") return sections;
+  if (role !== "child" && role !== "grandchild") return sections;
   return sections.filter((sec) => !CHILD_SKIP_DS260_SECTIONS.has(sec.id));
 }
 
@@ -670,6 +674,8 @@ export default function ReviewPage() {
   const [setupSpouseName, setSetupSpouseName] = useState("");
   const [setupChildNames, setSetupChildNames] = useState("");
   const [appendChildNames, setAppendChildNames] = useState("");
+  const [appendGrandchildNames, setAppendGrandchildNames] = useState("");
+  const [appendSiblingNames, setAppendSiblingNames] = useState("");
   const [appendSpouseName, setAppendSpouseName] = useState("");
   const [editingMemberNames, setEditingMemberNames] = useState<Record<string, string>>({});
   const [reviewTab, setReviewTab] = useState<"ds260" | "documents">("ds260");
@@ -923,24 +929,44 @@ export default function ReviewPage() {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (!spouse && children.length === 0) {
-      alert("Nhập tên con mới hoặc phối ngẫu cần bổ sung");
+    const grandchildren = appendGrandchildNames
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const siblings = appendSiblingNames
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (
+      !spouse &&
+      children.length === 0 &&
+      grandchildren.length === 0 &&
+      siblings.length === 0
+    ) {
+      alert("Nhập tên con/cháu/anh-chị-em mới hoặc phối ngẫu cần bổ sung");
       return;
     }
     if (spouse && hasSpouseMember) {
-      alert("Hồ sơ đã có phối ngẫu. Chỉ có thể thêm con.");
+      alert("Hồ sơ đã có phối ngẫu. Chỉ có thể thêm con/cháu/anh-chị-em.");
       return;
     }
 
-    const toAdd: { role: "spouse" | "child"; display_name: string }[] = [];
+    const toAdd: {
+      role: "spouse" | "child" | "grandchild" | "sibling";
+      display_name: string;
+    }[] = [];
     if (spouse && !hasSpouseMember) toAdd.push({ role: "spouse", display_name: spouse });
     children.forEach((name) => toAdd.push({ role: "child", display_name: name }));
+    grandchildren.forEach((name) => toAdd.push({ role: "grandchild", display_name: name }));
+    siblings.forEach((name) => toAdd.push({ role: "sibling", display_name: name }));
 
     setBusy("append-members");
     try {
       const saved = await api.addCaseMembers(id, toAdd);
       setCaseMembers(saved);
       setAppendChildNames("");
+      setAppendGrandchildNames("");
+      setAppendSiblingNames("");
       setAppendSpouseName("");
       await load();
       alert(`Đã bổ sung ${toAdd.length} thành viên. Tổng ${saved.length} người trong hồ sơ.`);
@@ -1327,6 +1353,36 @@ export default function ReviewPage() {
                     onChange={(e) => setAppendChildNames(e.target.value)}
                     placeholder="DANG MAI PHUONG THAO, DANG MAI PHUONG LINH"
                   />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label">
+                    Thêm cháu nội/ngoại (phân cách bằng dấu phẩy)
+                  </label>
+                  <input
+                    className="input"
+                    value={appendGrandchildNames}
+                    onChange={(e) => setAppendGrandchildNames(e.target.value)}
+                    placeholder="DANG GIA BAO, DANG GIA HAN"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Cha/mẹ của cháu được lấy từ GKS của cháu và khớp với thành viên
+                    &quot;Con&quot; tương ứng (cây gia phả).
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label">
+                    Thêm anh/chị/em được bảo lãnh (phân cách bằng dấu phẩy)
+                  </label>
+                  <input
+                    className="input"
+                    value={appendSiblingNames}
+                    onChange={(e) => setAppendSiblingNames(e.target.value)}
+                    placeholder="DANG VAN MINH, DANG THI LAN"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Anh/chị/em là đương đơn đầy đủ (có vợ/chồng, con riêng); nếu GKS riêng
+                    thiếu cha/mẹ thì kế thừa cha/mẹ của đương đơn chính.
+                  </p>
                 </div>
               </div>
               <button

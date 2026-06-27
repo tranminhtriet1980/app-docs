@@ -240,7 +240,10 @@ export const api = {
     case_type?: "immigration" | "study_abroad" | "tourism" | "other";
     tags?: string[];
     is_family_bundle?: boolean;
-    members?: { role: "principal" | "spouse" | "child"; display_name: string }[];
+    members?: {
+      role: "principal" | "spouse" | "child" | "grandchild" | "sibling";
+      display_name: string;
+    }[];
   }) =>
     request<Applicant>("/api/v1/applicants", {
       method: "POST",
@@ -286,7 +289,10 @@ export const api = {
 
   setCaseMembers: (
     applicantId: string,
-    members: { role: "principal" | "spouse" | "child"; display_name: string }[]
+    members: {
+      role: "principal" | "spouse" | "child" | "grandchild" | "sibling";
+      display_name: string;
+    }[]
   ) =>
     request<CaseMember[]>(`/api/v1/applicants/${applicantId}/members`, {
       method: "PUT",
@@ -295,7 +301,7 @@ export const api = {
 
   addCaseMembers: (
     applicantId: string,
-    members: { role: "spouse" | "child"; display_name: string }[]
+    members: { role: "spouse" | "child" | "grandchild" | "sibling"; display_name: string }[]
   ) =>
     request<CaseMember[]>(`/api/v1/applicants/${applicantId}/members`, {
       method: "POST",
@@ -616,7 +622,7 @@ export type Applicant = {
 
 export type CaseMember = {
   id: string;
-  role: "principal" | "spouse" | "child";
+  role: "principal" | "spouse" | "child" | "grandchild" | "sibling";
   display_name: string;
   sort_order: number;
   member_number?: string;

@@ -159,12 +159,12 @@ async def validate_ds260(
     for doc_type, section_ids in (rules.get("section_required_when_document_present") or {}).items():
         if doc_type not in present_docs:
             continue
-        if member_role == "child" and doc_type in _CHILD_SKIP_VALIDATION_DOC_TYPES:
+        if member_role in ("child", "grandchild") and doc_type in _CHILD_SKIP_VALIDATION_DOC_TYPES:
             continue
         if doc_type == "passport" and member_id and not member_has_passport_doc:
             continue
         for sec_id in section_ids:
-            if member_role == "child" and sec_id in _CHILD_SKIP_VALIDATION_SECTIONS:
+            if member_role in ("child", "grandchild") and sec_id in _CHILD_SKIP_VALIDATION_SECTIONS:
                 continue
             sec = section_by_id.get(sec_id)
             if not sec:

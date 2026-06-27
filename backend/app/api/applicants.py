@@ -317,7 +317,7 @@ async def add_case_members(
         if m.role == "principal":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Không thể thêm chủ hồ sơ mới. Chỉ bổ sung vợ hoặc con.",
+                detail="Không thể thêm chủ hồ sơ mới. Chỉ bổ sung vợ/chồng, con, cháu hoặc anh/chị/em.",
             )
 
     added = await append_case_members(

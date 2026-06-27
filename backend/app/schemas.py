@@ -93,7 +93,7 @@ class UserAdminUpdate(BaseModel):
 
 # Applicant
 class FamilyMemberCreate(BaseModel):
-    role: Literal["principal", "spouse", "child"] = "principal"
+    role: Literal["principal", "spouse", "child", "grandchild", "sibling"] = "principal"
     display_name: str = Field(min_length=1, max_length=255)
 
 

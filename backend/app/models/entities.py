@@ -34,6 +34,8 @@ class PersonRole(str, enum.Enum):
     principal = "principal"
     spouse = "spouse"
     child = "child"
+    grandchild = "grandchild"  # cháu nội/cháu ngoại — con của thành viên 'child'
+    sibling = "sibling"  # anh/chị/em được đương đơn chính bảo lãnh (diện F4)
 
 
 class DocumentStatus(str, enum.Enum):

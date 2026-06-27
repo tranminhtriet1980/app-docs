@@ -263,7 +263,7 @@ def apply_ds260_resolved_conflicts(
             continue
         seg, suffix = parsed
         if seg == WORKSHEET_CONFLICT_SEGMENT and suffix in mappings:
-            if member_role == "child":
+            if member_role in ("child", "grandchild"):
                 continue
             if (
                 suffix in identity_keys

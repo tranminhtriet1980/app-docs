@@ -36,8 +36,11 @@ export function suggestedUploadFilename(
   return `${memberNumber}_${seq} ${filenamePart} - ${displayName}.pdf`;
 }
 
-export function slotsForRole(role: "principal" | "spouse" | "child"): PersonFileSlot[] {
-  return role === "child" ? CHILD_FILE_SLOTS : PERSON_FILE_SLOTS;
+export function slotsForRole(
+  role: "principal" | "spouse" | "child" | "grandchild" | "sibling"
+): PersonFileSlot[] {
+  // Anh/chị/em là người lớn độc lập → bộ giấy tờ đầy đủ như chủ hồ sơ.
+  return role === "child" || role === "grandchild" ? CHILD_FILE_SLOTS : PERSON_FILE_SLOTS;
 }
 
 export const MEMBER_CODE_LEGEND = [
