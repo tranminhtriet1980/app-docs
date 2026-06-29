@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, getToken, User } from "@/lib/api";
 import AppSidebar from "./AppSidebar";
 import AppHeader from "./AppHeader";
+import ChatbotWidget from "@/components/ChatbotWidget";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -47,6 +48,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         <AppHeader user={user} unread={unread} />
         <main className="flex-1 overflow-auto p-6 lg:p-8">{children}</main>
       </div>
+      <ChatbotWidget />
     </div>
   );
 }

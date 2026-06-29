@@ -33,7 +33,7 @@ from app.services.permissions import (
     is_staff_or_admin,
 )
 from app.models.entities import CaseType
-from app.services.overview_stats import build_overview_extras
+from app.services.overview_stats import build_overview_extras, build_period_responsible_stats
 from app.services.quota import check_applicant_quota, count_applicants_this_month
 from app.services.applicant_purge import purge_applicant_completely
 from app.services.doc_record_sync import list_doc_records
@@ -56,6 +56,36 @@ TRASH_RETENTION_DAYS = 30
 
 def _members_out(members: list[CaseMember]) -> list[CaseMemberOut]:
     return [CaseMemberOut(**row) for row in serialize_case_members(members)]
+
+
+def _normalize_applicant_name(name: str) -> str:
+    """Chuẩn hóa tên hồ sơ để so trùng: viết hoa, gộp khoảng trắng."""
+    return " ".join((name or "").upper().split())
+
+
+async def _find_duplicate_applicant(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    display_name: str,
+    year: int,
+) -> Applicant | None:
+    """
+    Hồ sơ trùng = cùng người phụ trách (người tạo) + cùng năm tạo + cùng tên (chuẩn hóa).
+    Bỏ qua hồ sơ đã xóa (deleted_at) — cho phép tạo lại sau khi xóa.
+    """
+    result = await db.execute(
+        select(Applicant).where(
+            Applicant.user_id == user_id,
+            Applicant.deleted_at.is_(None),
+        )
+    )
+    target = _normalize_applicant_name(display_name)
+    for existing in result.scalars():
+        created_year = existing.created_at.year if existing.created_at else None
+        if created_year == year and _normalize_applicant_name(existing.display_name) == target:
+            return existing
+    return None
 
 
 async def _applicant_out(db: AsyncSession, applicant: Applicant) -> ApplicantOut:
@@ -143,10 +173,6 @@ async def _user_stats(db: AsyncSession, user: User) -> DashboardStatsOut:
         .join(Applicant, Conflict.applicant_id == Applicant.id)
         .where(base, active, Conflict.status == ConflictStatus.open)
     ) or 0
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    applicants_this_week = await db.scalar(
-        select(func.count()).select_from(Applicant).where(base, active, Applicant.created_at >= week_ago)
-    ) or 0
     status_rows = await db.execute(
         select(Applicant.status, func.count())
         .select_from(Applicant)
@@ -156,12 +182,16 @@ async def _user_stats(db: AsyncSession, user: User) -> DashboardStatsOut:
     by_status = {row[0].value: row[1] for row in status_rows.all()}
     quota_used = await count_applicants_this_month(db, uid)
     overview = await build_overview_extras(db, user_id=uid)
+    periods = await build_period_responsible_stats(db, user_id=uid)
     return DashboardStatsOut(
         total_applicants=total_applicants,
         total_documents=total_documents,
         total_exports=total_exports,
         open_conflicts=open_conflicts,
-        applicants_this_week=applicants_this_week,
+        applicants_this_week=periods["applicants_this_week"],
+        applicants_this_month=periods["applicants_this_month"],
+        applicants_this_year=periods["applicants_this_year"],
+        by_responsible=periods["by_responsible"],
         by_status=by_status,
         trend_weekly=await _weekly_trend(db, uid),
         quota_used=quota_used,
@@ -200,17 +230,30 @@ async def list_trash(
     return [await _applicant_out(db, a) for a in result.scalars().all()]
 
 
+def _apply_year_filter(q, year: int | None):
+    if year:
+        start = datetime(year, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        q = q.where(Applicant.created_at >= start, Applicant.created_at < end)
+    return q
+
+
 @router.get("", response_model=list[ApplicantOut])
 async def list_applicants(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     status_filter: ApplicantStatus | None = Query(None, alias="status"),
     search: str | None = Query(None, min_length=1),
+    case_type: str | None = Query(None),
+    year: int | None = Query(None, ge=2000, le=2100),
 ):
     q = select(Applicant).order_by(Applicant.created_at.desc())
     q = _active_filter(q, user)
     if status_filter:
         q = q.where(Applicant.status == status_filter)
+    if case_type:
+        q = q.where(Applicant.case_type == case_type)
+    q = _apply_year_filter(q, year)
     if search:
         q = q.where(Applicant.display_name.ilike(f"%{search}%"))
     result = await db.execute(q)
@@ -226,6 +269,22 @@ async def create_applicant(
     if not can_create_applicant(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền tạo hồ sơ.")
     await check_applicant_quota(db, user)
+
+    # Chặn tạo hồ sơ trùng: cùng người phụ trách + cùng năm + cùng tên.
+    current_year = datetime.now(timezone.utc).year
+    duplicate = await _find_duplicate_applicant(
+        db, user_id=user.id, display_name=body.display_name, year=current_year
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f'Hồ sơ trùng: đã tồn tại hồ sơ "{duplicate.display_name}" '
+                f"do bạn phụ trách trong năm {current_year}. Không thể tạo trùng — "
+                f"hãy mở hồ sơ đã có hoặc đổi tên để phân biệt."
+            ),
+        )
+
     applicant = Applicant(
         user_id=user.id,
         display_name=body.display_name,

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearToken, User } from "@/lib/api";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -14,6 +14,19 @@ const ROLE_LABELS: Record<string, string> = {
 export default function AppHeader({ user, unread }: { user: User | null; unread: number }) {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,17 +77,51 @@ export default function AppHeader({ user, unread }: { user: User | null; unread:
         <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="Trợ giúp">
           ❓
         </button>
-        <div className="flex items-center gap-3 border-l border-slate-200 pl-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
-            {initials}
-          </div>
-          <div className="hidden sm:block">
-            <p className="text-sm font-medium text-slate-900">{user?.full_name || user?.email}</p>
-            <p className="text-xs text-slate-500">{ROLE_LABELS[user?.role || "user"]}</p>
-          </div>
-          <button type="button" onClick={logout} className="text-xs text-slate-500 hover:text-brand-600">
-            Thoát
+        <div ref={menuRef} className="relative border-l border-slate-200 pl-3">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="flex items-center gap-3 rounded-lg p-1 hover:bg-slate-100"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
+              {initials}
+            </div>
+            <div className="hidden text-left sm:block">
+              <p className="text-sm font-medium text-slate-900">{user?.full_name || user?.email}</p>
+              <p className="text-xs text-slate-500">{ROLE_LABELS[user?.role || "user"]}</p>
+            </div>
+            <span className="hidden text-slate-400 sm:block">▾</span>
           </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <div className="border-b border-slate-100 px-4 py-2 sm:hidden">
+                <p className="text-sm font-medium text-slate-900">{user?.full_name || user?.email}</p>
+                <p className="text-xs text-slate-500">{ROLE_LABELS[user?.role || "user"]}</p>
+              </div>
+              <Link
+                href="/dashboard/settings"
+                onClick={() => setMenuOpen(false)}
+                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                🔑 Đổi mật khẩu
+              </Link>
+              <Link
+                href="/dashboard/settings"
+                onClick={() => setMenuOpen(false)}
+                className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                ⚙️ Cài đặt tài khoản
+              </Link>
+              <button
+                type="button"
+                onClick={logout}
+                className="block w-full border-t border-slate-100 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                🚪 Thoát
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

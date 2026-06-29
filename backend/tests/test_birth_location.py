@@ -3,7 +3,18 @@
 from app.services.birth_location import (
     derive_birth_state_from_place,
     derive_country_from_place,
+    format_address_english,
 )
+
+
+def test_format_address_english_translates_admin_terms():
+    assert (
+        format_address_english("A4/11K, QUỐC LỘ 50, XÃ BÌNH HƯNG, HUYỆN BÌNH CHÁNH")
+        == "A4/11K, Highway 50, Binh Hung Commune, Binh Chanh District"
+    )
+    assert format_address_english("TPHCM") == "Ho Chi Minh"
+    assert format_address_english("ẤP HÒA BÌNH, QUẬN 1") == "Hoa Binh Hamlet, District 1"
+    assert format_address_english("") == ""
 
 
 def test_birth_state_copies_place_of_birth():

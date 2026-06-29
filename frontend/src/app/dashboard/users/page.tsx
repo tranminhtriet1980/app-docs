@@ -101,6 +101,24 @@ export default function UsersAdminPage() {
     }
   };
 
+  const resetPassword = async (u: UserAdmin) => {
+    const pwd = window.prompt(`Nhập mật khẩu mới cho ${u.email} (tối thiểu 6 ký tự):`);
+    if (pwd === null) return;
+    if (pwd.length < 6) {
+      alert("Mật khẩu phải có tối thiểu 6 ký tự");
+      return;
+    }
+    setSavingId(u.id);
+    try {
+      const r = await api.resetUserPassword(u.id, pwd);
+      alert(r.message);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Đổi mật khẩu thất bại");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center text-slate-500">
@@ -243,7 +261,8 @@ export default function UsersAdminPage() {
                   <th className="pb-3 pr-4 font-medium">Trạng thái</th>
                   <th className="pb-3 pr-4 font-medium">Quota/tháng</th>
                   <th className="pb-3 pr-4 font-medium">Hồ sơ</th>
-                  <th className="pb-3 font-medium">Ngày tạo</th>
+                  <th className="pb-3 pr-4 font-medium">Ngày tạo</th>
+                  <th className="pb-3 font-medium">Hành động</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,7 +316,17 @@ export default function UsersAdminPage() {
                       />
                     </td>
                     <td className="py-3 pr-4">{u.applicant_count}</td>
-                    <td className="py-3">{formatDate(u.created_at)}</td>
+                    <td className="py-3 pr-4">{formatDate(u.created_at)}</td>
+                    <td className="py-3">
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:border-brand-500 hover:text-brand-600 disabled:opacity-50"
+                        disabled={savingId === u.id}
+                        onClick={() => resetPassword(u)}
+                      >
+                        🔑 Đổi MK
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

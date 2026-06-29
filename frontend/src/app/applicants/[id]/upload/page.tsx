@@ -30,6 +30,7 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [deletingId, setDeletingId] = useState<string>("");
+  const [reprocessingId, setReprocessingId] = useState<string>("");
   const [reprocessingAll, setReprocessingAll] = useState(false);
   const [docTypes, setDocTypes] = useState<DocumentTypeGuide[]>([]);
   const [deletingApplicant, setDeletingApplicant] = useState(false);
@@ -97,7 +98,7 @@ export default function UploadPage() {
       if (list.length > 1) {
         const uploaded = await api.uploadDocumentsBatch(id, list);
         if (!uploaded.length) {
-          throw new Error("Không file nào được chấp nhận. Dùng PDF, Word, Excel, ảnh hoặc TXT (tối đa 20MB/file).");
+          throw new Error("Không file nào được chấp nhận. Dùng PDF, Word, Excel, ảnh hoặc TXT (tối đa 50MB/file).");
         }
       } else {
         await api.uploadDocument(id, list[0]);
@@ -125,6 +126,18 @@ export default function UploadPage() {
       await load();
     } finally {
       setDeletingId("");
+    }
+  };
+
+  const reprocessOne = async (doc: Document) => {
+    setReprocessingId(doc.id);
+    try {
+      await api.reprocessDocument(id, doc.id);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Không thể reprocess tài liệu");
+    } finally {
+      setReprocessingId("");
     }
   };
 
@@ -203,7 +216,7 @@ export default function UploadPage() {
         >
           <p className="mb-2 font-medium">Kéo thả giấy tờ vào đây</p>
           <p className="mb-1 text-sm text-slate-500">
-            PDF, Word, Excel, ảnh, TXT — upload hàng loạt, tối đa 20MB/file
+            PDF, Word, Excel, ảnh, TXT — upload hàng loạt, tối đa 50MB/file
           </p>
           {applicant?.is_family_bundle && (
             <p className="mb-4 text-sm text-brand-700">
@@ -231,7 +244,7 @@ export default function UploadPage() {
               disabled={reprocessingAll || documents.length === 0}
               onClick={reprocessAll}
             >
-              {reprocessingAll ? "Đang reprocess..." : "Reprocess all PDFs"}
+              {reprocessingAll ? "Đang reprocess..." : "Reprocess tất cả (gồm .docx)"}
             </button>
           </div>
         </div>
@@ -647,14 +660,25 @@ export default function UploadPage() {
                           : "—"}
                       </td>
                       <td className="py-3 text-right">
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs text-red-700"
-                          disabled={deletingId === doc.id}
-                          onClick={() => deleteDocument(doc)}
-                        >
-                          {deletingId === doc.id ? "Đang xóa..." : "Xóa"}
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs"
+                            disabled={reprocessingId === doc.id || reprocessingAll}
+                            onClick={() => reprocessOne(doc)}
+                            title="Chạy lại OCR riêng tài liệu này"
+                          >
+                            {reprocessingId === doc.id ? "Đang xử lý..." : "Reprocess"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs text-red-700"
+                            disabled={deletingId === doc.id}
+                            onClick={() => deleteDocument(doc)}
+                          >
+                            {deletingId === doc.id ? "Đang xóa..." : "Xóa"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

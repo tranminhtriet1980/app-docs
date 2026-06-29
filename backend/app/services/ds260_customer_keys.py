@@ -165,12 +165,30 @@ _IMMI_PATH_WORK_EDU_REMAP: dict[str, str] = {
     "middle_school_cap_2_address": "edu_middle_school_address",
     "middle_school_cap_2_period": "edu_middle_school_period",
     "middle_school_grade_2": "edu_middle_school_name",
+    # Cấp 2 = Trung học cơ sở (THCS)
+    "trung_hoc_co_so": "edu_middle_school_name",
+    "trung_hoc_co_so_name": "edu_middle_school_name",
+    "trung_hoc_co_so_address": "edu_middle_school_address",
+    "trung_hoc_co_so_period": "edu_middle_school_period",
+    "thcs": "edu_middle_school_name",
+    "thcs_name": "edu_middle_school_name",
+    "thcs_address": "edu_middle_school_address",
+    "thcs_period": "edu_middle_school_period",
     "high_school_cap_3": "edu_high_school_name",
     "highschool_cap_3": "edu_high_school_name",
     "high_school_cap_3_name": "edu_high_school_name",
     "high_school_cap_3_address": "edu_high_school_address",
     "high_school_cap_3_period": "edu_high_school_period",
     "highschool_cap_3_name": "edu_high_school_name",
+    # Cấp 3 = Trung học phổ thông (THPT)
+    "trung_hoc_pho_thong": "edu_high_school_name",
+    "trung_hoc_pho_thong_name": "edu_high_school_name",
+    "trung_hoc_pho_thong_address": "edu_high_school_address",
+    "trung_hoc_pho_thong_period": "edu_high_school_period",
+    "thpt": "edu_high_school_name",
+    "thpt_name": "edu_high_school_name",
+    "thpt_address": "edu_high_school_address",
+    "thpt_period": "edu_high_school_period",
     "college_university": "edu_college_name",
     "college_university_name": "edu_college_name",
     "college_university_address": "edu_college_address",
@@ -514,7 +532,39 @@ def normalize_ds260_customer_raw(raw: dict[str, str]) -> dict[str, str]:
                     out[key] = val
                     break
 
+    _clean_name_header_noise(out)
     return out
+
+
+# Header tiêu đề form lẫn vào tên do OCR (vd. "DS 260 ...", "KHACH KHAI DS260 ...").
+_NAME_HEADER_NOISE = re.compile(
+    r"^(?:khach\s*khai\s*)?(?:bang\s*cau\s*hoi\s*)?ds[\s\-]?2?6?0?\b[\s\-]*",
+    re.IGNORECASE,
+)
+_NAME_FIELDS_TO_CLEAN: tuple[str, ...] = (
+    "applicant_name",
+    "applicant_name_native",
+    "full_name",
+    "name",
+    "family_name",
+    "surname",
+    "given_name",
+    "given_names",
+    "birth_cert_full_name",
+    "judicial_full_name",
+    "military_full_name",
+    "father_full_name",
+    "mother_full_name",
+    "spouse_full_name",
+)
+
+
+def _clean_name_header_noise(out: dict[str, str]) -> None:
+    """Bỏ tiền tố tiêu đề form ("DS 260", "KHACH KHAI"…) lẫn vào trường tên do OCR chữ tay."""
+    for key in _NAME_FIELDS_TO_CLEAN:
+        val = (out.get(key) or "").strip()
+        if val:
+            out[key] = _NAME_HEADER_NOISE.sub("", val).strip()
 
 
 def coerce_ds260_customer_extraction(extraction: dict[str, Any]) -> dict[str, Any]:

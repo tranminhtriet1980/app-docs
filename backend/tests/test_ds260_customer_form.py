@@ -22,6 +22,41 @@ def test_parse_ds260_filename():
     assert "ds260_customer_form" in RECORDABLE_DOC_TYPES
 
 
+def test_name_header_noise_stripped():
+    """OCR chữ tay lẫn tiêu đề 'DS 260' / 'KHACH KHAI' vào tên → phải bỏ."""
+    from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+
+    out = normalize_ds260_customer_raw(
+        {"applicant_name": "DS LE CONG PHONG", "family_name": "DS", "full_name": "DS LE CONG PHONG"}
+    )
+    assert out["applicant_name"] == "LE CONG PHONG"
+    assert out["full_name"] == "LE CONG PHONG"
+    assert out["family_name"] == ""
+    assert normalize_ds260_customer_raw({"applicant_name": "KHACH KHAI DS260 TRAN MAN VY"})[
+        "applicant_name"
+    ] == "TRAN MAN VY"
+    # Tên sạch không bị đụng.
+    assert normalize_ds260_customer_raw({"applicant_name": "LE CONG PHONG"})["applicant_name"] == "LE CONG PHONG"
+
+
+def test_vietnamese_school_levels_map_to_middle_and_high():
+    """Cấp 2 = Trung học cơ sở (THCS); Cấp 3 = Trung học phổ thông (THPT)."""
+    from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+
+    out = normalize_ds260_customer_raw(
+        {
+            "trung_hoc_co_so_name": "THCS Nguyen Du",
+            "trung_hoc_co_so_period": "09/1990 - 05/1994",
+            "thpt_name": "THPT Le Hong Phong",
+            "thpt_period": "09/1994 - 05/1997",
+        }
+    )
+    assert out["edu_middle_school_name"] == "THCS Nguyen Du"
+    assert out["edu_middle_school_period"] == "09/1990 - 05/1994"
+    assert out["edu_high_school_name"] == "THPT Le Hong Phong"
+    assert out["edu_high_school_period"] == "09/1994 - 05/1997"
+
+
 def _rec(raw: dict, *, variant: str = "exception") -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),

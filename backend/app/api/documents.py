@@ -115,7 +115,7 @@ ALLOWED_MIME = {
     "text/plain",
 }
 ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx", ".xlsx", ".xls", ".txt"}
-MAX_SIZE = 20 * 1024 * 1024
+MAX_SIZE = 50 * 1024 * 1024
 
 
 def _doc_out(
@@ -309,7 +309,7 @@ async def upload_document(
 
     content = await file.read()
     if len(content) > MAX_SIZE:
-        raise HTTPException(status_code=400, detail="File too large (max 20MB)")
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
     document = await _save_upload(
         db,
@@ -356,7 +356,7 @@ async def upload_documents_batch(
     elif files:
         raise HTTPException(
             status_code=400,
-            detail="Không file nào hợp lệ. Chấp nhận PDF, Word, Excel, ảnh, TXT — tối đa 20MB/file.",
+            detail="Không file nào hợp lệ. Chấp nhận PDF, Word, Excel, ảnh, TXT — tối đa 50MB/file.",
         )
     await db.commit()
     return out

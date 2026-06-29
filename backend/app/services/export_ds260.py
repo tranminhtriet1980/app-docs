@@ -19,6 +19,7 @@ from app.services.ds260_dates import format_ds260_display_date, is_date_field_ke
 from app.services.ds260_validate import flatten_ds260_values, validate_ds260
 from app.services.postal_code import derive_postal_code_from_location
 from app.services.birth_location import (
+    format_address_english,
     format_birth_city_display,
     format_nationality_country,
     format_person_name_ascii,
@@ -99,6 +100,21 @@ APPLICANT_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"military.*rank|cấp bậc", re.I), "military_rank"),
     (re.compile(r"service.*from|phục vụ.*từ", re.I), "military_service_start"),
     (re.compile(r"service.*to|phục vụ.*đến", re.I), "military_service_end"),
+    # E.2 Thông tin bổ sung — ngôn ngữ khác & du lịch 5 năm (Yes/No + chi tiết).
+    (re.compile(r"other languages beside|ngôn ngữ nào khác", re.I), "other_languages_used"),
+    (re.compile(r"traveled to any countries|đã từng du lịch|du lịch đến các nước", re.I), "traveled_countries_5yr_used"),
+]
+
+# Mục NGHĨA VỤ QUÂN SỰ — nhãn song ngữ. Gắn context "military" để "Country/Region" KHÔNG rơi vào
+# địa chỉ hiện tại. Thứ tự: nhãn đặc thù trước, "country/nước" cuối cùng.
+MILITARY_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"have you ever served|đã từng phục vụ trong quân", re.I), "military_served"),
+    (re.compile(r"branch|chiến khu", re.I), "military_branch"),
+    (re.compile(r"rank|positon|position|cấp bậc|công việc gì", re.I), "military_rank"),
+    (re.compile(r"specialty|chuyên ngành", re.I), "military_specialty"),
+    (re.compile(r"service\s*from|phục vụ.*từ", re.I), "military_service_start"),
+    (re.compile(r"service\s*to|phục vụ.*đến", re.I), "military_service_end"),
+    (re.compile(r"country|region|nước|lãnh thổ", re.I), "military_country"),
 ]
 
 _SECTION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -117,7 +133,10 @@ _SECTION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"college\s*/?\s*univer|cao đẳng|đại học", re.I), "edu_college"),
     (re.compile(r"work\s*/?\s*education|primary occupation|nghề nghiệp chính", re.I), "work"),
     # Reset context khi sang phần khác để không kẹt ở work/edu.
-    (re.compile(r"military service|nghĩa vụ quân sự|additional information|security and background", re.I), "applicant"),
+    (re.compile(r"additional information|security and background", re.I), "applicant"),
+    (re.compile(r"military service|nghĩa vụ quân sự", re.I), "military"),
+    # THÔNG TIN KHÁC (E.2) — thoát context military để ngôn ngữ/du lịch khớp ở context applicant.
+    (re.compile(r"thông tin khác", re.I), "applicant"),
 ]
 
 # Section D — Work
@@ -179,14 +198,16 @@ CONTACT_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"secondary phone|điện thoại phụ", re.I), "secondary_phone"),
     (re.compile(r"work phone|điện thoại.*làm việc|nơi làm việc", re.I), "work_phone"),
     (re.compile(r"other.*telephone|điện thoại khác.*5|other phone", re.I), "other_phones_used"),
-    (re.compile(r"email address|địa chỉ email", re.I), "email"),
+    # "Other Email used..." phải khớp TRƯỚC nhãn email chung (dòng đó chứa "địa chỉ EMAIL KHÁC").
     (re.compile(r"other.*email.*5|email khác.*5", re.I), "other_emails_used"),
+    (re.compile(r"email address|địa chỉ email", re.I), "email"),
 ]
 
 SOCIAL_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # "Other Social Media used..." phải khớp TRƯỚC (dòng đó chứa "TÊN MẠNG XÃ HỘI KHÁC" → đụng identifier).
+    (re.compile(r"other social media.*5|mạng xã hội khác.*5", re.I), "other_social_media_used"),
     (re.compile(r"social media provider|social media platform|mạng xã hội nào", re.I), "social_media_platform"),
     (re.compile(r"social media identifier|tên mạng xã hội|link trang", re.I), "social_media_identifier"),
-    (re.compile(r"other social media.*5|mạng xã hội khác.*5", re.I), "other_social_media_used"),
 ]
 
 _CONTEXT_FIELD_MAP: dict[str, dict[str, str]] = {
@@ -405,6 +426,26 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     if out.get("spouse_marriage_country"):
         out["spouse_marriage_country"] = format_nationality_country(out["spouse_marriage_country"])
     _enrich_postal_codes(out)
+    # Địa chỉ → tiếng Anh (Quốc lộ→Highway, Xã→Commune, Huyện/Quận→District, bỏ dấu…).
+    # Sau _enrich_postal_codes để không ảnh hưởng suy luận mã bưu điện.
+    _ADDRESS_ENGLISH_KEYS = (
+        "current_address",
+        "current_city",
+        "other_addresses_history",
+        "spouse_address",
+        "father_address",
+        "mother_address",
+        "work_employer_address",
+        "edu_middle_school_address",
+        "edu_high_school_address",
+        "edu_college_address",
+    )
+    for key in _ADDRESS_ENGLISH_KEYS:
+        if out.get(key):
+            out[key] = format_address_english(out[key])
+    for key in list(out.keys()):
+        if re.match(r"^child_\d+_current_address$", key) and out.get(key):
+            out[key] = format_address_english(out[key])
     for key, val in list(out.items()):
         if not val:
             continue
@@ -412,7 +453,8 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
             out[key] = _format_gender(val)
             continue
         if is_date_field_key(key):
-            out[key] = format_ds260_display_date(val)
+            # Giữ nguyên text nếu không phải 1 ngày chuẩn (vd. "Sep 2008 to Now") — đừng xoá trắng.
+            out[key] = format_ds260_display_date(val) or val
     return out
 
 
@@ -520,6 +562,12 @@ def _match_ds260_key(text: str, context: str = "applicant") -> str:
             if pattern.search(text):
                 return key
         return ""
+    # Nghĩa vụ quân sự — gate riêng để "Country/Region" tiếng Việt không lọt sang địa chỉ.
+    if context == "military":
+        for pattern, key in MILITARY_LABEL_PATTERNS:
+            if pattern.search(text):
+                return key
+        return ""
     if context in _EDU_CONTEXT_KEYS:
         keys = _EDU_CONTEXT_KEYS[context]
         for pattern, suffix in EDU_LABEL_PATTERNS:
@@ -550,6 +598,11 @@ def _match_ds260_key(text: str, context: str = "applicant") -> str:
                     if mapped:
                         return mapped
             return ""
+
+    # Năm mất cha/mẹ — chỉ trong section cha/mẹ. (Pattern "năm mất" ở APPLICANT_LABEL_PATTERNS map sang
+    # death_date của giấy báo tử, KHÔNG áp dụng cho ô này.)
+    if context in ("father", "mother") and re.search(r"year of death|năm mất", text, re.I):
+        return f"{context}_death_year"
 
     for pattern, key in DS260_LABEL_PATTERNS:
         if pattern.search(text):
@@ -615,6 +668,38 @@ def _fill_period_from_to(text: str, value: str) -> str | None:
 _QUESTION_FILL_KEYS = frozenset({"spouse_immigrating"})
 _QUESTION_FILL_KEY_RE = re.compile(r"^child_\d+_(immigrating|immigrating_future|lives_with)$")
 
+# Field có nhãn KHÔNG kết thúc bằng ':' trên mẫu (vd. Social Media Identifier kết thúc bằng "(LINK NGẮN))")
+# — vẫn phải điền giá trị, gắn ở cuối dòng.
+_APPEND_NO_COLON_KEYS = frozenset({"social_media_identifier", "military_served"})
+
+# Câu hỏi Yes/No có phần khai chi tiết. Quy tắc: có chi tiết (history) → "Yes - <chi tiết>";
+# không có → "No". Map cờ used → field chi tiết tương ứng.
+_OTHER_USED_HISTORY: dict[str, str] = {
+    "other_phones_used": "other_phones_history",
+    "other_emails_used": "other_emails_history",
+    "other_social_media_used": "other_social_history",
+    # Section D — Work: nghề khác + lịch sử việc làm 10 năm (narrative phải hiện ra, không chỉ Yes/No).
+    "work_other_occupation_used": "work_other_occupation_detail",
+    "work_prior_jobs_used": "work_prior_jobs_history",
+    # E.2 Thông tin bổ sung — ngôn ngữ khác + du lịch 5 năm.
+    "other_languages_used": "other_languages",
+    "traveled_countries_5yr_used": "traveled_countries_history",
+    # A.3 Địa chỉ — "đã từng ở chỗ khác kể từ 16 tuổi?" → Yes + lịch sử địa chỉ / No.
+    "other_addresses_used": "other_addresses_history",
+}
+
+_AFFIRMATIVE_TOKENS = frozenset({"yes", "y", "có", "co", "true", "1"})
+
+
+def _other_used_answer(key: str, values: dict[str, str]) -> str:
+    used = (values.get(key) or "").strip()
+    history = re.sub(r"\s*\n\s*", "; ", (values.get(_OTHER_USED_HISTORY[key]) or "").strip())
+    if history:
+        return f"Yes - {history}"
+    if used.lower() in _AFFIRMATIVE_TOKENS:
+        return "Yes"
+    return "No"
+
 
 def _is_question_fill_key(key: str) -> bool:
     return key in _QUESTION_FILL_KEYS or bool(_QUESTION_FILL_KEY_RE.match(key))
@@ -627,17 +712,30 @@ def _fill_question_line(text: str, value: str) -> str:
     return f"{text.rstrip()}   {value}"
 
 
-def _smart_fill_ds260_line(text: str, values: dict[str, str], context: str = "applicant") -> str:
+def _smart_fill_ds260_line(
+    text: str,
+    values: dict[str, str],
+    context: str = "applicant",
+    filled: set[str] | None = None,
+) -> str:
     if "{{" in text:
         return text
     key = _match_ds260_key(text, context)
     if not key:
         return text
+    # Cờ "Other ... used last Five years?" — luôn ghi Yes+chi tiết / No, kể cả khi field trống.
+    if key in _OTHER_USED_HISTORY:
+        # Câu hỏi có thể trải 2 dòng (Anh + Việt) — chỉ điền đáp án một lần / tài liệu.
+        if filled is not None:
+            if key in filled:
+                return text
+            filled.add(key)
+        return _fill_question_line(text, _other_used_answer(key, values))
     value = (values.get(key) or "").strip()
     if not value:
         return text
     if ":" not in text:
-        if _is_question_fill_key(key):
+        if _is_question_fill_key(key) or key in _APPEND_NO_COLON_KEYS:
             return _fill_question_line(text, value)
         return text
     if key.endswith("_period"):
@@ -670,21 +768,25 @@ def _build_replacements(values: dict[str, str], mapping: dict[str, str]) -> dict
     return reps
 
 
-def _replace_in_paragraph(paragraph, values: dict[str, str], mapping: dict[str, str], context: str) -> None:
+def _replace_in_paragraph(
+    paragraph, values: dict[str, str], mapping: dict[str, str], context: str, filled: set[str] | None = None
+) -> None:
     text = paragraph.text
     if "{{" in text:
         for old, new in _build_replacements(values, mapping).items():
             if old in text and new:
                 text = text.replace(old, new)
-    text = _smart_fill_ds260_line(text, values, context)
+    text = _smart_fill_ds260_line(text, values, context, filled)
     if text != paragraph.text:
         paragraph.text = text
 
 
-def _fill_paragraphs_with_context(paragraphs, values: dict[str, str], mapping: dict[str, str], context: str) -> str:
+def _fill_paragraphs_with_context(
+    paragraphs, values: dict[str, str], mapping: dict[str, str], context: str, filled: set[str] | None = None
+) -> str:
     for paragraph in paragraphs:
         context = _update_section_context(paragraph.text, context)
-        _replace_in_paragraph(paragraph, values, mapping, context)
+        _replace_in_paragraph(paragraph, values, mapping, context, filled)
     return context
 
 
@@ -699,12 +801,13 @@ def fill_ds260_docx_template(
     display = _prepare_display_values(values)
 
     context = "applicant"
-    context = _fill_paragraphs_with_context(doc.paragraphs, display, mapping, context)
+    filled: set[str] = set()
+    context = _fill_paragraphs_with_context(doc.paragraphs, display, mapping, context, filled)
 
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                context = _fill_paragraphs_with_context(cell.paragraphs, display, mapping, context)
+                context = _fill_paragraphs_with_context(cell.paragraphs, display, mapping, context, filled)
 
     doc.save(str(out_path))
 

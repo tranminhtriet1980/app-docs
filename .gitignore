@@ -18,6 +18,7 @@ deploy/certs/
 # Build & cache
 frontend/.next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
 __pycache__/
 *.py[cod]
 .pytest_cache/

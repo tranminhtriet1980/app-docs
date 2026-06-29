@@ -1104,6 +1104,8 @@ def apply_child_sections_from_birth_cert(
         apply_father_absent_rule,
         apply_mother_absent_rule,
         empty_ds260_field_source,
+        enrich_parent_death_from_death_cert,
+        pick_latest_record,
     )
 
     father_name = _resolve_child_parent_name_for_fill(child_rec, "father", members, role)
@@ -1202,6 +1204,19 @@ def apply_child_sections_from_birth_cert(
                         record_id=rid,
                         derived=derived,
                     )
+
+    # Giấy báo tử → cha/mẹ của con "đã mất" + năm mất (ghi đè còn-sống mặc định "Yes").
+    death_rec = pick_latest_record(records, "death_certificate") if records else None
+    if death_rec:
+        for sec in sections_out:
+            if sec["id"] == "section_father" and father_name:
+                enrich_parent_death_from_death_cert(
+                    sec["fields"], death_rec, "father", father_name
+                )
+            elif sec["id"] == "section_mother" and mother_name:
+                enrich_parent_death_from_death_cert(
+                    sec["fields"], death_rec, "mother", mother_name
+                )
 
 
 def apply_sibling_parent_fallback(

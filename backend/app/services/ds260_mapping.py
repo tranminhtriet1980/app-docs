@@ -60,6 +60,7 @@ class Ds260FieldMapping:
     aliases: tuple[str, ...] = ()
     derive: str | None = None
     review_hidden: bool = False
+    default: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ def load_ds260_sections() -> list[Ds260Section]:
                 aliases=tuple(f.get("aliases") or ()),
                 derive=f.get("derive"),
                 review_hidden=bool(f.get("review_hidden")),
+                default=f.get("default"),
             )
             for f in sec.get("fields", [])
         )
@@ -353,6 +355,8 @@ def _split_vn_person_name(full_name: str) -> tuple[str, str]:
 
 _PARENT_NA_MARKERS = frozenset({"n/a", "na", "none", "unknown", "khong", "không"})
 
+_GENDER_TOKENS = frozenset({"male", "female", "nam", "nu", "nữ", "m", "f"})
+
 _PARENT_BIRTH_CERT_CONFIG: dict[str, dict[str, Any]] = {
     "father": {
         "section_id": "section_father",
@@ -525,9 +529,10 @@ def enrich_parent_death_from_death_cert(
     year = _year_from_death_date(merged.get("date_of_death", ""))
     death_key = f"{parent}_death_year"
     living_key = f"{parent}_is_living"
+    # Giấy báo tử là nguồn quyết định: ghi đè còn-sống = No dù trước đó suy ra "Yes".
     for field in fields_out:
         key = field.get("key", "")
-        if key == death_key and not (field.get("value") or "").strip() and year:
+        if key == death_key and year:
             field["value"] = year
             field["source"] = {
                 "document_type": "death_certificate",
@@ -535,7 +540,7 @@ def enrich_parent_death_from_death_cert(
                 "record_id": str(death_rec.id),
                 "derived": f"{parent}_death_from_cert",
             }
-        if key == living_key and not (field.get("value") or "").strip():
+        if key == living_key:
             field["value"] = "No"
             field["source"] = {
                 "document_type": "death_certificate",
@@ -543,6 +548,74 @@ def enrich_parent_death_from_death_cert(
                 "record_id": str(death_rec.id),
                 "derived": f"{parent}_not_living_from_death_cert",
             }
+
+
+def enrich_parent_names_from_judicial(
+    fields_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    parent: str,
+    person_name: str | None,
+) -> None:
+    """
+    Đương đơn không có GKS → lấy tên cha/mẹ từ phiếu lý lịch tư pháp (father_name/mother_name).
+    Chỉ điền khi trường còn trống — GKS (nguồn chính) luôn được ưu tiên.
+    """
+    rec, ref = (
+        pick_luong1_pair_for_person(records, "judicial_certificate", person_name)
+        if person_name
+        else pick_luong1_pair(records, "judicial_certificate")
+    )
+    rec = rec or ref
+    if not rec:
+        return
+    name = _strip_person_title(
+        _resolve_from_record(rec, f"{parent}_name", (f"{parent}_full_name",))
+    ).strip()
+    if not name:
+        return
+    sur, given = _split_vn_person_name(name)
+    rid = str(rec.id)
+
+    def _fill(key: str, value: str) -> None:
+        if not value:
+            return
+        for field in fields_out:
+            if field.get("key") != key or (field.get("value") or "").strip():
+                continue
+            field["value"] = value
+            field["source"] = {
+                **empty_ds260_field_source(),
+                "document_type": "judicial_certificate",
+                "source_field": f"{parent}_name",
+                "record_id": rid,
+                "derived": "parent_name_from_judicial",
+            }
+
+    _fill(f"{parent}_full_name", name)
+    _fill(f"{parent}_surname", sur)
+    _fill(f"{parent}_given_names", given)
+
+
+def _spouse_is_deceased(
+    marriage_primary: ApplicantDocRecord | None,
+    passport_rec: ApplicantDocRecord | None,
+    passport_ref: ApplicantDocRecord | None,
+    death_rec: ApplicantDocRecord | None,
+) -> bool:
+    """Phối ngẫu trên giấy kết hôn trùng người trên giấy báo tử → đã goá."""
+    if not marriage_primary or not death_rec:
+        return False
+    side = _pick_spouse_side_from_marriage(marriage_primary, passport_rec, passport_ref)
+    if not side:
+        return False
+    spouse_name = _resolve_from_record(
+        marriage_primary, f"{side}_full_name", (f"{side}_name",)
+    )
+    if not spouse_name:
+        return False
+    merged = _merge_raw_dict(death_rec)
+    deceased = (merged.get("deceased_full_name") or merged.get("full_name") or "").strip()
+    return _names_match(deceased, spouse_name)
 
 
 def _normalize_person_name_key(name: str) -> str:
@@ -1279,6 +1352,52 @@ def enrich_previous_spouse_from_divorce(
             field["source"]["derived"] = "previous_spouse_from_divorce"
 
 
+def enrich_previous_spouse_from_death(
+    fields_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    passport_rec: ApplicantDocRecord | None,
+    passport_ref: ApplicantDocRecord | None = None,
+) -> None:
+    """
+    Hôn nhân kết thúc do phối ngẫu qua đời (không có giấy ly hôn) → khai phối ngẫu cũ
+    từ giấy kết hôn + giấy báo tử (ngày mất dùng làm ngày kết thúc hôn nhân).
+    """
+    death_rec = pick_latest_record(records, "death_certificate")
+    marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+    primary = marriage_rec or marriage_ref
+    if not death_rec or not primary or not _spouse_is_deceased(
+        primary, passport_rec, passport_ref, death_rec
+    ):
+        _reset_divorce_section_fields(fields_out)
+        return
+
+    side = _pick_spouse_side_from_marriage(primary, passport_rec, passport_ref)
+    spouse_name = _strip_person_title(
+        _resolve_from_record(primary, f"{side}_full_name", (f"{side}_name",))
+    )
+    merged = _merge_raw_dict(death_rec)
+    derived = {
+        "previous_spouses_used": "Yes",
+        "previous_spouse_full_name": spouse_name,
+        "previous_spouse_date_of_birth": _resolve_from_record(
+            primary, f"{side}_date_of_birth", ()
+        ),
+        "previous_marriage_date": _resolve_from_record(
+            primary, "marriage_date", ("date_of_marriage",)
+        ),
+        "previous_divorce_date": (merged.get("date_of_death") or "").strip(),
+    }
+    for field in fields_out:
+        key = field.get("key", "")
+        val = (derived.get(key) or "").strip()
+        if val:
+            field["value"] = val
+            field.setdefault("source", {})
+            field["source"]["document_type"] = "death_certificate"
+            field["source"]["source_field"] = key
+            field["source"]["derived"] = "previous_spouse_from_death"
+
+
 def _canonical_birth_city_from_place(place: str) -> str:
     """Thành phố nơi sinh — bỏ quốc gia ở cuối chuỗi (vd. …, Da Nang City, Vietnam)."""
     from app.services.birth_location import normalize_location
@@ -1348,8 +1467,12 @@ def enrich_marital_status_from_documents(
     marriage_ref: ApplicantDocRecord | None = None,
     passport_rec: ApplicantDocRecord | None = None,
     passport_ref: ApplicantDocRecord | None = None,
+    death_rec: ApplicantDocRecord | None = None,
 ) -> None:
-    """Có giấy ly hôn → Divorced; có giấy kết hôn hợp lệ → Married; không có → để trống."""
+    """
+    Ly hôn → Divorced; kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ → Married;
+    không có giấy tờ → để trống.
+    """
     if divorce_rec:
         status = "Divorced"
         derived = "marital_status_from_divorce"
@@ -1357,9 +1480,16 @@ def enrich_marital_status_from_documents(
     elif has_applicable_marriage_certificate(
         marriage_rec, marriage_ref, passport_rec, passport_ref
     ):
-        status = "Married"
-        derived = "marital_status_from_marriage"
-        doc_type = "marriage_certificate"
+        if _spouse_is_deceased(
+            marriage_rec or marriage_ref, passport_rec, passport_ref, death_rec
+        ):
+            status = "Widowed"
+            derived = "marital_status_widowed_from_death"
+            doc_type = "death_certificate"
+        else:
+            status = "Married"
+            derived = "marital_status_from_marriage"
+            doc_type = "marriage_certificate"
     else:
         for field in fields_out:
             if field.get("key") != "current_marital_status":
@@ -2299,6 +2429,11 @@ def enrich_empty_fields_from_all_doc_records(
                 val, source_field = _resolve_field_from_record(rec, mapping)
                 if _is_empty_for_fallback(val):
                     continue
+                # Chặn giá trị giới tính lọt nhầm vào trường họ/tên (bleed OCR).
+                if field_key.endswith(
+                    ("_full_name", "_surname", "_given_names", "_name")
+                ) and val.strip().lower() in _GENDER_TOKENS:
+                    continue
                 doc_id = str(rec.source_document_id) if rec.source_document_id else None
                 derived = "doc_scan_fill"
                 if rec.variant == "exception":
@@ -2784,6 +2919,36 @@ def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> Non
             _set_value(field, "", "state_address_cleared")
 
 
+def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
+    """Điền giá trị mặc định cho các trường còn trống (CHỌN YES/NO, LUÔN KHAI CÓ).
+
+    Chỉ áp dụng khi trường vẫn trống — không ghi đè giá trị từ giấy tờ, worksheet,
+    conflict hay manual override. Trường con (child_N_*_future) chỉ điền khi con đó tồn tại.
+    """
+    defaults = {k: m.default for k, m in flatten_ds260_mappings().items() if m.default}
+    if not defaults:
+        return
+    for sec in sections_out:
+        present_children: set[str] = set()
+        for field in sec["fields"]:
+            m = re.match(r"^(child_\d+)_full_name$", field.get("key", ""))
+            if m and (field.get("value") or "").strip():
+                present_children.add(m.group(1))
+        for field in sec["fields"]:
+            key = field.get("key", "")
+            default = defaults.get(key)
+            if not default or (field.get("value") or "").strip():
+                continue
+            cm = re.match(r"^(child_\d+)_immigrating_future$", key)
+            if cm and cm.group(1) not in present_children:
+                continue
+            field["value"] = default
+            field["source"] = {
+                **empty_ds260_field_source(),
+                "derived": "default_value",
+            }
+
+
 async def resolve_ds260_form(
     db: AsyncSession,
     applicant_id,
@@ -2957,6 +3122,7 @@ async def resolve_ds260_form(
                 bc_rec = _pick_luong1_record(records, "birth_certificate")
             if bc_rec and not has_father_info_on_birth_cert(bc_rec):
                 apply_father_absent_rule(fields_out)
+            enrich_parent_names_from_judicial(fields_out, records, "father", person_name)
             enrich_parent_is_living(fields_out, bc_rec, "father")
             death_rec = pick_latest_record(records, "death_certificate")
             father_name = next(
@@ -2974,6 +3140,7 @@ async def resolve_ds260_form(
                 bc_rec = _pick_luong1_record(records, "birth_certificate")
             if bc_rec and not has_mother_info_on_birth_cert(bc_rec):
                 apply_mother_absent_rule(fields_out)
+            enrich_parent_names_from_judicial(fields_out, records, "mother", person_name)
             enrich_parent_is_living(fields_out, bc_rec, "mother")
             death_rec = pick_latest_record(records, "death_certificate")
             mother_name = next(
@@ -2992,6 +3159,7 @@ async def resolve_ds260_form(
                     marriage_ref=marriage_ref,
                     passport_rec=passport_rec,
                     passport_ref=passport_ref,
+                    death_rec=pick_latest_record(records, "death_certificate"),
                 )
             enrich_applicant_birth_city_state_equal(
                 fields_out, passport_rec, passport_ref=passport_ref
@@ -3035,7 +3203,13 @@ async def resolve_ds260_form(
                 clear_spouse_section_fields(fields_out)
         if sec.id == "section_previous_spouse" and not is_child_member:
             divorce_rec = pick_latest_record(records, "divorce")
-            enrich_previous_spouse_from_divorce(fields_out, divorce_rec, passport_rec)
+            if divorce_rec:
+                enrich_previous_spouse_from_divorce(fields_out, divorce_rec, passport_rec)
+            else:
+                # Không có giấy ly hôn — thử phối ngẫu cũ đã qua đời (goá).
+                enrich_previous_spouse_from_death(
+                    fields_out, records, passport_rec, passport_ref
+                )
         if sec.id == "section_children" and not is_child_member:
             child_recs = list_child_birth_records(records, filename_map=filename_map)
             enrich_children_section_from_birth_certs(
@@ -3128,6 +3302,17 @@ async def resolve_ds260_form(
         if child_bc:
             for sec in sections_out:
                 enrich_child_member_personal(sec["fields"], child_bc, passport_rec)
+        # Con/cháu mặc định độc thân (Single) trên DS-260.
+        for sec in sections_out:
+            if sec["id"] != "section_a_personal":
+                continue
+            for field in sec["fields"]:
+                if field.get("key") == "current_marital_status":
+                    field["value"] = "Single"
+                    field["source"] = {
+                        **empty_ds260_field_source(),
+                        "derived": "child_default_single",
+                    }
 
     if member_ctx is not None and member_ctx.role == "sibling":
         from app.services.family_case import apply_sibling_parent_fallback
@@ -3135,6 +3320,9 @@ async def resolve_ds260_form(
         apply_sibling_parent_fallback(sections_out, records, case_members_all, person_name)
 
     apply_ds260_manual_overrides(sections_out, manual_overrides)
+
+    # Giá trị mặc định (CHỌN YES/NO, LUÔN KHAI CÓ) — chỉ điền khi vẫn còn trống.
+    apply_ds260_default_values(sections_out)
 
     upgrade_partial_dates_from_worksheet(sections_out, records)
     enrich_native_name_from_worksheet(sections_out, records)

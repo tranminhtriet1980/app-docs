@@ -228,7 +228,7 @@
         {"key": "child_1_lives_with", "label": "Child (1) Lives with you?", "document": "ds260_customer_form", "field": "child_1_lives_with", "aliases": ["child_lives_with"]},
         {"key": "child_1_current_address", "label": "Child (1) Current address if not with you", "document": "ds260_customer_form", "field": "child_1_current_address", "aliases": ["child_1_address"]},
         {"key": "child_1_immigrating", "label": "Child (1) Immigrating with you?", "document": "ds260_customer_form", "field": "child_1_immigrating", "aliases": []},
-        {"key": "child_1_immigrating_future", "label": "Child (1) Will join in future?", "document": "ds260_customer_form", "field": "child_1_immigrating_future", "aliases": []},
+        {"key": "child_1_immigrating_future", "label": "Child (1) Will join in future?", "document": "ds260_customer_form", "field": "child_1_immigrating_future", "aliases": [], "default": "Yes"},
         {"key": "child_2_full_name", "label": "Child (2) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
         {"key": "child_2_date_of_birth", "label": "Child (2) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
         {"key": "child_2_birth_city", "label": "Child (2) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
@@ -237,7 +237,7 @@
         {"key": "child_2_lives_with", "label": "Child (2) Lives with you?", "document": "ds260_customer_form", "field": "child_2_lives_with", "aliases": []},
         {"key": "child_2_current_address", "label": "Child (2) Current address if not with you", "document": "ds260_customer_form", "field": "child_2_current_address", "aliases": []},
         {"key": "child_2_immigrating", "label": "Child (2) Immigrating with you?", "document": "ds260_customer_form", "field": "child_2_immigrating", "aliases": []},
-        {"key": "child_2_immigrating_future", "label": "Child (2) Will join in future?", "document": "ds260_customer_form", "field": "child_2_immigrating_future", "aliases": []},
+        {"key": "child_2_immigrating_future", "label": "Child (2) Will join in future?", "document": "ds260_customer_form", "field": "child_2_immigrating_future", "aliases": [], "default": "Yes"},
         {"key": "child_3_full_name", "label": "Child (3) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
         {"key": "child_3_date_of_birth", "label": "Child (3) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
         {"key": "child_3_birth_city", "label": "Child (3) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
@@ -246,7 +246,7 @@
         {"key": "child_3_lives_with", "label": "Child (3) Lives with you?", "document": "ds260_customer_form", "field": "child_3_lives_with", "aliases": []},
         {"key": "child_3_current_address", "label": "Child (3) Current address if not with you", "document": "ds260_customer_form", "field": "child_3_current_address", "aliases": []},
         {"key": "child_3_immigrating", "label": "Child (3) Immigrating with you?", "document": "ds260_customer_form", "field": "child_3_immigrating", "aliases": []},
-        {"key": "child_3_immigrating_future", "label": "Child (3) Will join in future?", "document": "ds260_customer_form", "field": "child_3_immigrating_future", "aliases": []},
+        {"key": "child_3_immigrating_future", "label": "Child (3) Will join in future?", "document": "ds260_customer_form", "field": "child_3_immigrating_future", "aliases": [], "default": "Yes"},
         {"key": "child_4_full_name", "label": "Child (4) Full Name", "document": "birth_certificate_child", "field": "child_full_name"},
         {"key": "child_4_date_of_birth", "label": "Child (4) Date of Birth", "document": "birth_certificate_child", "field": "child_date_of_birth", "aliases": ["date_of_birth", "dob"]},
         {"key": "child_4_birth_city", "label": "Child (4) City of Birth", "document": "birth_certificate_child", "field": "child_birth_city", "aliases": ["birth_city"]},
@@ -255,7 +255,7 @@
         {"key": "child_4_lives_with", "label": "Child (4) Lives with you?", "document": "ds260_customer_form", "field": "child_4_lives_with", "aliases": []},
         {"key": "child_4_current_address", "label": "Child (4) Current address if not with you", "document": "ds260_customer_form", "field": "child_4_current_address", "aliases": []},
         {"key": "child_4_immigrating", "label": "Child (4) Immigrating with you?", "document": "ds260_customer_form", "field": "child_4_immigrating", "aliases": []},
-        {"key": "child_4_immigrating_future", "label": "Child (4) Will join in future?", "document": "ds260_customer_form", "field": "child_4_immigrating_future", "aliases": []}
+        {"key": "child_4_immigrating_future", "label": "Child (4) Will join in future?", "document": "ds260_customer_form", "field": "child_4_immigrating_future", "aliases": [], "default": "Yes"}
       ]
     },
     {
@@ -303,6 +303,92 @@
         {"key": "military_service_start", "label": "Service Start", "document": "military_discharge", "field": "service_from_date", "aliases": ["service_from"]},
         {"key": "military_service_end", "label": "Service End", "document": "military_discharge", "field": "service_to_date", "aliases": ["service_to"]},
         {"key": "military_document_number", "label": "Document Number", "document": "military_discharge", "field": "document_number"}
+      ]
+    },
+    {
+      "id": "section_us_travel",
+      "title": "DS-260 C — Previous U.S Travel / Lịch sử đến Mỹ",
+      "subtitle": "Nguồn: I-94 (đã đến Mỹ), VISA (đã được cấp visa) → DS-260 khách khai nếu không có file",
+      "fields": [
+        {"key": "been_in_us", "label": "Have you ever been in the U.S? / Đã từng đến Mỹ?", "document": "ds260_customer_form", "field": "been_in_us", "aliases": ["ever_been_in_us", "us_travel_used"]},
+        {"key": "us_travel_history", "label": "U.S travel details (date/duration — I-94) / Chi tiết (ngày đến, ở bao lâu)", "document": "ds260_customer_form", "field": "us_travel_history", "aliases": ["us_travel_detail", "i94_history"]},
+        {"key": "issued_us_visa", "label": "Have you ever been issued a U.S visa? / Đã từng được cấp visa Mỹ?", "document": "ds260_customer_form", "field": "issued_us_visa", "aliases": ["us_visa_issued_used", "ever_issued_us_visa"]},
+        {"key": "us_visa_history", "label": "U.S visa details (type/date/number — VISA) / Chi tiết visa (loại, ngày cấp, số visa)", "document": "ds260_customer_form", "field": "us_visa_history", "aliases": ["us_visa_detail"]},
+        {"key": "refused_us_visa", "label": "Refused U.S visa / admission / withdrawn? / Bị từ chối visa/nhập cảnh?", "document": "ds260_customer_form", "field": "refused_us_visa", "aliases": ["us_visa_refused_used", "ever_refused_us_visa"]},
+        {"key": "us_visa_refusal_history", "label": "Refusal details (visa type/date/reason) / Chi tiết (loại visa, ngày, lý do)", "document": "ds260_customer_form", "field": "us_visa_refusal_history", "aliases": ["us_visa_refusal_detail"]}
+      ]
+    },
+    {
+      "id": "section_additional_info",
+      "title": "DS-260 E.2 — Additional Information / Thông tin khác",
+      "subtitle": "Nguồn: DS-260 khách khai",
+      "fields": [
+        {"key": "other_languages_used", "label": "Use other languages besides native? / Dùng ngôn ngữ khác?", "document": "ds260_customer_form", "field": "other_languages_used", "aliases": ["uses_other_languages"]},
+        {"key": "other_languages", "label": "Languages list / Liệt kê ngôn ngữ", "document": "ds260_customer_form", "field": "other_languages", "aliases": ["languages_spoken", "other_languages_list"]},
+        {"key": "traveled_countries_5yr_used", "label": "Traveled to other countries in last 5 years? / Du lịch nước nào trong 5 năm qua?", "document": "ds260_customer_form", "field": "traveled_countries_5yr_used", "aliases": ["traveled_last_5_years_used", "countries_visited_used"]},
+        {"key": "traveled_countries_history", "label": "Countries visited (last 5 years) / Danh sách nước đã đến", "document": "ds260_customer_form", "field": "traveled_countries_history", "aliases": ["countries_visited_history", "travel_history_5_years"]}
+      ]
+    },
+    {
+      "id": "section_security",
+      "title": "DS-260 F — Security and Background / An ninh & lý lịch",
+      "subtitle": "Nguồn: DS-260 khách khai (Yes/No)",
+      "fields": [
+        {"key": "communicable_disease", "label": "Communicable disease (e.g. tuberculosis)? / Bệnh lây nhiễm (Lao)?", "document": "ds260_customer_form", "field": "communicable_disease"},
+        {"key": "has_vaccination_docs", "label": "Have vaccination documentation per U.S law? / Có giấy chích ngừa? (CHỌN YES)", "document": "ds260_customer_form", "field": "has_vaccination_docs", "default": "Yes"},
+        {"key": "mental_physical_disorder", "label": "Mental/physical disorder posing a threat? / Rối loạn tâm thần/thể chất gây nguy hiểm?", "document": "ds260_customer_form", "field": "mental_physical_disorder"},
+        {"key": "drug_abuser", "label": "Drug abuser or addict? / Nghiện ma túy?", "document": "ds260_customer_form", "field": "drug_abuser"},
+        {"key": "arrested_convicted", "label": "Ever arrested or convicted? / Từng bị bắt giữ/kết án?", "document": "ds260_customer_form", "field": "arrested_convicted"},
+        {"key": "violated_controlled_substance", "label": "Violated controlled-substance law? / Vi phạm luật chất cấm?", "document": "ds260_customer_form", "field": "violated_controlled_substance"},
+        {"key": "family_drug_trafficking_benefited", "label": "Family drug trafficking — benefited (5y)? / Hưởng lợi buôn ma túy của người thân (5 năm)?", "document": "ds260_customer_form", "field": "family_drug_trafficking_benefited"},
+        {"key": "prostitution", "label": "Prostitution / commercialized vice (10y)? / Mại dâm (10 năm)?", "document": "ds260_customer_form", "field": "prostitution"},
+        {"key": "money_laundering", "label": "Money laundering? / Rửa tiền?", "document": "ds260_customer_form", "field": "money_laundering"},
+        {"key": "human_trafficking_committed", "label": "Committed human trafficking? / Buôn người?", "document": "ds260_customer_form", "field": "human_trafficking_committed"},
+        {"key": "human_trafficking_aided", "label": "Aided a severe trafficking individual? / Giúp đỡ cá nhân buôn người?", "document": "ds260_customer_form", "field": "human_trafficking_aided"},
+        {"key": "family_human_trafficking_benefited", "label": "Family human trafficking — benefited (5y)? / Hưởng lợi buôn người của người thân (5 năm)?", "document": "ds260_customer_form", "field": "family_human_trafficking_benefited"},
+        {"key": "espionage_sabotage", "label": "Espionage / sabotage / export violations? / Gián điệp/phá hoại?", "document": "ds260_customer_form", "field": "espionage_sabotage"},
+        {"key": "terrorist_activities", "label": "Engaged / seek terrorist activities? / Hoạt động khủng bố?", "document": "ds260_customer_form", "field": "terrorist_activities"},
+        {"key": "terrorist_financial_support", "label": "Financial support to terrorists? / Hỗ trợ tài chính khủng bố?", "document": "ds260_customer_form", "field": "terrorist_financial_support"},
+        {"key": "terrorist_org_member", "label": "Member of terrorist organization? / Thành viên tổ chức khủng bố?", "document": "ds260_customer_form", "field": "terrorist_org_member"},
+        {"key": "family_terrorist_activity", "label": "Family terrorist activity (5y)? / Người thân hoạt động khủng bố (5 năm)?", "document": "ds260_customer_form", "field": "family_terrorist_activity"},
+        {"key": "genocide", "label": "Participated in genocide? / Tham gia diệt chủng?", "document": "ds260_customer_form", "field": "genocide"},
+        {"key": "torture", "label": "Participated in torture? / Tham gia tra tấn?", "document": "ds260_customer_form", "field": "torture"},
+        {"key": "extrajudicial_killings", "label": "Extrajudicial/political killings/violence? / Giết người phi pháp/chính trị?", "document": "ds260_customer_form", "field": "extrajudicial_killings"},
+        {"key": "child_soldiers", "label": "Recruitment/use of child soldiers? / Tuyển dụng binh lính trẻ em?", "document": "ds260_customer_form", "field": "child_soldiers"},
+        {"key": "religious_freedom_violations", "label": "Severe violations of religious freedom (as official)? / Vi phạm tự do tôn giáo?", "document": "ds260_customer_form", "field": "religious_freedom_violations"},
+        {"key": "communist_party_member", "label": "Member of Communist/totalitarian party? / Thành viên đảng cộng sản/độc tài?", "document": "ds260_customer_form", "field": "communist_party_member"},
+        {"key": "colombia_groups_support", "label": "Assisted FARC / ELN / AUC? / Hỗ trợ FARC/ELN/AUC?", "document": "ds260_customer_form", "field": "colombia_groups_support"},
+        {"key": "abuse_position_confiscate_property", "label": "Abuse of position to confiscate property? / Lạm quyền chiếm đoạt tài sản?", "document": "ds260_customer_form", "field": "abuse_position_confiscate_property"},
+        {"key": "family_abuse_position_property", "label": "Family abuse of position — property? / Người thân lạm quyền chiếm đoạt tài sản?", "document": "ds260_customer_form", "field": "family_abuse_position_property"},
+        {"key": "population_control_abortion", "label": "Population control forcing abortion/sterilization? / Ép phá thai/triệt sản?", "document": "ds260_customer_form", "field": "population_control_abortion"},
+        {"key": "chemical_weapons_disclosure", "label": "Disclosed/trafficked CWC confidential info? / Tiết lộ bí mật Công ước vũ khí hóa học?", "document": "ds260_customer_form", "field": "chemical_weapons_disclosure"},
+        {"key": "family_chemical_weapons_disclosure", "label": "Family CWC disclosure? / Người thân tiết lộ bí mật CWC?", "document": "ds260_customer_form", "field": "family_chemical_weapons_disclosure"},
+        {"key": "visa_fraud", "label": "Visa fraud / willful misrepresentation? / Gian lận visa?", "document": "ds260_customer_form", "field": "visa_fraud"},
+        {"key": "removed_deported", "label": "Removed or deported from any country? / Bị trục xuất khỏi nước nào?", "document": "ds260_customer_form", "field": "removed_deported"},
+        {"key": "withheld_custody_us_child", "label": "Withheld custody of a U.S child? / Giữ trái phép con là công dân Mỹ?", "document": "ds260_customer_form", "field": "withheld_custody_us_child"},
+        {"key": "assisted_withhold_custody", "label": "Assisted withholding custody of U.S child? / Giúp giữ trái phép con công dân Mỹ?", "document": "ds260_customer_form", "field": "assisted_withhold_custody"},
+        {"key": "voted_illegally", "label": "Voted in U.S in violation of law? / Bỏ phiếu ở Mỹ trái luật?", "document": "ds260_customer_form", "field": "voted_illegally"},
+        {"key": "renounced_citizenship_tax", "label": "Renounced U.S citizenship for tax? / Từ bỏ quốc tịch Mỹ để tránh thuế?", "document": "ds260_customer_form", "field": "renounced_citizenship_tax"},
+        {"key": "attended_public_school_f_status", "label": "Attended U.S public school on F status w/o reimbursing? / Học trường công bằng visa F không trả tiền?", "document": "ds260_customer_form", "field": "attended_public_school_f_status"},
+        {"key": "skilled_labor_no_certification", "label": "Skilled/unskilled labor not certified by Labor Sec? / Lao động chưa được Bộ Lao động chứng nhận?", "document": "ds260_customer_form", "field": "skilled_labor_no_certification"},
+        {"key": "foreign_medical_grad_no_exam", "label": "Foreign medical grad without NBME exam? / Tốt nghiệp y khoa nước ngoài chưa thi NBME?", "document": "ds260_customer_form", "field": "foreign_medical_grad_no_exam"},
+        {"key": "health_care_worker_no_cert", "label": "Health-care worker without certification? / Nhân viên y tế chưa có chứng nhận?", "document": "ds260_customer_form", "field": "health_care_worker_no_cert"},
+        {"key": "permanently_ineligible_citizenship", "label": "Permanently ineligible for U.S citizenship? / Vĩnh viễn không đủ điều kiện quốc tịch Mỹ?", "document": "ds260_customer_form", "field": "permanently_ineligible_citizenship"},
+        {"key": "departed_us_evade_military", "label": "Departed U.S to evade military service in wartime? / Rời Mỹ để né nghĩa vụ thời chiến?", "document": "ds260_customer_form", "field": "departed_us_evade_military"},
+        {"key": "polygamy", "label": "Coming to U.S to practice polygamy? / Đến Mỹ để đa thê?", "document": "ds260_customer_form", "field": "polygamy"},
+        {"key": "exchange_visitor_j_unfulfilled", "label": "Former J visitor — 2-year residence unfulfilled? / Visa J chưa đủ cư trú 2 năm?", "document": "ds260_customer_form", "field": "exchange_visitor_j_unfulfilled"},
+        {"key": "frivolous_asylum", "label": "Determined to have filed frivolous asylum? / Bị xác định nộp đơn tị nạn gian dối?", "document": "ds260_customer_form", "field": "frivolous_asylum"},
+        {"key": "public_charge", "label": "Likely to become a public charge? / Có xin trợ cấp chính phủ Mỹ? (CHỌN NO)", "document": "ds260_customer_form", "field": "public_charge", "default": "No"}
+      ]
+    },
+    {
+      "id": "section_ssn",
+      "title": "DS-260 G — Social Security Number / Số An Sinh Xã Hội",
+      "subtitle": "Nguồn: DS-260 khách khai",
+      "fields": [
+        {"key": "applied_ssn_before", "label": "Ever applied for a Social Security number? / Đã từng xin SSN?", "document": "ds260_customer_form", "field": "applied_ssn_before", "aliases": ["ssn_applied_used"]},
+        {"key": "want_ssn_issued", "label": "Want SSA to issue SSN and card? / Muốn cấp SSN và thẻ? (CHỌN YES)", "document": "ds260_customer_form", "field": "want_ssn_issued", "default": "Yes"},
+        {"key": "authorize_ssn_disclosure", "label": "Authorize SSN disclosure to DHS/SSA? / Cho phép chia sẻ SSN với Sở Di trú? (CHỌN YES)", "document": "ds260_customer_form", "field": "authorize_ssn_disclosure", "default": "Yes"}
       ]
     }
   ],

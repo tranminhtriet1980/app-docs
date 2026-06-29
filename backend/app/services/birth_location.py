@@ -45,6 +45,65 @@ def format_birth_city_display(text: str) -> str:
     return re.sub(r"\s+City$", "", val, flags=re.I).strip()
 
 
+# Thuật ngữ hành chính VN → Anh. Tiếng Anh đặt thuật ngữ SAU tên ("Xã Bình Hưng" → "Binh Hung Commune").
+# Khớp theo prefix accent-stripped; xếp cụm dài trước cụm ngắn ("thi xa" trước "xa").
+_ADDRESS_PREFIX_TERMS: list[tuple[str, str]] = [
+    ("thanh pho", "City"),
+    ("thi xa", "Town"),
+    ("thi tran", "Town"),
+    ("tx", "Town"),
+    ("tt", "Town"),
+    ("phuong", "Ward"),
+    ("quan", "District"),
+    ("huyen", "District"),
+    ("xa", "Commune"),
+    ("tinh", "Province"),
+    ("khu pho", "Quarter"),
+    ("ap", "Hamlet"),
+    ("thon", "Hamlet"),
+]
+
+# Viết tắt nguyên cụm → tên đầy đủ.
+_ADDRESS_WHOLE_MAP: dict[str, str] = {
+    "tphcm": "Ho Chi Minh",
+    "tp hcm": "Ho Chi Minh",
+    "tp.hcm": "Ho Chi Minh",
+    "tp ho chi minh": "Ho Chi Minh",
+}
+
+
+def _format_address_segment(seg: str) -> str:
+    ascii_seg = re.sub(r"\s+", " ", _strip_accents(seg.strip())).strip()
+    if not ascii_seg:
+        return ""
+    low = ascii_seg.lower()
+    if low in _ADDRESS_WHOLE_MAP:
+        return _ADDRESS_WHOLE_MAP[low]
+    m = re.match(r"(?i)^quoc\s*lo\s+(.+)$", ascii_seg)  # Quốc lộ 50 → Highway 50
+    if m:
+        return f"Highway {m.group(1).strip().title()}".strip()
+    for prefix, suffix in _ADDRESS_PREFIX_TERMS:
+        if low.startswith(prefix + " "):
+            rest = ascii_seg[len(prefix) :].strip()
+            if not rest:
+                break
+            # Đơn vị đánh số: "Quận 1" → "District 1"; có tên: "Xã Bình Hưng" → "Binh Hung Commune".
+            if re.fullmatch(r"\d+", rest):
+                return f"{suffix} {rest}"
+            return f"{rest.title()} {suffix}".strip()
+    return ascii_seg.title()
+
+
+def format_address_english(text: str) -> str:
+    """Địa chỉ VN → Anh: bỏ dấu, dịch thuật ngữ hành chính (Xã→Commune, Huyện/Quận→District,
+    Quốc lộ→Highway, Phường→Ward, Ấp/Thôn→Hamlet…) và đặt thuật ngữ sau tên theo văn phong Anh."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    parts = [_format_address_segment(s) for s in re.split(r"\s*,\s*", raw)]
+    return ", ".join(p for p in parts if p)
+
+
 def format_nationality_country(text: str) -> str:
     """
     Quốc tịch / Country of Origin → tên quốc gia chuẩn (vd. VIỆT NAM / VIETNAMESE → Vietnam).

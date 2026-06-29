@@ -22,6 +22,7 @@ from app.models.entities import (
     UserRole,
 )
 from app.schemas import (
+    AdminPasswordReset,
     ApplicantAdminOut,
     AuditLogOut,
     BackupInfoOut,
@@ -35,7 +36,7 @@ from app.schemas import (
 from app.services.audit import log_audit
 from app.services.auth import get_user_by_email, hash_password
 from app.services.export import delete_form_template
-from app.services.overview_stats import build_overview_extras
+from app.services.overview_stats import build_overview_extras, build_period_responsible_stats
 from app.services.backup import create_sqlite_backup, list_backups, restore_sqlite_backup
 from app.services.reporting import applicants_csv, load_applicants_for_export
 
@@ -110,11 +111,6 @@ async def dashboard_stats(
         )
     ) or 0
 
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    applicants_this_week = await db.scalar(
-        _apply(select(func.count()).select_from(Applicant).where(Applicant.created_at >= week_ago))
-    ) or 0
-
     status_rows = await db.execute(
         _apply(
             select(Applicant.status, func.count())
@@ -143,13 +139,17 @@ async def dashboard_stats(
 
     overview_uid = user.id if scope == "mine" else None
     overview = await build_overview_extras(db, user_id=overview_uid)
+    periods = await build_period_responsible_stats(db, user_id=overview_uid)
 
     return DashboardStatsOut(
         total_applicants=total_applicants,
         total_documents=total_documents,
         total_exports=total_exports,
         open_conflicts=open_conflicts,
-        applicants_this_week=applicants_this_week,
+        applicants_this_week=periods["applicants_this_week"],
+        applicants_this_month=periods["applicants_this_month"],
+        applicants_this_year=periods["applicants_this_year"],
+        by_responsible=periods["by_responsible"],
         by_status=by_status,
         total_users=total_users,
         trend_weekly=trend,
@@ -169,6 +169,8 @@ async def list_all_applicants(
     status_filter: ApplicantStatus | None = Query(None, alias="status"),
     search: str | None = Query(None, min_length=1),
     owner_id: uuid.UUID | None = None,
+    case_type: str | None = Query(None),
+    year: int | None = Query(None, ge=2000, le=2100),
 ):
     q = (
         select(Applicant)
@@ -180,6 +182,12 @@ async def list_all_applicants(
         q = q.where(Applicant.user_id == owner_id)
     if status_filter:
         q = q.where(Applicant.status == status_filter)
+    if case_type:
+        q = q.where(Applicant.case_type == case_type)
+    if year:
+        start = datetime(year, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        q = q.where(Applicant.created_at >= start, Applicant.created_at < end)
     if search:
         q = q.where(Applicant.display_name.ilike(f"%{search}%"))
     result = await db.execute(q)
@@ -301,6 +309,30 @@ async def update_user(
         created_at=target.created_at,
         applicant_count=count,
     )
+
+
+@router.post("/users/{user_id}/reset-password", response_model=MessageOut)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    body: AdminPasswordReset,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(require_admin)],
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    target.hashed_password = hash_password(body.new_password)
+    await log_audit(
+        db,
+        user=current,
+        action="user.password_reset",
+        entity_type="user",
+        entity_id=target.id,
+        payload={"email": target.email},
+    )
+    await db.commit()
+    return MessageOut(message=f"Đã đổi mật khẩu cho {target.email}")
 
 
 @router.delete("/users/{user_id}", response_model=MessageOut)

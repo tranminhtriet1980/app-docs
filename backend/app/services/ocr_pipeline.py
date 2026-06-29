@@ -16,7 +16,7 @@ from app.services.document_registry import (
 )
 from app.services.ds260_mapping import get_extract_keys_for_doc_type
 from app.services.field_mapping import DOCUMENT_TYPES
-from app.services.llm_client import get_openai_client, is_openai_configured
+from app.services.llm_client import get_ocr_client, get_openai_client, is_openai_configured
 from app.services.llm_usage import UsageContext, chat_completion
 
 QUOTA_WARNING = (
@@ -40,7 +40,12 @@ Bước 1: Xác định loại tài liệu từ nội dung (ảnh/PDF). Các lo�
 
 Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, address_document, ds260_customer_form, photo, other
 
-ds260_customer_form = bản DS-260 khách tự khai (mục 3–5: địa chỉ, liên lạc, mạng xã hội).
+ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền tay/đánh máy). Gồm cả:
+(a) bản CŨ ImmiPath nhiều mục (cá nhân, hộ chiếu, ĐỊA CHỈ, LIÊN LẠC, MXH, cha/mẹ/phối ngẫu/con,
+    công việc/học vấn…) — thường có nhãn tiếng Việt trong ngoặc và khối "From/To" cho địa chỉ;
+(b) bản MỚI trùng mẫu DS-260 export.
+Chọn loại này cho MỌI worksheet khách tự khai, kể cả khi có nhiều mục — KHÔNG hạ xuống "other" hay
+"address_document". address_document chỉ dành cho hoá đơn/hợp đồng thuê/giấy xác nhận cư trú riêng lẻ.
 
 Trả về ONLY valid JSON:
 {"document_type": "<code>", "confidence": 0.0-1.0, "reason": "brief"}"""
@@ -99,7 +104,8 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
 
         doc = fitz.open(str(path))
         for i in range(min(len(doc), max_pages)):
-            out = path.parent / f"{path.stem}_page{i + 1}.png"
+            # DPI trong tên cache → đổi DPI sẽ render lại, không dùng nhầm ảnh độ nét cũ.
+            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}.png"
             if not out.exists() or out.stat().st_mtime < path.stat().st_mtime:
                 pix = doc[i].get_pixmap(dpi=dpi)
                 pix.save(str(out))
@@ -115,7 +121,7 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
 
         rendered = convert_from_path(str(path), first_page=1, last_page=max_pages, dpi=dpi)
         for i, img in enumerate(rendered):
-            out = path.parent / f"{path.stem}_page{i + 1}.png"
+            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}.png"
             img.save(str(out), "PNG")
             images.append(out)
     except Exception:
@@ -162,7 +168,37 @@ def _pdf_text_excerpt(path: Path, max_chars: int = 12000) -> str:
     return merged
 
 
-def _resolve_document_images(file_path: Path, max_pages: int = 3) -> tuple[list[Path], str]:
+# DS-260 worksheet (.docx) is long (full form ~60k chars) — cap generously so later sections
+# (cha/mẹ, công việc/học vấn, du lịch, quân sự) không bị cắt khỏi prompt trích xuất.
+_DOCX_MAX_CHARS = 80000
+
+
+def _docx_text_excerpt(path: Path, max_chars: int = _DOCX_MAX_CHARS) -> str:
+    """Extract text from a Word worksheet — paragraphs + table cells (DS-260 form is a label/value table)."""
+    try:
+        from docx import Document as _DocxDocument
+    except ImportError:
+        return ""
+    try:
+        doc = _DocxDocument(str(path))
+    except Exception:
+        return ""
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        t = (para.text or "").strip()
+        if t:
+            parts.append(t)
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [(c.text or "").strip() for c in row.cells]
+            line = " | ".join(c for c in cells if c)
+            if line:
+                parts.append(line)
+    merged = "\n".join(parts).strip()
+    return merged[:max_chars]
+
+
+def _resolve_document_images(file_path: Path, max_pages: int = 3, dpi: int = 180) -> tuple[list[Path], str]:
     """
     Return image paths suitable for vision API and a hint about source.
     hint: direct_image | pdf_pages | pdf_text_only | filename_only
@@ -171,7 +207,7 @@ def _resolve_document_images(file_path: Path, max_pages: int = 3) -> tuple[list[
     if suffix in IMAGE_SUFFIXES:
         return [file_path], "direct_image"
     if suffix == ".pdf":
-        pages = _pdf_pages_to_images(file_path, max_pages=max_pages)
+        pages = _pdf_pages_to_images(file_path, max_pages=max_pages, dpi=dpi)
         if pages:
             return pages, "pdf_pages"
         text = _pdf_text_excerpt(file_path)
@@ -201,6 +237,10 @@ def _resolve_document_images(file_path: Path, max_pages: int = 3) -> tuple[list[
                 return [], "plain_text"
         except Exception:
             pass
+        return [], "filename_only"
+    if suffix == ".docx":
+        if _docx_text_excerpt(file_path):
+            return [], "plain_text"
         return [], "filename_only"
     return [], "filename_only"
 
@@ -475,6 +515,7 @@ def _build_llm_user_content(
         )
 
     if hint == "plain_text":
+        cap = 12000
         try:
             if file_path.suffix.lower() in {".xlsx", ".xls"}:
                 from openpyxl import load_workbook
@@ -486,11 +527,14 @@ def _build_llm_user_content(
                         cells.extend(str(c) for c in row if c is not None)
                 wb.close()
                 text = "\n".join(cells)
+            elif file_path.suffix.lower() == ".docx":
+                text = _docx_text_excerpt(file_path)
+                cap = _DOCX_MAX_CHARS
             else:
                 text = file_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             text = ""
-        return f"{task} Filename: {filename}. Document text:\n\n{text[:12000]}"
+        return f"{task} Filename: {filename}. Document text:\n\n{text[:cap]}"
 
     return f"{task} Filename: {filename}. No image available — infer document type from filename only."
 
@@ -516,6 +560,8 @@ async def _openai_classify(
         operation="document.classify",
         context=ctx,
         messages=messages,
+        client=get_ocr_client(),
+        model=settings.ocr_model,
         response_format={"type": "json_object"},
         temperature=0,
     )
@@ -549,6 +595,16 @@ Extract ALL DS-260 sections visible on the document, including:
 
 ADDRESS (section 3): current_address, address_city, address_state, postal_code, address_country,
 address_from_date, other_addresses_since_16 (Yes/No), other_addresses_history (prior addresses with dates).
+The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietnamese + English), e.g.:
+  (Street)(Đường) ... (City)(Thành phố) ... (State/Province)(Tỉnh/Bang) ...
+  (Country)(Quốc gia) ... (Postal code)(Mã bưu điện) ...
+  From (Từ tháng/năm)(MM/YYYY) ... To (Đến tháng/năm)(MM/YYYY) ...
+Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
+address → current_address (Street), address_city (City), address_state (State/Province),
+address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
+block on its own line in other_addresses_history as "Street, City, State, Country (MM/YYYY–MM/YYYY)"
+and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
+when choosing the current block.
 
 CONTACT (section 4): primary_phone_number, secondary_phone_number, work_phone_number,
 other_phones_used (Yes/No), other_phones_history,
@@ -556,6 +612,14 @@ email_address, other_emails_used (Yes/No), other_emails_history.
 
 SOCIAL MEDIA (section 5): social_media_platform, social_media_identifier,
 other_social_media_used (Yes/No), other_social_history.
+
+RESIDENCE-HISTORY rules (the form's "Lưu ý") — these add ADDRESS entries to
+other_addresses_history, they are NOT child/birth data:
+  - time spent studying or working in another locality → the real address there;
+  - (male) military service → the address(es) while serving;
+  - (female) gave birth in another locality → that locality's address.
+Capture each such period as its own line in other_addresses_history
+("Street, City, State, Country (MM/YYYY–MM/YYYY)") and set other_addresses_since_16 = Yes.
 
 Use Yes/No for yes-no questions. Dates as YYYY-MM-DD or dd/mm/yyyy as printed.
 """
@@ -656,6 +720,16 @@ service_from_date, service_to_date, document_number.
 DS260_CUSTOMER_FORM_EXTRACT_HINT = """
 This is a FULL CUSTOMER DS-260 WORKSHEET (ImmiPath form — all sections). Extract EVERY filled field.
 
+This is often a SCANNED, HANDWRITTEN form — read each page carefully, including later pages
+(security questions, Social Security). Read the customer's answer written after each label.
+Name handling — read EXACTLY as written, do not guess or merge:
+  - "Surnames (Họ)" = family name ONLY (e.g. LE, HUYNH, LAM); "Given Names (Tên)" = the rest
+    (e.g. VAN TOT, THI KIM PHUC, THI MUOI). Keep father/mother/spouse surname vs given separate.
+  - NEVER put the form header/title into a name field: ignore "DS-260", "DS 260", "DS260",
+    "KHACH KHAI", "BANG CAU HOI" — these are NOT the applicant's name.
+Free-text answers (10-year job history, military service, prior addresses, travel) — transcribe the
+WHOLE text verbatim, do not shorten to "Yes". If a long answer is hard to read, capture what is legible.
+
 PERSONAL (section 1): applicant_name, applicant_name_native, other_name_used, other_names,
 gender/sex, current_marital_status, date_of_birth, birth_city, birth_state, birth_country,
 nationality, id_card_number.
@@ -667,6 +741,20 @@ other_nationality_used, other_nationality_history.
 ADDRESS (section 3): current_address, address_city/current_city, address_state/current_state,
 postal_code, address_country/current_country, address_from_date,
 other_addresses_since_16 (Yes/No), other_addresses_history.
+The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietnamese + English), e.g.:
+  (Street)(Đường) ... (City)(Thành phố) ... (State/Province)(Tỉnh/Bang) ...
+  (Country)(Quốc gia) ... (Postal code)(Mã bưu điện) ...
+  From (Từ tháng/năm)(MM/YYYY) ... To (Đến tháng/năm)(MM/YYYY) ...
+Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
+address → current_address (Street), address_city (City), address_state (State/Province),
+address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
+block on its own line in other_addresses_history as "Street, City, State, Country (MM/YYYY–MM/YYYY)"
+and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
+when choosing the current block.
+RESIDENCE-HISTORY rules (the form's "Lưu ý") add ADDRESS entries to other_addresses_history — they
+are NOT child/birth data: time studying/working in another locality → that real address; (male)
+military service → the address while serving; (female) gave birth in another locality → that
+locality's address. List each as its own line and set other_addresses_since_16 = Yes.
 
 CONTACT (section 4): primary_phone_number, secondary_phone_number, work_phone_number,
 other_phones_used (Yes/No), other_phones_history,
@@ -707,9 +795,10 @@ prior_jobs_history = FULL narrative of past 10 years employment exactly as writt
   (e.g. "From 01 January 2009 to 31 December 2023 / Occupation: Manager / Company name: ... /
    Company address: ... / Supervisor name: ... / Supervisor phone number: ...").
 EDUCATION (cấp 2/cấp 3/đại học) — for each level capture name, address and period "from ... to ...":
-middle_school_name (Cấp 2 / Secondary), middle_school_address, middle_school_period,
-high_school_name (Cấp 3 / Highschool), high_school_address, high_school_period,
+middle_school_name (Cấp 2 = Trung học cơ sở / THCS / Secondary), middle_school_address, middle_school_period,
+high_school_name (Cấp 3 = Trung học phổ thông / THPT / Highschool), high_school_address, high_school_period,
 college_name (Cao đẳng/Đại học), college_address, college_major, college_period.
+Map by level: "Trung học cơ sở"/"THCS" → middle_school_*, "Trung học phổ thông"/"THPT" → high_school_*.
 
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
@@ -725,8 +814,9 @@ WORK: primary_occupation, occupation_other_specify, present_employer, employer_n
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
 job_title, employment_start_date, prior_jobs_history.
 
-EDUCATION: middle_school_name, middle_school_address, middle_school_period,
-high_school_name, high_school_address, high_school_period,
+EDUCATION: middle_school_name (Cấp 2 / Trung học cơ sở / THCS),
+middle_school_address, middle_school_period,
+high_school_name (Cấp 3 / Trung học phổ thông / THPT), high_school_address, high_school_period,
 college_name, college_address, college_major, college_period.
 
 Yes/No for yes-no questions. Dates as printed.
@@ -779,6 +869,9 @@ async def _openai_extract(
         doc_type=doc_type,
         expected_keys=", ".join(expected_keys) or "any relevant fields for this document type",
     ) + extra
+    # DS-260 worksheet khách khai thường là bản SCAN/VIẾT TAY nhiều trang (≈18 trang) →
+    # đọc hết trang + render DPI cao hơn cho rõ nét chữ tay.
+    is_ds260_ws = doc_type == "ds260_customer_form"
     image_paths, hint = _resolve_document_images(
         file_path,
         max_pages=3
@@ -786,8 +879,9 @@ async def _openai_extract(
         else (
             4
             if doc_type in {"birth_certificate", "marriage_certificate"}
-            else (12 if doc_type == "ds260_customer_form" else 2)
+            else (20 if is_ds260_ws else 2)
         ),
+        dpi=300 if is_ds260_ws else 180,
     )
     content = _build_llm_user_content(
         filename=filename,
@@ -812,6 +906,8 @@ async def _openai_extract(
             doc_type=doc_type,
         ),
         messages=messages,
+        client=get_ocr_client(),
+        model=settings.ocr_model,
         response_format={"type": "json_object"},
         temperature=0,
     )

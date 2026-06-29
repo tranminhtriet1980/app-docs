@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-change-in-production"
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1"
+    # Base URL cho client OpenAI-compatible (vd. OpenRouter, Gemini OpenAI-compat) — trống = OpenAI.
+    openai_base_url: str = ""
+    # Model riêng cho OCR tài liệu (đọc ảnh/chữ tay). Trống → dùng openai_model.
+    # Đặt model vision mạnh hơn cho worksheet viết tay, vd. "gpt-4o" hoặc (qua OCR base_url) "google/gemini-2.5-pro".
+    vision_model: str = ""
+    # Client OCR riêng — cho phép chạy OCR ở provider/model khác chat. Trống → kế thừa openai_*.
+    ocr_api_key: str = ""
+    ocr_base_url: str = ""
     upload_dir: str = "uploads"
     export_dir: str = "exports"
     templates_dir: str = "templates/forms"
@@ -71,6 +79,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def ocr_model(self) -> str:
+        """Model dùng cho OCR tài liệu — vision_model nếu đặt, ngược lại openai_model."""
+        return (self.vision_model or "").strip() or self.openai_model
 
     @property
     def resolved_database_url(self) -> str:

@@ -91,6 +91,10 @@ class UserAdminUpdate(BaseModel):
     max_applicants_per_month: int | None = None
 
 
+class AdminPasswordReset(BaseModel):
+    new_password: str = Field(min_length=6)
+
+
 # Applicant
 class FamilyMemberCreate(BaseModel):
     role: Literal["principal", "spouse", "child", "grandchild", "sibling"] = "principal"
@@ -177,6 +181,9 @@ class DashboardStatsOut(BaseModel):
     total_exports: int
     open_conflicts: int
     applicants_this_week: int
+    applicants_this_month: int = 0
+    applicants_this_year: int = 0
+    by_responsible: list[dict] = []
     by_status: dict[str, int]
     total_users: int | None = None
     trend_weekly: list[dict[str, int | str]] | None = None
@@ -397,6 +404,23 @@ class AiChatRequest(BaseModel):
 
 class AiChatOut(BaseModel):
     answer: str
+    model: str | None = None
+
+
+class AiAssistantRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=2000)
+
+
+class AiAssistantSource(BaseModel):
+    id: str
+    name: str
+    status: str | None = None
+
+
+class AiAssistantOut(BaseModel):
+    answer: str
+    sources: list[AiAssistantSource] = []
+    source_type: str = "openai"  # data | openai | none
     model: str | None = None
 
 

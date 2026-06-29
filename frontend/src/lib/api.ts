@@ -60,7 +60,7 @@ async function request<T>(
     const detail = err.detail;
     let message = typeof detail === "string" ? detail : Array.isArray(detail) ? detail[0]?.msg : "Request failed";
     if (res.status === 413) {
-      message = "File quá lớn (tối đa 20MB/file). Thử file nhỏ hơn hoặc liên hệ admin.";
+      message = "File quá lớn (tối đa 50MB/file). Thử file nhỏ hơn hoặc liên hệ admin.";
     }
     throw new Error(message || "Request failed");
   }
@@ -118,10 +118,12 @@ export const api = {
 
   getAdminStats: () => request<DashboardStats>("/api/v1/admin/stats"),
 
-  listApplicants: (params?: { status?: string; search?: string }) => {
+  listApplicants: (params?: { status?: string; search?: string; case_type?: string; year?: number }) => {
     const q = new URLSearchParams();
     if (params?.status) q.set("status", params.status);
     if (params?.search) q.set("search", params.search);
+    if (params?.case_type) q.set("case_type", params.case_type);
+    if (params?.year) q.set("year", String(params.year));
     const qs = q.toString();
     return request<Applicant[]>(`/api/v1/applicants${qs ? `?${qs}` : ""}`);
   },
@@ -201,10 +203,19 @@ export const api = {
       body: JSON.stringify({ assigned_staff_id }),
     }),
 
-  listAdminApplicants: (params?: { status?: string; search?: string }) => {
+  listAdminApplicants: (params?: {
+    status?: string;
+    search?: string;
+    case_type?: string;
+    year?: number;
+    owner_id?: string;
+  }) => {
     const q = new URLSearchParams();
     if (params?.status) q.set("status", params.status);
     if (params?.search) q.set("search", params.search);
+    if (params?.case_type) q.set("case_type", params.case_type);
+    if (params?.year) q.set("year", String(params.year));
+    if (params?.owner_id) q.set("owner_id", params.owner_id);
     const qs = q.toString();
     return request<ApplicantAdmin[]>(`/api/v1/admin/applicants${qs ? `?${qs}` : ""}`);
   },
@@ -229,6 +240,12 @@ export const api = {
     request<UserAdmin>(`/api/v1/admin/users/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+
+  resetUserPassword: (id: string, new_password: string) =>
+    request<{ message: string }>(`/api/v1/admin/users/${id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password }),
     }),
 
   createApplicant: (data: {
@@ -263,6 +280,17 @@ export const api = {
 
   aiChat: (applicantId: string, question: string) =>
     request<{ answer: string; model?: string }>(`/api/v1/applicants/${applicantId}/ai/chat`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+
+  askAssistant: (question: string) =>
+    request<{
+      answer: string;
+      sources: { id: string; name: string; status?: string }[];
+      source_type: "data" | "openai" | "none";
+      model?: string;
+    }>("/api/v1/ai/assistant", {
       method: "POST",
       body: JSON.stringify({ question }),
     }),
@@ -559,6 +587,9 @@ export type DashboardStats = {
   total_exports: number;
   open_conflicts: number;
   applicants_this_week: number;
+  applicants_this_month?: number;
+  applicants_this_year?: number;
+  by_responsible?: { name: string; email: string; week: number; month: number; year: number }[];
   by_status: Record<string, number>;
   total_users?: number | null;
   trend_weekly?: { week: string; count: number }[];
