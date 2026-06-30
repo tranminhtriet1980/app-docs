@@ -69,7 +69,25 @@ def _coerce(value):
     return value
 
 
-async def migrate(sqlite_path: Path, pg_url: str) -> None:
+def _rewrite_upload_path(raw: str | None, upload_root: str) -> str | None:
+    """Đổi đường dẫn upload (tuyệt đối Windows) sang đường dẫn trong container.
+
+    DB local lưu kiểu 'D:\\app docs\\backend\\uploads\\<applicant>\\<doc>\\original.pdf'.
+    Trong container Linux thư mục uploads nằm ở '/app/uploads'. Lấy phần sau 'uploads'
+    rồi ghép lại với upload_root để file đọc được sau khi copy thư mục uploads vào volume.
+    """
+    if not raw:
+        return raw
+    norm = raw.replace("\\", "/")
+    marker = "/uploads/"
+    idx = norm.lower().rfind(marker)
+    if idx == -1:
+        return raw  # không nhận ra cấu trúc → giữ nguyên
+    tail = norm[idx + len(marker):]
+    return f"{upload_root.rstrip('/')}/{tail}"
+
+
+async def migrate(sqlite_path: Path, pg_url: str, upload_root: str = "/app/uploads") -> None:
     if not sqlite_path.exists():
         raise SystemExit(f"Không thấy file SQLite: {sqlite_path}")
 
@@ -97,6 +115,9 @@ async def migrate(sqlite_path: Path, pg_url: str) -> None:
                 print(f"  {table.name}: 0")
                 continue
             payload = [{k: _coerce(v) for k, v in row.items()} for row in rows]
+            if table.name == "documents":
+                for r in payload:
+                    r["file_path"] = _rewrite_upload_path(r.get("file_path"), upload_root)
             async with dst_engine.begin() as conn:
                 await conn.execute(table.insert(), payload)
             total += len(payload)
@@ -119,8 +140,13 @@ def main() -> None:
         default=None,
         help="Chuỗi kết nối Postgres (postgresql+asyncpg://...). Bỏ trống = lấy từ POSTGRES_*",
     )
+    parser.add_argument(
+        "--upload-root",
+        default="/app/uploads",
+        help="Thư mục uploads trong container để viết lại documents.file_path (mặc định /app/uploads)",
+    )
     args = parser.parse_args()
-    asyncio.run(migrate(Path(args.sqlite), _resolve_pg_url(args.pg_url)))
+    asyncio.run(migrate(Path(args.sqlite), _resolve_pg_url(args.pg_url), args.upload_root))
 
 
 if __name__ == "__main__":
