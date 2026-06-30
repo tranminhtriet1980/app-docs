@@ -107,22 +107,59 @@ async def migrate(sqlite_path: Path, pg_url: str, upload_root: str = "/app/uploa
                 await conn.execute(table.delete())
 
         # 3) Copy từng bảng theo thứ tự an toàn khóa ngoại.
+        # SQLite không ép khóa ngoại → có thể tồn tại bản ghi "mồ côi" (trỏ tới
+        # applicant/document đã bị xóa). Postgres ép chặt nên ta phải dọn trước:
+        # FK rỗng-được → set NULL; FK bắt buộc → bỏ dòng. pk_valid dựng dần theo
+        # thứ tự cha-trước-con nên con luôn soi được khóa cha thực sự đã chèn.
+        pk_valid: dict[str, set] = {}
         total = 0
+        skipped = 0
         for table in tables:
             async with src_engine.connect() as src:
                 rows = (await src.execute(table.select())).mappings().all()
-            if not rows:
-                print(f"  {table.name}: 0")
-                continue
             payload = [{k: _coerce(v) for k, v in row.items()} for row in rows]
             if table.name == "documents":
                 for r in payload:
                     r["file_path"] = _rewrite_upload_path(r.get("file_path"), upload_root)
-            async with dst_engine.begin() as conn:
-                await conn.execute(table.insert(), payload)
-            total += len(payload)
-            print(f"  {table.name}: {len(payload)}")
-        print(f"Xong. Đã copy {total} dòng sang PostgreSQL.")
+
+            fks = list(table.foreign_keys)
+            cleaned: list[dict] = []
+            for r in payload:
+                drop = False
+                for fk in fks:
+                    local = fk.parent.name
+                    ref_table = fk.column.table.name
+                    val = r.get(local)
+                    if val is None:
+                        continue
+                    valid = pk_valid.get(ref_table)  # bảng cha đã xử lý trước đó
+                    if valid is not None and val not in valid:
+                        if fk.parent.nullable:
+                            r[local] = None
+                        else:
+                            drop = True
+                            break
+                if drop:
+                    skipped += 1
+                    continue
+                cleaned.append(r)
+
+            pk_cols = list(table.primary_key.columns)
+            if len(pk_cols) == 1:
+                pk = pk_cols[0].name
+                pk_valid[table.name] = {r[pk] for r in cleaned}
+
+            if cleaned:
+                async with dst_engine.begin() as conn:
+                    await conn.execute(table.insert(), cleaned)
+                total += len(cleaned)
+            dropped = len(payload) - len(cleaned)
+            note = f"  (bỏ {dropped} dòng mồ côi)" if dropped else ""
+            print(f"  {table.name}: {len(cleaned)}{note}")
+        msg = f"Xong. Đã copy {total} dòng sang PostgreSQL."
+        if skipped:
+            msg += f" Bỏ {skipped} dòng tham chiếu mồ côi."
+        print(msg)
     finally:
         await src_engine.dispose()
         await dst_engine.dispose()
