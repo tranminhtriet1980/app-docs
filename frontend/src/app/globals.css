@@ -19,6 +19,37 @@ body {
   min-height: 100vh;
 }
 
+/* Vòng viền gradient XOAY quanh nút AI Assistant — animate góc conic-gradient (không xoay
+   cả phần tử) nên viền luôn khít pill. @property cho animation mượt; trình duyệt không hỗ trợ
+   sẽ hiển thị viền gradient tĩnh (vẫn đẹp). */
+@property --immi-ring-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes immi-ring-spin {
+  to {
+    --immi-ring-angle: 360deg;
+  }
+}
+.immi-ai-ring {
+  background: conic-gradient(
+    from var(--immi-ring-angle),
+    #fbbf24,
+    #f43f5e,
+    #b91c1c,
+    #f59e0b,
+    #fde68a,
+    #fbbf24
+  );
+  animation: immi-ring-spin 3.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .immi-ai-ring {
+    animation: none;
+  }
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition;

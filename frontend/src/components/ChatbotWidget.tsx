@@ -99,20 +99,34 @@ export default function ChatbotWidget() {
 
   return (
     <>
-      {/* Nút mở — viên thuốc gradient, có chấm trạng thái */}
+      {/* Nút mở — viên thuốc gradient, có chấm trạng thái + vòng viền gradient xoay */}
       {!open && (
-        <button
-          type="button"
-          aria-label="AI Assistant"
-          onClick={() => setOpen(true)}
-          className="group fixed bottom-5 right-5 z-50 flex items-center gap-2.5 rounded-full bg-gradient-to-br from-brand-600 to-brand-700 px-5 py-3.5 font-medium text-white shadow-xl ring-4 ring-brand-600/15 transition hover:scale-[1.04] hover:shadow-2xl active:scale-95"
-        >
-          <span className="relative flex h-6 w-6 items-center justify-center">
-            <BotIcon className="h-6 w-6" />
-            <span className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700" />
-          </span>
-          <span className="text-sm">AI Assistant</span>
-        </button>
+        <div className="group fixed bottom-5 right-5 z-50">
+          <div className="relative">
+            {/* Glow mờ xoay phía sau — sáng lên khi hover */}
+            <span
+              aria-hidden
+              className="immi-ai-ring pointer-events-none absolute -inset-1 rounded-full opacity-60 blur-md transition duration-300 group-hover:opacity-100"
+            />
+            {/* Vòng viền sắc nét (2.5px) xoay quanh nút */}
+            <span
+              aria-hidden
+              className="immi-ai-ring pointer-events-none absolute -inset-[2.5px] rounded-full"
+            />
+            <button
+              type="button"
+              aria-label="AI Assistant"
+              onClick={() => setOpen(true)}
+              className="relative flex items-center gap-2.5 rounded-full bg-gradient-to-br from-brand-600 to-brand-700 px-5 py-3.5 font-medium text-white shadow-xl transition hover:scale-[1.04] hover:shadow-2xl active:scale-95"
+            >
+              <span className="relative flex h-6 w-6 items-center justify-center">
+                <BotIcon className="h-6 w-6" />
+                <span className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700" />
+              </span>
+              <span className="text-sm">AI Assistant</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {open && (
