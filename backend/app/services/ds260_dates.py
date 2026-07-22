@@ -18,7 +18,14 @@ _FULL_DATE_TEXT_FORMATS = (
 
 
 def is_date_field_key(key: str) -> bool:
-    return "date" in (key or "").lower() or (key or "").endswith("_dob")
+    k = (key or "").lower()
+    # 'service_start'/'service_end' là ngày quân sự nhưng tên không chứa 'date'.
+    return "date" in k or k.endswith("_dob") or k.endswith("service_start") or k.endswith("service_end")
+
+
+def is_date_range_field_key(key: str) -> bool:
+    """Field chứa KHOẢNG thời gian 'A - B' (vd. thời gian học edu_*_period)."""
+    return (key or "").lower().endswith("_period")
 
 
 def parse_full_date(val: str) -> date | None:
@@ -126,17 +133,54 @@ def format_ds260_display_date(val: str) -> str:
     return partial or ""
 
 
+# Dấu ngăn cách KHOẢNG thời gian: en/em-dash, 'to'/'đến', mũi tên — HOẶC dấu '-' CÓ khoảng trắng
+# hai bên. Bắt buộc có space quanh '-' để KHÔNG cắt nhầm '01-01-2010' (dấu '-' trong ngày dd-mm-yyyy).
+_RANGE_SEP_RE = re.compile(r"\s+(?:–|—|->|=>|to|đến|den)\s+|\s+-\s+", re.IGNORECASE)
+_OPEN_ENDED = {"now", "present", "current", "nay", "hien tai", "hiện tại", "den nay", "đến nay"}
+
+
+def _format_range_endpoint(token: str) -> str:
+    t = (token or "").strip()
+    if not t:
+        return ""
+    if t.lower() in _OPEN_ENDED:
+        return "Present"
+    return format_ds260_display_date(t) or t
+
+
+def format_ds260_display_date_range(val: str) -> str:
+    """Chuẩn hoá khoảng thời gian → 'DD Mon YYYY - DD Mon YYYY' (mỗi đầu theo chuẩn ngày DS-260).
+
+    'Aug 15, 2004 - Jun 01, 2008' → '15 Aug 2004 - 01 Jun 2008'; giữ 'Present' cho đầu mở
+    (Now/nay). Không tách được (không phải khoảng) → thử format như 1 ngày, không được thì giữ nguyên.
+    """
+    v = (val or "").strip()
+    if not v:
+        return ""
+    v = re.sub(r"^\s*(?:from|từ|tu)\s+", "", v, flags=re.IGNORECASE)
+    parts = _RANGE_SEP_RE.split(v, maxsplit=1)
+    if len(parts) != 2:
+        return format_ds260_display_date(v) or v
+    return f"{_format_range_endpoint(parts[0])} - {_format_range_endpoint(parts[1])}"
+
+
 def format_sections_date_display(sections_out: list) -> None:
-    """Chuẩn hóa mọi trường ngày trên form DS-260 (Review + export)."""
+    """Chuẩn hóa mọi trường ngày trên form DS-260 (Review + export) về 'DD Mon YYYY'.
+
+    Gồm cả field KHOẢNG thời gian ('_period': thời gian học) → 'DD Mon YYYY - DD Mon YYYY'.
+    """
     for sec in sections_out:
         for field in sec.get("fields", []):
             key = field.get("key", "")
             val = (field.get("value") or "").strip()
-            if not val or not is_date_field_key(key):
+            if not val:
                 continue
-            formatted = format_ds260_display_date(val)
-            if formatted:
-                field["value"] = formatted
+            if is_date_range_field_key(key):
+                field["value"] = format_ds260_display_date_range(val)
+            elif is_date_field_key(key):
+                formatted = format_ds260_display_date(val)
+                if formatted:
+                    field["value"] = formatted
 
 
 def partial_date_warning_message(field_label: str, raw_val: str, display_val: str) -> str:

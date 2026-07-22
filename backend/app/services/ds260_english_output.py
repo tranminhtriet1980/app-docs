@@ -183,7 +183,15 @@ def format_ds260_field_value(key: str, value: str) -> str:
     v = (value or "").strip()
     if not v or key in _SKIP_KEYS:
         return v
-    if "date" in key.lower() or key.endswith("_dob") or key.endswith("_death_year"):
+    # Ngày & khoảng thời gian đã được chuẩn hoá ở format_sections_date_display → GIỮ nguyên,
+    # không title-case lại (tránh làm hỏng '15 Aug 2004 - 01 Jun 2008').
+    from app.services.ds260_dates import is_date_field_key, is_date_range_field_key
+
+    if (
+        is_date_field_key(key)
+        or is_date_range_field_key(key)
+        or key.endswith("_death_year")
+    ):
         return v
 
     if key.endswith("_native"):
