@@ -58,9 +58,12 @@ def parse_full_date(val: str) -> date | None:
     return None
 
 
+_MONTHS_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
 def _month_name(month: int) -> str:
-    """Tên tháng đầy đủ tiếng Anh (vd. November) — theo mẫu DS-260 điền tay."""
-    return date(2000, month, 1).strftime("%B")
+    """Tháng viết tắt tiếng Anh (vd. Mar) — thống nhất định dạng ngày DS-260 'DD Mon YYYY' (14 Mar 1983)."""
+    return _MONTHS_ABBR[month] if 1 <= month <= 12 else ""
 
 
 def format_partial_ds260_date(val: str) -> str | None:

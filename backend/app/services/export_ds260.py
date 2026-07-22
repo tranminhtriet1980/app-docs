@@ -19,11 +19,14 @@ from app.services.ds260_dates import format_ds260_display_date, is_date_field_ke
 from app.services.ds260_validate import flatten_ds260_values, validate_ds260
 from app.services.postal_code import derive_postal_code_from_location
 from app.services.birth_location import (
+    canonical_vn_city,
+    find_vn_locality,
     format_address_english,
     format_birth_city_display,
     format_nationality_country,
     format_person_name_ascii,
     format_place_name_title,
+    normalize_location,
 )
 
 DS260_TEMPLATE_CODE = "ds260_final"
@@ -375,8 +378,59 @@ def _enrich_postal_codes(out: dict[str, str]) -> None:
     )
 
 
+def _normalize_vn_phone(v: str) -> str:
+    """SĐT nội địa VN (bắt đầu '0', 9–11 chữ số) → định dạng quốc tế +84 (bỏ số 0 đầu).
+    Giữ nguyên nếu đã có '+', là 'N/A'/trống, hoặc không giống số VN."""
+    v = (v or "").strip()
+    if not v or v.upper() == "N/A" or v.startswith("+"):
+        return v
+    digits = re.sub(r"\D", "", v)
+    if digits.startswith("0") and 9 <= len(digits) <= 11:
+        return "+84" + digits[1:]
+    return v
+
+
+def _normalize_birth_city_state(out: dict[str, str]) -> None:
+    """Quy ước DS-260: sinh tại TP trực thuộc TW (Hà Nội/HCM/Hải Phòng/Đà Nẵng/Cần Thơ/Huế)
+    → City = tên TP, State/Province = 'N/A'. Chặn lỗi để cả City lẫn State = tên TP."""
+    for city_key, state_key in (
+        ("birth_city", "birth_state"),
+        ("father_birth_city", "father_birth_state"),
+        ("mother_birth_city", "mother_birth_state"),
+        ("spouse_birth_city", "spouse_birth_state"),
+        # Địa chỉ hiện tại ở TP trực thuộc TW cũng theo quy ước State = N/A.
+        ("current_city", "current_state"),
+        ("father_city", "father_state"),
+        ("mother_city", "mother_state"),
+        ("spouse_city", "spouse_state"),
+    ):
+        if canonical_vn_city(out.get(city_key, "")):
+            if normalize_location(out.get(state_key, "")) not in ("n/a", "na"):
+                out[state_key] = "N/A"
+
+
+def _cross_check_birth_country(out: dict[str, str]) -> None:
+    """Guard xác định: nếu NƠI SINH là địa danh Việt Nam (thành phố/tỉnh) thì Quốc gia nơi sinh
+    phải là 'Vietnam'. Chặn lỗi AI trích xuất nhầm nước (vd. birth_city='Can Tho' nhưng
+    birth_country='Canada'). Chỉ ép khi nhận diện được địa danh VN — không đụng ca sinh ở nước ngoài."""
+    for city_key, state_key, country_key in (
+        ("birth_city", "birth_state", "birth_country"),
+        ("father_birth_city", "father_birth_state", "father_birth_country"),
+        ("mother_birth_city", "mother_birth_state", "mother_birth_country"),
+        ("spouse_birth_city", "spouse_birth_state", "spouse_birth_country"),
+    ):
+        if find_vn_locality(out.get(city_key, "")) or find_vn_locality(out.get(state_key, "")):
+            if normalize_location(out.get(country_key, "")) not in {"vietnam", "viet nam", "vietnamese"}:
+                out[country_key] = "Vietnam"
+
+
 def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     out = {k: (v or "").strip() for k, v in values.items()}
+    _normalize_birth_city_state(out)
+    _cross_check_birth_country(out)
+    for _pk in ("primary_phone", "secondary_phone", "work_phone"):
+        if out.get(_pk):
+            out[_pk] = _normalize_vn_phone(out[_pk])
     fam = out.get("family_name", "")
     given = out.get("given_names", "")
     raw_name = out.get("applicant_name") or f"{fam} {given}".strip()
@@ -386,8 +440,10 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     if not native and (fam or given):
         native = f"{fam} {given}".strip()
     if native:
-        out["applicant_name_native"] = native
+        # Full Name in Native Language → IN HOA, GIỮ dấu tiếng Việt (vd. NGUYỄN VĂN A).
+        out["applicant_name_native"] = " ".join(native.split()).upper()
     if raw_name:
+        # Name (Last/Middle/First) → IN HOA, KHÔNG dấu (vd. NGUYEN VAN A).
         out["applicant_name"] = format_person_name_ascii(raw_name)
     # City/State nơi sinh đã được chuẩn hóa theo quy ước DS-260 ở resolve
     # (TP trực thuộc TW → City; tỉnh → State; cái còn lại → N/A) — không ép bằng nhau.

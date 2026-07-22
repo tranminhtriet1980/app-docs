@@ -29,6 +29,7 @@ __pycache__/
 # Local DB & uploads (runtime data)
 backend/immigration.db
 backend/uploads/
+backend/uploads.zip
 backend/exports/
 backend/backups/
 *.db-journal

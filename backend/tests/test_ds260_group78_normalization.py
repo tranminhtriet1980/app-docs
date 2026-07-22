@@ -75,5 +75,5 @@ def test_period_from_to_split():
 
     line = "Period (Thời gian học): from (từ)      to (đến):"
     out = _fill_period_from_to(line, "05/09/1991 - 30/05/1994")
-    assert "from (từ) 05 September 1991" in out
+    assert "from (từ) 05 Sep 1991" in out
     assert "to (đến): 30 May 1994" in out

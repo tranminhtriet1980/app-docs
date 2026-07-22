@@ -557,8 +557,12 @@ def enrich_parent_names_from_judicial(
     person_name: str | None,
 ) -> None:
     """
-    Đương đơn không có GKS → lấy tên cha/mẹ từ phiếu lý lịch tư pháp (father_name/mother_name).
-    Chỉ điền khi trường còn trống — GKS (nguồn chính) luôn được ưu tiên.
+    Ưu tiên tên cha/mẹ từ Giấy LÝ LỊCH TƯ PHÁP (in máy, đọc chuẩn) hơn giấy khai sinh
+    (OCR khai sinh hay đọc sai dấu, vd. 'Hà' → 'Ho'). Ghi đè tên từ GKS khi:
+      - trường còn trống, HOẶC
+      - LLTP và GKS là CÙNG một người (chỉ khác cách đọc/chính tả) — để sửa lỗi đọc.
+    KHÔNG ghi đè nếu LLTP ra một người KHÁC (tránh khớp nhầm giấy). Chỉ đụng field TÊN,
+    không đụng ngày sinh/nơi sinh (vẫn lấy từ GKS). Manual override vẫn thắng (áp sau).
     """
     rec, ref = (
         pick_luong1_pair_for_person(records, "judicial_certificate", person_name)
@@ -576,11 +580,24 @@ def enrich_parent_names_from_judicial(
     sur, given = _split_vn_person_name(name)
     rid = str(rec.id)
 
+    def _current(key: str) -> str:
+        return next(
+            ((f.get("value") or "").strip() for f in fields_out if f.get("key") == key), ""
+        )
+
+    existing_full = _current(f"{parent}_full_name") or (
+        f"{_current(f'{parent}_surname')} {_current(f'{parent}_given_names')}".strip()
+    )
+    # Trống → điền; cùng người → ghi đè bằng bản LLTP (sửa lỗi đọc); khác người → giữ nguyên GKS.
+    override = (not existing_full) or _names_match(existing_full, name)
+
     def _fill(key: str, value: str) -> None:
         if not value:
             return
         for field in fields_out:
-            if field.get("key") != key or (field.get("value") or "").strip():
+            if field.get("key") != key:
+                continue
+            if (field.get("value") or "").strip() and not override:
                 continue
             field["value"] = value
             field["source"] = {
@@ -1375,7 +1392,10 @@ def enrich_previous_spouse_from_death(
     spouse_name = _strip_person_title(
         _resolve_from_record(primary, f"{side}_full_name", (f"{side}_name",))
     )
-    merged = _merge_raw_dict(death_rec)
+    # Phối ngẫu QUA ĐỜI (không ly hôn): khai như phối ngẫu cũ, NHƯNG tuyệt đối KHÔNG
+    # đưa ngày mất vào ô "Date of Divorce" (previous_divorce_date) — người goá KHÔNG ly hôn.
+    # Mẫu ImmiPath không có ô "lý do/ngày kết thúc hôn nhân", nên để ô ly hôn TRỐNG;
+    # tình trạng "Widowed" (marital status) + giấy báo tử đã thể hiện việc phối ngẫu đã mất.
     derived = {
         "previous_spouses_used": "Yes",
         "previous_spouse_full_name": spouse_name,
@@ -1385,10 +1405,16 @@ def enrich_previous_spouse_from_death(
         "previous_marriage_date": _resolve_from_record(
             primary, "marriage_date", ("date_of_marriage",)
         ),
-        "previous_divorce_date": (merged.get("date_of_death") or "").strip(),
     }
     for field in fields_out:
         key = field.get("key", "")
+        # Người goá không ly hôn → xóa mọi giá trị lỡ điền vào ô "Date of Divorce".
+        if key == "previous_divorce_date":
+            if (field.get("value") or "").strip():
+                field["value"] = ""
+                field.setdefault("source", {})
+                field["source"]["derived"] = "previous_spouse_deceased_not_divorced"
+            continue
         val = (derived.get(key) or "").strip()
         if val:
             field["value"] = val
@@ -2949,6 +2975,77 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
             }
 
 
+# Câu hỏi Yes/No mà đáp án hợp lệ CHỈ có thể là Yes/No → "N/A" luôn sai; khi trống mà KHÔNG
+# có dữ liệu kèm theo (evidence) thì mặc định "No" theo mẫu DS-260. Mỗi câu ánh xạ tới các
+# field "bằng chứng" — nếu có bằng chứng thì để nguyên cho người review (không tự đoán Yes/No).
+# KHÔNG gồm *_is_living (N/A ở đó KHÔNG được suy thành "No" = đã mất) và children_count
+# (định dạng riêng "No, 0").
+_YESNO_QUESTION_EVIDENCE: dict[str, tuple[str, ...]] = {
+    "other_name_used": ("other_names",),
+    "other_nationality_used": ("other_nationality_history",),
+    "other_addresses_used": ("other_addresses_history",),
+    "other_phones_used": ("other_phones_history",),
+    "other_emails_used": ("other_emails_history",),
+    "other_social_media_used": ("other_social_history",),
+    "work_other_occupation_used": ("work_other_occupation_detail",),
+    "work_prior_jobs_used": ("work_prior_jobs_history",),
+    "traveled_countries_5yr_used": ("traveled_countries_history",),
+    "previous_spouses_used": ("previous_spouse_full_name",),
+    "children_used": ("children_count", "child_1_full_name"),
+    "military_served": ("military_full_name", "military_country", "military_branch"),
+}
+
+
+def _is_na_value(val: str) -> bool:
+    """True khi giá trị là 'N/A' (mọi biến thể) — không phải câu trả lời Yes/No hợp lệ."""
+    return (val or "").strip().lower().replace(" ", "").replace(".", "") in {"na", "n/a"}
+
+
+def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> None:
+    """Hậu xử lý XÁC ĐỊNH (deterministic), chạy sau khi đã chuẩn hóa tiếng Anh:
+
+    - B4: câu hỏi Yes/No để "N/A" → "No"; để trống & KHÔNG có dữ liệu kèm → "No"
+      (nếu có dữ liệu kèm thì để nguyên cho review, không tự đoán).
+    - A4: '*_death_year' lỡ nhận NGÀY đầy đủ (vd. 07/09/2006) → rút về NĂM (2006),
+      đúng ô 'Year of death' và giảm rủi ro số liệu bịa quá chi tiết.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    for sec in sections_out:
+        for field in sec.get("fields", []):
+            index.setdefault(field.get("key", ""), field)
+
+    def _val(key: str) -> str:
+        f = index.get(key)
+        return (f.get("value") or "").strip() if f else ""
+
+    for qkey, evidence_keys in _YESNO_QUESTION_EVIDENCE.items():
+        field = index.get(qkey)
+        if field is None:
+            continue
+        cur = (field.get("value") or "").strip()
+        if cur and not _is_na_value(cur):
+            continue  # đã có Yes/No (hoặc giá trị khác) hợp lệ → giữ nguyên
+        if any(_val(e) for e in evidence_keys):
+            continue  # có dữ liệu chứng minh → để review tự chốt Yes/No
+        field["value"] = "No"
+        field["source"] = {
+            **empty_ds260_field_source(),
+            "derived": "yesno_default_no",
+        }
+
+    for key, field in index.items():
+        if not key.endswith("_death_year"):
+            continue
+        raw = (field.get("value") or "").strip()
+        if not raw or re.fullmatch(r"\d{4}", raw):
+            continue
+        year = _year_from_death_date(raw)
+        if year and year != raw:
+            field["value"] = year
+            field.setdefault("source", {})
+            field["source"]["derived"] = "death_year_normalized"
+
+
 async def resolve_ds260_form(
     db: AsyncSession,
     applicant_id,
@@ -3334,6 +3431,10 @@ async def resolve_ds260_form(
     from app.services.ds260_english_output import format_sections_english_output
 
     format_sections_english_output(sections_out)
+
+    # Chốt Yes/No (N/A/trống-không-dữ-liệu → No) + rút '*_death_year' về năm. Chạy SAU khi đã
+    # chuẩn hóa tiếng Anh để thao tác trên đúng giá trị hiển thị cuối cùng.
+    reconcile_ds260_yesno_and_death_year(sections_out)
 
     # Hậu xử lý nghiệp vụ: chuẩn hóa nơi sinh, đối chiếu còn sống / địa chỉ cha mẹ.
     reconcile_parent_living_status(sections_out)

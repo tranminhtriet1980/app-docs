@@ -95,8 +95,20 @@ def _encode_image(path: Path) -> tuple[str, str]:
     return mime, data
 
 
+# Cạnh dài tối đa (px) của ảnh render gửi Vision API. Một số PDF scan có trang khổ
+# siêu lớn (mediabox phóng đại) → get_pixmap(dpi) sinh ảnh hàng chục nghìn px, payload
+# base64 lên tới hàng trăm MB khiến cổng Vision API trả 502 Bad Gateway. Kẹp cạnh dài +
+# nén JPEG để payload chỉ còn vài MB/trang mà vẫn đủ nét cho OCR.
+_MAX_RENDER_PX = 2600
+_RENDER_JPEG_QUALITY = 85
+
+
 def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list[Path]:
-    """Render PDF pages to PNG for vision API. PyMuPDF first (no Poppler), then pdf2image."""
+    """Render PDF pages to JPEG for vision API. PyMuPDF first (no Poppler), then pdf2image.
+
+    Cạnh dài mỗi ảnh bị kẹp ≤ _MAX_RENDER_PX bất kể kích thước trang PDF, tránh payload
+    khổng lồ (→ 502 Bad Gateway) với PDF có trang khổ lớn.
+    """
     images: list[Path] = []
 
     try:
@@ -104,11 +116,16 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
 
         doc = fitz.open(str(path))
         for i in range(min(len(doc), max_pages)):
-            # DPI trong tên cache → đổi DPI sẽ render lại, không dùng nhầm ảnh độ nét cũ.
-            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}.png"
+            # DPI + max_px trong tên cache → đổi tham số sẽ render lại, không dùng nhầm ảnh cũ.
+            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}_px{_MAX_RENDER_PX}.jpg"
             if not out.exists() or out.stat().st_mtime < path.stat().st_mtime:
-                pix = doc[i].get_pixmap(dpi=dpi)
-                pix.save(str(out))
+                page = doc[i]
+                zoom = dpi / 72.0
+                longest = max(page.rect.width, page.rect.height) * zoom
+                if longest > _MAX_RENDER_PX:
+                    zoom *= _MAX_RENDER_PX / longest
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                out.write_bytes(pix.tobytes(output="jpg", jpg_quality=_RENDER_JPEG_QUALITY))
             images.append(out)
         doc.close()
         if images:
@@ -121,8 +138,11 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
 
         rendered = convert_from_path(str(path), first_page=1, last_page=max_pages, dpi=dpi)
         for i, img in enumerate(rendered):
-            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}.png"
-            img.save(str(out), "PNG")
+            out = path.parent / f"{path.stem}_page{i + 1}_dpi{dpi}_px{_MAX_RENDER_PX}.jpg"
+            if max(img.size) > _MAX_RENDER_PX:
+                scale = _MAX_RENDER_PX / max(img.size)
+                img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))))
+            img.convert("RGB").save(str(out), "JPEG", quality=_RENDER_JPEG_QUALITY)
             images.append(out)
     except Exception:
         pass
@@ -669,7 +689,9 @@ Vietnamese originals: mother_surname/mother_given_names, mother_date_of_birth, m
 mother_place_of_birth, mother_country.
 
 If the document has NO father or mother information, leave all corresponding parent fields empty.
-Use ISO dates YYYY-MM-DD. Do not use applicant nationality for parent country fields.
+Use ISO dates YYYY-MM-DD when the FULL date (day+month+year) is printed. If only a YEAR is legible
+(vd. 1945), output just the year "1945" — do NOT invent day/month ("01 January 1945"). Same for
+month+year only → "MM/YYYY". Do not use applicant nationality for parent country fields.
 Do NOT skip parent date/address/nationality when they are printed on the certificate.
 """
 
@@ -802,6 +824,16 @@ Map by level: "Trung học cơ sở"/"THCS" → middle_school_*, "Trung học ph
 
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
+
+QUY TẮC BẮT BUỘC (chống bịa/nhầm dữ liệu):
+- NGÀY: chỉ ghi đúng những gì đọc được. Nếu chỉ có NĂM (vd. 1945) → ghi đúng "1945", TUYỆT ĐỐI KHÔNG
+  tự thêm ngày/tháng (không được ghi "01 January 1945", "01/01/1945"). Nếu có tháng+năm → "MM/YYYY".
+- QUỐC GIA NƠI SINH: người mang hộ chiếu Việt Nam sinh tại một địa danh Việt Nam (tỉnh/thành VN) thì
+  birth_country / *_birth_country = "Vietnam". KHÔNG suy ra hay bịa nước khác (Canada, USA…) khi không có
+  bằng chứng rõ ràng trên giấy tờ.
+- NGHỀ vs CÔNG TY: primary_occupation = CHỨC DANH nghề, DỊCH sang tiếng Anh (vd. "Nhân viên bán hàng" →
+  "Sales Staff", "Thợ may" → "Tailor"); present_employer = TÊN công ty/cửa hàng/trường (vd. "Dung Grocery
+  Store"). KHÔNG đặt chức danh vào ô công ty và ngược lại; không để trống occupation nếu đọc được chức danh.
 
 Use mapping keys above (English snake_case). Yes/No for yes-no questions.
 Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, CÔNG VIỆC/HỌC VẤN, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON.

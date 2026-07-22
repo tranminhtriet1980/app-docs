@@ -11,8 +11,8 @@ from app.services.export_ds260 import _prepare_display_values
 
 
 def test_format_full_date_d_month_yyyy():
-    assert format_ds260_display_date("1990-01-15") == "15 January 1990"
-    assert format_ds260_display_date("15/01/1990") == "15 January 1990"
+    assert format_ds260_display_date("1990-01-15") == "15 Jan 1990"
+    assert format_ds260_display_date("15/01/1990") == "15 Jan 1990"
     assert format_ds260_display_date("01 May 2026") == "01 May 2026"
     assert format_ds260_display_date("2026-05-01") == "01 May 2026"
 
@@ -38,7 +38,7 @@ def test_prepare_display_keeps_partial_marriage_date():
     )
     assert out["spouse_marriage_date"] == "May 2023"
     assert out["address_from_date"] == "May 2023"
-    assert out["date_of_birth"] == "15 January 1990"
+    assert out["date_of_birth"] == "15 Jan 1990"
 
 
 def test_sanitize_date_values():
@@ -50,5 +50,5 @@ def test_sanitize_date_values():
         }
     )
     assert cleaned["address_from_date"] == "May 2023"
-    assert cleaned["passport_issue_date"] == "01 March 2020"
+    assert cleaned["passport_issue_date"] == "01 Mar 2020"
     assert cleaned["military_service_start"] == "2023"
