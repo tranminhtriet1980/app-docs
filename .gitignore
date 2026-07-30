@@ -46,6 +46,17 @@ Thumbs.db
 Data test/
 dữ liệu mẫu/
 
+# Báo cáo & tài liệu nội bộ (chứa tên thật khách hàng — repo đang public)
+Thông kê/
+Chốt chặn docs/
+BAO CAO DEM*.docx
+Ghi_nhan_ket_qua_test_DS260.xlsx
+quy-trinh/file-rieng/00b-Master-plan.xlsx
+quy-trinh/file-rieng/06-Ra-soat-docs.xlsx
+quy-trinh/file-rieng/07-Dieu-chinh-code.xlsx
+quy-trinh/file-rieng/08-Deploy.xlsx
+quy-trinh/file-rieng/09-Go-live.xlsx
+
 # Logs
 *.log
 npm-debug.log*
