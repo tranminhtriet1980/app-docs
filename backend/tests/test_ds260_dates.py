@@ -5,7 +5,9 @@ from app.services.ds260_dates import (
     format_ds260_display_date_range,
     format_partial_ds260_date,
     format_sections_date_display,
+    is_ambiguous_numeric_date,
     is_partial_date_value,
+    looks_like_date_but_unparsed,
     parse_full_date,
     sanitize_date_values,
 )
@@ -88,3 +90,56 @@ def test_sanitize_date_values():
     assert cleaned["address_from_date"] == "May 2023"
     assert cleaned["passport_issue_date"] == "01 Mar 2020"
     assert cleaned["military_service_start"] == "2023"
+
+
+# --- Nhập nhằng dd/mm ↔ mm/dd (lỗi Case C: spouse DOB xuất thô '01/26/1986') ---
+
+
+def test_mm_dd_resolved_when_second_part_exceeds_12():
+    """Cụm thứ hai > 12 chỉ có thể là NGÀY → cụm đầu là THÁNG. Suy luận xác định."""
+    assert parse_full_date("01/26/1986").isoformat() == "1986-01-26"
+    assert format_ds260_display_date("01/26/1986") == "26 Jan 1986"
+    assert not is_ambiguous_numeric_date("01/26/1986")
+
+
+def test_dd_mm_still_default_for_vietnamese_documents():
+    assert format_ds260_display_date("26/01/1986") == "26 Jan 1986"
+    assert format_ds260_display_date("12/09/2019") == "12 Sep 2019"
+
+
+def test_ambiguous_date_flagged_but_kept_as_dd_mm():
+    assert is_ambiguous_numeric_date("05/06/1986")
+    assert format_ds260_display_date("05/06/1986") == "05 Jun 1986"
+    # Cùng ngày & tháng → đọc kiểu nào cũng như nhau, không cần cảnh báo.
+    assert not is_ambiguous_numeric_date("05/05/1986")
+
+
+def test_unparseable_date_is_blanked_with_note_not_kept_raw():
+    """Trước đây chuỗi hỏng bị giữ nguyên trên form; nay để trống + đánh dấu."""
+    assert looks_like_date_but_unparsed("32/45/1986")
+    secs = [
+        {
+            "fields": [
+                {"key": "spouse_date_of_birth", "value": "01/26/1986"},
+                {"key": "father_date_of_birth", "value": "05/06/1986"},
+                {"key": "mother_date_of_birth", "value": "32/45/1986"},
+            ]
+        }
+    ]
+    format_sections_date_display(secs)
+    got = {f["key"]: f for f in secs[0]["fields"]}
+
+    assert got["spouse_date_of_birth"]["value"] == "26 Jan 1986"
+    assert "date_note" not in got["spouse_date_of_birth"]
+
+    assert got["father_date_of_birth"]["value"] == "05 Jun 1986"
+    assert got["father_date_of_birth"]["date_note"]["code"] == "ambiguous_date"
+
+    assert got["mother_date_of_birth"]["value"] == ""
+    assert got["mother_date_of_birth"]["date_note"]["code"] == "unparsed_date"
+    assert got["mother_date_of_birth"]["date_note"]["raw"] == "32/45/1986"
+
+
+def test_valid_dates_never_flagged_as_unparsed():
+    for good in ("2020-03-01", "01 Mar 2020", "May 2023", "1963", "03/2023"):
+        assert not looks_like_date_but_unparsed(good)

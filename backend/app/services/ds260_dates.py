@@ -17,6 +17,10 @@ _FULL_DATE_TEXT_FORMATS = (
 )
 
 
+# Ngày dạng số A/B/YYYY (hoặc '-', '.') — dùng chung cho parse và phát hiện nhập nhằng.
+_NUMERIC_DMY_RE = re.compile(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$")
+
+
 def is_date_field_key(key: str) -> bool:
     k = (key or "").lower()
     # 'service_start'/'service_end' là ngày quân sự nhưng tên không chứa 'date'.
@@ -49,11 +53,19 @@ def parse_full_date(val: str) -> date | None:
         except ValueError:
             return None
 
-    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$", val)
+    m = _NUMERIC_DMY_RE.match(val)
     if m:
-        d, mo, y = m.groups()
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        # Giấy tờ VN dùng dd/mm/yyyy, nhưng OCR đôi khi trả mm/dd/yyyy (kiểu Mỹ).
+        # Cấu phần thứ hai > 12 thì nó CHỈ có thể là NGÀY → cụm đầu là THÁNG (mm/dd).
+        # Suy luận này xác định, không đoán mò. Trường hợp cả hai ≤ 12 là NHẬP NHẰNG
+        # thật sự → giữ quy ước VN dd/mm và báo cảnh báo qua is_ambiguous_numeric_date().
+        if b > 12 and a <= 12:
+            d, mo = b, a
+        else:
+            d, mo = a, b
         try:
-            return date(int(y), int(mo), int(d))
+            return date(y, mo, d)
         except ValueError:
             return None
 
@@ -112,6 +124,36 @@ def format_partial_ds260_date(val: str) -> str | None:
         return m.group(1)
 
     return None
+
+
+def is_ambiguous_numeric_date(val: str) -> bool:
+    """True khi ngày dạng số có thể đọc theo CẢ dd/mm lẫn mm/dd → giá trị xuất có thể SAI ÂM THẦM.
+
+    '05/06/1986' → 5 Jun hay 6 May? Hệ thống giữ quy ước VN (dd/mm) nhưng phải cảnh báo
+    để người review đối chiếu giấy gốc. '26/01/1986' (26 > 12) KHÔNG nhập nhằng.
+    """
+    m = _NUMERIC_DMY_RE.match((val or "").strip())
+    if not m:
+        return False
+    a, b = int(m.group(1)), int(m.group(2))
+    if a == b:
+        return False  # 05/05 đọc kiểu nào cũng ra một ngày
+    return 1 <= a <= 12 and 1 <= b <= 12
+
+
+def looks_like_date_but_unparsed(val: str) -> bool:
+    """True khi giá trị CÓ dạng ngày nhưng không parse được (đủ lẫn từng phần).
+
+    Vd. '32/45/1986', '00/00/0000'. Những giá trị này trước đây bị giữ nguyên chuỗi thô
+    trên form → lệch định dạng với các ô ngày khác mà không ai biết.
+    """
+    v = (val or "").strip()
+    if not v:
+        return False
+    if parse_full_date(v) or format_partial_ds260_date(v):
+        return False
+    # Có ít nhất 1 cụm 4 chữ số (năm) HOẶC dạng số phân tách bằng / - .
+    return bool(re.match(r"^[\d/.\-\s]+$", v) and re.search(r"\d", v))
 
 
 def is_partial_date_value(val: str) -> bool:
@@ -181,6 +223,15 @@ def format_sections_date_display(sections_out: list) -> None:
                 formatted = format_ds260_display_date(val)
                 if formatted:
                     field["value"] = formatted
+                    # Đọc được nhưng nguồn nhập nhằng dd/mm ↔ mm/dd → đánh dấu để
+                    # validate cảnh báo; người review phải đối chiếu giấy gốc.
+                    if is_ambiguous_numeric_date(val):
+                        field["date_note"] = {"code": "ambiguous_date", "raw": val}
+                elif looks_like_date_but_unparsed(val):
+                    # Trước đây giữ nguyên chuỗi thô (vd. '01/26/1986') → lệch định dạng
+                    # với mọi ô ngày khác mà KHÔNG ai biết. Nay để TRỐNG + cảnh báo.
+                    field["value"] = ""
+                    field["date_note"] = {"code": "unparsed_date", "raw": val}
 
 
 def partial_date_warning_message(field_label: str, raw_val: str, display_val: str) -> str:

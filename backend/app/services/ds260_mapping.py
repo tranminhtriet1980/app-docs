@@ -3046,6 +3046,165 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
             field["source"]["derived"] = "death_year_normalized"
 
 
+# Ô THÔNG TIN (số điện thoại, email, định danh MXH) — bỏ trống thì ghi 'N/A',
+# KHÔNG bao giờ là 'No'. Lỗi Case B-2: Work Phone hiển thị 'No'.
+_NA_NOT_NO_KEYS: frozenset[str] = frozenset(
+    {
+        "primary_phone",
+        "secondary_phone",
+        "work_phone",
+        "email_address",
+        "social_media_identifier",
+    }
+)
+
+# Cặp (ô City, ô State) — City đã có giá trị thì State không được để TRỐNG (phải 'N/A').
+_CITY_STATE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("birth_city", "birth_state"),
+    ("father_birth_city", "father_birth_state"),
+    ("mother_birth_city", "mother_birth_state"),
+    ("spouse_birth_city", "spouse_birth_state"),
+)
+
+
+def normalize_ds260_na_conventions(sections_out: list[dict[str, Any]]) -> None:
+    """Thống nhất quy ước 'N/A' vs 'No' vs để trống trên toàn bộ form.
+
+    Ba nhóm lệch mà tester ghi nhận lặp lại ở nhiều hồ sơ:
+      - Ô số điện thoại/email hiển thị 'No' (Case B-2) → phải là 'N/A'.
+      - 'Số con' để TRỐNG ở một thành viên trong khi anh chị em ghi 'No' (Case C-2).
+      - Ô Tỉnh/Bang để TRỐNG trong khi ô Thành phố đã có (Case E).
+    """
+    idx = _index_fields_by_key(sections_out)
+
+    for key in _NA_NOT_NO_KEYS:
+        field = idx.get(key)
+        if not field:
+            continue
+        val = (field.get("value") or "").strip()
+        if not val or val.lower() in {"no", "none", "không", "khong"}:
+            _set_value(field, "N/A", "na_not_no")
+
+    count_field = idx.get("children_count")
+    if count_field and not (count_field.get("value") or "").strip():
+        has_child = any(
+            (idx.get(f"child_{i}_full_name", {}).get("value") or "").strip()
+            for i in range(1, 10)
+        )
+        if not has_child:
+            _set_value(count_field, "No", "children_count_none")
+
+    for city_key, state_key in _CITY_STATE_PAIRS:
+        city_field, state_field = idx.get(city_key), idx.get(state_key)
+        if not city_field or not state_field:
+            continue
+        if (city_field.get("value") or "").strip() and not (
+            state_field.get("value") or ""
+        ).strip():
+            _set_value(state_field, "N/A", "state_na_when_city_present")
+
+
+def _year_of(val: str) -> int | None:
+    """Năm từ một giá trị ngày bất kỳ (đầy đủ / tháng-năm / chỉ năm)."""
+    v = (val or "").strip()
+    if not v:
+        return None
+    full = parse_full_date(v)
+    if full:
+        return full.year
+    m = re.search(r"(1[89]\d{2}|20\d{2})", v)
+    return int(m.group(1)) if m else None
+
+
+# Cặp (ô năm mất, ô ngày sinh của CHÍNH người đó) — chết không thể trước khi sinh.
+_DEATH_VS_OWN_BIRTH: tuple[tuple[str, str], ...] = (
+    ("father_death_year", "father_date_of_birth"),
+    ("mother_death_year", "mother_date_of_birth"),
+)
+
+# Cha/mẹ phải còn sống ở thời điểm đương đơn ra đời. Cha có thể mất TRƯỚC khi con sinh
+# (thụ thai rồi mất) → cho phép sớm hơn 1 năm; mẹ thì không.
+_DEATH_VS_APPLICANT_BIRTH: tuple[tuple[str, int], ...] = (
+    ("father_death_year", 1),
+    ("mother_death_year", 0),
+)
+
+
+def enforce_ds260_temporal_plausibility(sections_out: list[dict[str, Any]]) -> None:
+    """Xoá năm mất VÔ LÝ về mặt thời gian thay vì in lên form pháp lý.
+
+    Lỗi thực tế (Case D): cha đương đơn ghi mất năm 1968 trong khi đương đơn sinh 1973 —
+    không ai phát hiện vì không có kiểm tra nào. Chỉ xoá khi CHẮC CHẮN vô lý; thiếu dữ
+    liệu để so sánh thì giữ nguyên cho người review.
+    """
+    idx = _index_fields_by_key(sections_out)
+    applicant_birth_year = _year_of(_field_value(idx, "date_of_birth"))
+
+    def _drop(key: str, reason: str) -> None:
+        field = idx.get(key)
+        if field and (field.get("value") or "").strip():
+            _set_value(field, "", reason)
+
+    for death_key, birth_key in _DEATH_VS_OWN_BIRTH:
+        dy = _year_of(_field_value(idx, death_key))
+        by = _year_of(_field_value(idx, birth_key))
+        if dy is not None and by is not None and dy < by:
+            _drop(death_key, "death_year_before_own_birth")
+
+    if applicant_birth_year is not None:
+        for death_key, slack in _DEATH_VS_APPLICANT_BIRTH:
+            dy = _year_of(_field_value(idx, death_key))
+            if dy is not None and dy < applicant_birth_year - slack:
+                _drop(death_key, "death_year_before_applicant_birth")
+
+
+def downgrade_fabricated_date_precision(
+    sections_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+) -> None:
+    """Worksheet chỉ ghi NĂM mà form lại xuất NGÀY ĐẦY ĐỦ → rút về đúng độ chi tiết đã khai.
+
+    Lỗi thực tế: KHAI ghi cha sinh '1963' → xuất 'Jan 01, 1963'; KHAI ghi cha/mẹ 'Mất'
+    (không ngày) → xuất '07 September 2006'. Đây là bịa dữ liệu trên form pháp lý.
+    Chỉ áp dụng khi giá trị LẤY TỪ worksheet — ngày đầy đủ trên giấy tờ chính thức
+    (khai sinh, chứng tử) vẫn giữ nguyên vì đó là nguồn đáng tin.
+    """
+    from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+    from app.services.ds260_dates import is_date_field_key, is_partial_date_value
+
+    ws_rec = pick_latest_record(records, "ds260_customer_form")
+    if not ws_rec:
+        return
+    ws = normalize_ds260_customer_raw(_merge_raw_dict(ws_rec))
+    if not ws:
+        return
+    mappings = flatten_ds260_mappings()
+
+    for sec in sections_out:
+        for field in sec.get("fields", []):
+            key = field.get("key", "")
+            val = (field.get("value") or "").strip()
+            if not val or not is_date_field_key(key):
+                continue
+            if (field.get("source") or {}).get("document_type") != "ds260_customer_form":
+                continue
+            if not parse_full_date(val):
+                continue  # đã là một phần → không có gì để rút
+            mapping = mappings.get(key)
+            cand_keys = [key]
+            if mapping:
+                cand_keys += [mapping.field, *(mapping.aliases or ())]
+            for ck in cand_keys:
+                ws_val = (ws.get(ck) or "").strip()
+                if not ws_val:
+                    continue
+                if is_partial_date_value(ws_val):
+                    field["value"] = ws_val
+                    field.setdefault("source", {})
+                    field["source"]["derived"] = "date_precision_downgraded_to_source"
+                break
+
+
 async def resolve_ds260_form(
     db: AsyncSession,
     applicant_id,
@@ -3422,6 +3581,9 @@ async def resolve_ds260_form(
     apply_ds260_default_values(sections_out)
 
     upgrade_partial_dates_from_worksheet(sections_out, records)
+    # Ngược chiều với hàm trên: giá trị LẤY TỪ worksheet không được chi tiết hơn chính
+    # worksheet (KHAI '1963' thì không được xuất 'Jan 01, 1963').
+    downgrade_fabricated_date_precision(sections_out, records)
     enrich_native_name_from_worksheet(sections_out, records)
 
     from app.services.ds260_dates import format_sections_date_display
@@ -3435,6 +3597,13 @@ async def resolve_ds260_form(
     # Chốt Yes/No (N/A/trống-không-dữ-liệu → No) + rút '*_death_year' về năm. Chạy SAU khi đã
     # chuẩn hóa tiếng Anh để thao tác trên đúng giá trị hiển thị cuối cùng.
     reconcile_ds260_yesno_and_death_year(sections_out)
+
+    # Năm mất vô lý (trước khi chính người đó sinh, hoặc trước khi đương đơn ra đời)
+    # → xoá thay vì in lên form. Chạy sau khi '*_death_year' đã được rút về năm.
+    enforce_ds260_temporal_plausibility(sections_out)
+
+    # Thống nhất 'N/A' vs 'No' vs để trống (SĐT/email, số con, ô Tỉnh).
+    normalize_ds260_na_conventions(sections_out)
 
     # Hậu xử lý nghiệp vụ: chuẩn hóa nơi sinh, đối chiếu còn sống / địa chỉ cha mẹ.
     reconcile_parent_living_status(sections_out)

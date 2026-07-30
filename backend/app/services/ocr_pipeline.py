@@ -150,6 +150,51 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
     return images
 
 
+# Vision API (detail=high) nén ảnh về CẠNH NGẮN 768px trước khi đọc, nên render DPI cao
+# KHÔNG làm chữ nét hơn — cả trang A4 luôn về ~768x1086.
+#
+# Hệ quả quan trọng: độ phân giải hiệu dụng = 768 / CHIỀU RỘNG crop. Cắt băng NGANG giữ
+# nguyên chiều rộng → KHÔNG được lợi gì (đã đo: 0.523 px/px cả trước lẫn sau khi cắt).
+# Phải cắt HẸP CHIỀU NGANG. Lưới 2x2 cho ~2x độ phân giải trên chữ viết tay.
+#
+# Chồng lấn rộng ở trục ngang vì form là cặp NHÃN (trái) – CÂU TRẢ LỜI viết tay (phải),
+# cắt dọc giữa trang dễ tách đôi cặp này.
+_TILE_OVERLAP_X = 0.18
+_TILE_OVERLAP_Y = 0.08
+
+# Vision API còn kẹp cạnh DÀI ở 2048px → tỉ lệ cao/rộng vượt ngưỡng này sẽ bị nén thêm.
+_MAX_TILE_ASPECT = 2048 / 768
+
+
+def _split_image_into_tiles(path: Path, rows: int, cols: int) -> list[Path]:
+    """Cắt ảnh thành lưới rows x cols chồng lấn. Lỗi/không cần cắt → trả [path]."""
+    if rows < 2 and cols < 2:
+        return [path]
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            width, height = img.size
+            tile_w, tile_h = width / cols, height / rows
+            ov_x, ov_y = tile_w * _TILE_OVERLAP_X, tile_h * _TILE_OVERLAP_Y
+            out: list[Path] = []
+            for r in range(rows):
+                for c in range(cols):
+                    left = max(0, int(c * tile_w - ov_x))
+                    right = min(width, int((c + 1) * tile_w + ov_x))
+                    top = max(0, int(r * tile_h - ov_y))
+                    bottom = min(height, int((r + 1) * tile_h + ov_y))
+                    dest = path.parent / f"{path.stem}_r{r + 1}c{c + 1}of{rows}x{cols}.jpg"
+                    if not dest.exists() or dest.stat().st_mtime < path.stat().st_mtime:
+                        img.crop((left, top, right, bottom)).convert("RGB").save(
+                            str(dest), "JPEG", quality=_RENDER_JPEG_QUALITY
+                        )
+                    out.append(dest)
+            return out
+    except Exception:
+        return [path]
+
+
 def _pdf_text_excerpt(path: Path, max_chars: int = 12000) -> str:
     """Extract plain text from PDF pages (fallback when vision conversion unavailable)."""
     chunks: list[str] = []
@@ -511,17 +556,31 @@ def _build_llm_user_content(
     hint: str,
     file_path: Path,
     task: str,
+    image_labels: list[str] | None = None,
 ) -> list[dict] | str:
     """Build OpenAI user message content (multimodal or text-only)."""
     if image_paths:
         parts: list[dict] = []
         intro = f"{task} Filename: {filename}."
-        if hint == "pdf_pages":
+        if image_labels:
+            intro += (
+                f" Document has {len(image_labels)} image(s): each page is split into"
+                " OVERLAPPING tiles so handwriting is legible. Tiles of the same page are"
+                " parts of ONE page — reassemble them (left tile holds the printed label,"
+                " right tile usually holds the handwritten answer for the SAME row)."
+                " Because tiles overlap, the same text may appear twice — report it once."
+            )
+        elif hint == "pdf_pages":
             intro += f" Document has {len(image_paths)} page image(s) — read all pages."
         parts.append({"type": "text", "text": intro})
         for i, img_path in enumerate(image_paths):
             mime, data = _encode_image(img_path)
-            parts.append({"type": "text", "text": f"--- Page {i + 1} ---"})
+            label = (
+                image_labels[i]
+                if image_labels and i < len(image_labels)
+                else f"Page {i + 1}"
+            )
+            parts.append({"type": "text", "text": f"--- {label} ---"})
             parts.append(
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}", "detail": "high"}}
             )
@@ -835,8 +894,23 @@ QUY TẮC BẮT BUỘC (chống bịa/nhầm dữ liệu):
   "Sales Staff", "Thợ may" → "Tailor"); present_employer = TÊN công ty/cửa hàng/trường (vd. "Dung Grocery
   Store"). KHÔNG đặt chức danh vào ô công ty và ngược lại; không để trống occupation nếu đọc được chức danh.
 
+C — LỊCH SỬ ĐẾN MỸ: been_in_us (Yes/No), issued_us_visa (Yes/No), refused_us_visa (Yes/No),
+us_travel_history (mỗi đợt: ngày đến – ngày đi – loại visa), us_visa_history.
+
+E.2 — THÔNG TIN KHÁC: other_languages_used (Yes/No) và other_languages_list — LIỆT KÊ đúng
+ngôn ngữ khách ghi (vd. "Tiếng Anh" → "English"). ĐỪNG để trống rồi mặc định "No" khi khách
+CÓ ghi ngôn ngữ. traveled_countries_5yr_used (Yes/No) + traveled_countries_history.
+
+F — AN NINH & LÝ LỊCH: đọc HẾT các câu Yes/No ở những trang cuối (bệnh lây nhiễm, giấy chích
+ngừa, ma túy, tiền án, mại dâm, rửa tiền, buôn người, khủng bố, trục xuất…). Mỗi câu trả lời
+đúng như khách đánh dấu. Nếu khách BỎ TRỐNG một câu thì để null — KHÔNG tự suy thành Yes/No.
+Đặc biệt has_vaccination_docs: ghi đúng lựa chọn của khách.
+
+G — SỐ AN SINH XÃ HỘI: applied_ssn_before (Yes/No), want_ssn_issued (Yes/No),
+authorize_ssn_disclosure (Yes/No), ssn_number nếu có.
+
 Use mapping keys above (English snake_case). Yes/No for yes-no questions.
-Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, CÔNG VIỆC/HỌC VẤN, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON.
+Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, CÔNG VIỆC/HỌC VẤN, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON, AN NINH, SỐ AN SINH XÃ HỘI.
 """
 
 APPLICATION_FORM_EXTRACT_HINT = """
@@ -897,9 +971,17 @@ async def _openai_extract(
         expected_keys = list(
             dict.fromkeys([*expected_keys, *CONTACT_AND_SOCIAL_MAP.keys()])
         )
+    if doc_type == "ds260_customer_form":
+        # Worksheet có ~500 key nếu đổ phẳng (gồm cả alias và tên field của LOẠI GIẤY KHÁC)
+        # → prompt loãng, model điền chéo. Chỉ nêu key thuộc worksheet, nhóm theo mục.
+        from app.services.ds260_customer_keys import render_ds260_customer_prompt_keys
+
+        rendered_keys = render_ds260_customer_prompt_keys()
+    else:
+        rendered_keys = ", ".join(expected_keys)
     prompt = EXTRACTION_PROMPT_TEMPLATE.format(
         doc_type=doc_type,
-        expected_keys=", ".join(expected_keys) or "any relevant fields for this document type",
+        expected_keys=rendered_keys or "any relevant fields for this document type",
     ) + extra
     # DS-260 worksheet khách khai thường là bản SCAN/VIẾT TAY nhiều trang (≈18 trang) →
     # đọc hết trang + render DPI cao hơn cho rõ nét chữ tay.
@@ -915,12 +997,35 @@ async def _openai_extract(
         ),
         dpi=300 if is_ds260_ws else 180,
     )
+    image_labels: list[str] | None = None
+    rows, cols = settings.ocr_worksheet_rows, settings.ocr_worksheet_cols
+    if is_ds260_ws and image_paths and (rows > 1 or cols > 1):
+        # Worksheet khách khai là bản SCAN VIẾT TAY → cắt lưới để chữ đủ lớn cho Vision API.
+        tiled: list[Path] = []
+        labels: list[str] = []
+        for page_no, page_img in enumerate(image_paths, start=1):
+            crops = _split_image_into_tiles(page_img, rows, cols)
+            if len(crops) == 1:
+                tiled.append(crops[0])
+                labels.append(f"Page {page_no}")
+                continue
+            for i, crop in enumerate(crops):
+                r, c = divmod(i, cols)
+                tiled.append(crop)
+                labels.append(
+                    f"Page {page_no} — tile row {r + 1}/{rows}, col {c + 1}/{cols}"
+                    f" ({'top' if r == 0 else 'bottom' if r == rows - 1 else 'middle'}"
+                    f" {'left' if c == 0 else 'right' if c == cols - 1 else 'centre'})"
+                )
+        image_paths, image_labels = tiled, labels
+
     content = _build_llm_user_content(
         filename=filename,
         image_paths=image_paths,
         hint=hint,
         file_path=file_path,
         task="Extract all fields from this document.",
+        image_labels=image_labels,
     )
     messages: list[dict] = [
         {"role": "system", "content": prompt},

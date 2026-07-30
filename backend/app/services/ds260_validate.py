@@ -55,6 +55,36 @@ from app.services.ds260_dates import (
 )
 
 
+def _date_note_warnings(
+    form: dict[str, Any], field_labels: dict[str, str]
+) -> list[dict[str, str]]:
+    """Cảnh báo ngày do format_sections_date_display đánh dấu (nhập nhằng / không đọc được)."""
+    out: list[dict[str, str]] = []
+    for sec in form.get("sections", []):
+        for field in sec.get("fields", []):
+            note = field.get("date_note")
+            if not isinstance(note, dict):
+                continue
+            key = field.get("key", "")
+            label = field_labels.get(key, key)
+            raw = note.get("raw", "")
+            if note.get("code") == "ambiguous_date":
+                msg = (
+                    f"{label}: ngày \"{raw}\" đọc được theo cả dd/mm lẫn mm/dd — "
+                    f"đang hiểu theo dd/mm (chuẩn VN), xuất \"{field.get('value', '')}\". "
+                    f"Đối chiếu giấy gốc."
+                )
+            else:
+                msg = (
+                    f"{label}: không đọc được ngày \"{raw}\" — đã để TRỐNG để tránh "
+                    f"sai định dạng trên form. Nhập tay sau khi đối chiếu giấy gốc."
+                )
+            out.append(
+                _issue(code=str(note.get("code")), message=msg, field_key=key)
+            )
+    return out
+
+
 def _issue(
     *,
     code: str,
@@ -209,6 +239,8 @@ async def validate_ds260(
                 document_type=mapping.document if mapping else None,
             )
         )
+
+    warnings.extend(_date_note_warnings(form, field_labels))
 
     exp_val = flat.get("passport_expiration_date", "").strip()
     if exp_val:

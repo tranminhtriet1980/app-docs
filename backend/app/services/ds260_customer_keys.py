@@ -373,9 +373,94 @@ def _field_meta_value(meta: object) -> str:
     return "" if meta is None else str(meta).strip()
 
 
+# Mục KHÔNG nằm trên worksheet khách khai — đọc từ chính giấy tờ (khai sinh, lý lịch tư
+# pháp, chứng tử, ly hôn). Quảng cáo key của chúng trong prompt worksheet chỉ mời model
+# điền chéo: lỗi thật đã gặp là chồng ĐÃ MẤT bị xếp vào ô "ĐÃ LY HÔN" (Case D).
+_NON_WORKSHEET_SECTION_IDS = frozenset(
+    {
+        "section_birth_certificate",
+        "section_judicial",
+        "section_divorce",
+        "section_death",
+    }
+)
+
+# Nhãn tiếng Việt cho từng mục, để prompt nhóm key theo mục thay vì đổ một danh sách phẳng.
+_PROMPT_SECTION_LABELS: dict[str, str] = {
+    "section_a_personal": "A.1 THÔNG TIN CÁ NHÂN",
+    "section_a_passport": "A.2 HỘ CHIẾU",
+    "section_address": "A.3 ĐỊA CHỈ",
+    "section_contact": "A.4 THÔNG TIN LIÊN LẠC",
+    "section_social": "A.5 MẠNG XÃ HỘI",
+    "section_father": "B.1 THÔNG TIN CHA",
+    "section_mother": "B.2 THÔNG TIN MẸ",
+    "section_spouse": "B.3 PHỐI NGẪU HIỆN TẠI",
+    "section_previous_spouse": "B.4 PHỐI NGẪU CŨ (CHỈ khi ĐÃ LY HÔN)",
+    "section_children": "B.5 CON CÁI",
+    "section_us_travel": "C. LỊCH SỬ ĐẾN MỸ",
+    "section_work_education": "D. CÔNG VIỆC / HỌC VẤN",
+    "section_military": "E.1 QUÂN SỰ",
+    "section_additional_info": "E.2 THÔNG TIN KHÁC (ngôn ngữ, du lịch 5 năm)",
+    "section_security": "F. AN NINH & LÝ LỊCH (Yes/No)",
+    "section_ssn": "G. SỐ AN SINH XÃ HỘI",
+}
+
+
+def _load_mapping_sections() -> list[dict]:
+    mapping_path = (
+        Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "ds260_mapping.json"
+    )
+    with mapping_path.open(encoding="utf-8") as f:
+        return json.load(f).get("sections", [])
+
+
+@lru_cache(maxsize=1)
+def build_ds260_customer_prompt_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Key ĐỀ NGHỊ model trích xuất, nhóm theo mục của DS-260.
+
+    Khác với build_ds260_customer_extract_keys() (bộ lọc ĐẦU RA, giữ rộng để không làm rơi
+    dữ liệu hợp lệ), hàm này quyết định cái ta HỎI. Siết ở đây để prompt ngắn và không mời
+    model điền chéo:
+      - bỏ hẳn mục thuộc giấy tờ khác (khai sinh / LLTP / chứng tử / ly hôn);
+      - chỉ lấy tên `field`/alias khi field đó thực sự do worksheet cung cấp — nếu không,
+        chỉ nêu `key` chuẩn DS-260 (tránh tên chung chung như 'full_name', 'date_of_death').
+    """
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for sec in _load_mapping_sections():
+        sec_id = sec.get("id", "")
+        if sec_id in _NON_WORKSHEET_SECTION_IDS:
+            continue
+        label = _PROMPT_SECTION_LABELS.get(sec_id)
+        if not label:
+            continue
+        keys: list[str] = []
+        for field in sec.get("fields", []):
+            key = field.get("key")
+            if not key:
+                continue
+            if key not in keys:
+                keys.append(key)
+            if field.get("document") != "ds260_customer_form":
+                continue
+            for extra in (field.get("field"), *(field.get("aliases") or ())):
+                if extra and extra not in keys:
+                    keys.append(extra)
+        if keys:
+            out.append((label, tuple(keys)))
+    return tuple(out)
+
+
+def render_ds260_customer_prompt_keys() -> str:
+    """Danh sách key theo mục, dạng text đưa vào prompt trích xuất."""
+    return "\n".join(
+        f"[{label}] {', '.join(keys)}"
+        for label, keys in build_ds260_customer_prompt_sections()
+    )
+
+
 @lru_cache(maxsize=1)
 def build_ds260_customer_extract_keys() -> frozenset[str]:
-    """Mọi key DS-260 mapping + alias OCR — cho phép trích xuất full worksheet."""
+    """Mọi key DS-260 mapping + alias OCR — bộ lọc ĐẦU RA (giữ rộng, xem hàm trên)."""
     keys: set[str] = set(DS260_CUSTOMER_KEY_REMAP)
     keys.update(DS260_CUSTOMER_KEY_REMAP.values())
 

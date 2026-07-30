@@ -63,8 +63,11 @@ def test_normalize_municipality_birthplace():
     assert by_key["birth_state"] == "N/A"
 
 
-def test_normalize_province_birthplace():
-    """Tỉnh → State = tỉnh, City = N/A; bỏ tên bệnh viện."""
+def test_normalize_hue_birthplace_as_municipality():
+    """Huế lên TP trực thuộc TW (01/2025) → City = Hue, State = N/A; bỏ tên nhà hộ sinh.
+
+    Trước đây ra ('N/A', 'Thua Thien Hue') — tester Case C-2 báo sai ở cả 5 thành viên.
+    """
     from app.services.ds260_mapping import normalize_ds260_place_fields
 
     sections = [
@@ -79,5 +82,45 @@ def test_normalize_province_birthplace():
     ]
     normalize_ds260_place_fields(sections)
     by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert by_key["father_birth_city"] == "Hue"
+    assert by_key["father_birth_state"] == "N/A"
+
+
+def test_normalize_province_only_birthplace_keeps_na_city():
+    """Chỉ có tên TỈNH, không có tên TP thuộc tỉnh → City = N/A."""
+    from app.services.ds260_mapping import normalize_ds260_place_fields
+
+    sections = [
+        {
+            "id": "section_father",
+            "fields": [
+                {"key": "father_birth_city", "value": "Benh vien Que Son, Quang Nam", "source": {}},
+                {"key": "father_birth_state", "value": "Quang Nam", "source": {}},
+                {"key": "father_birth_country", "value": "Vietnam", "source": {}},
+            ],
+        }
+    ]
+    normalize_ds260_place_fields(sections)
+    by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
     assert by_key["father_birth_city"] == "N/A"
-    assert by_key["father_birth_state"] == "Thua Thien Hue"
+    assert by_key["father_birth_state"] == "Quang Nam"
+
+
+def test_city_within_province_is_kept_not_dropped():
+    """TP thuộc tỉnh → City = tên TP, State = tỉnh (lỗi 'bỏ mất Nha Trang' ở Case C)."""
+    from app.services.ds260_mapping import normalize_ds260_place_fields
+
+    sections = [
+        {
+            "id": "section_a_personal",
+            "fields": [
+                {"key": "birth_city", "value": "Nha Trang", "source": {}},
+                {"key": "birth_state", "value": "Khanh Hoa", "source": {}},
+                {"key": "birth_country", "value": "Vietnam", "source": {}},
+            ],
+        }
+    ]
+    normalize_ds260_place_fields(sections)
+    by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert by_key["birth_city"] == "Nha Trang"
+    assert by_key["birth_state"] == "Khanh Hoa"

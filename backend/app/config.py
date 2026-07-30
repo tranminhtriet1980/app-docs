@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     # Client OCR riêng — cho phép chạy OCR ở provider/model khác chat. Trống → kế thừa openai_*.
     ocr_api_key: str = ""
     ocr_base_url: str = ""
+    # Lưới cắt mỗi trang worksheet DS-260 viết tay trước khi gửi Vision API.
+    # Vision API (detail=high) nén ảnh về cạnh NGẮN 768px và kẹp cạnh DÀI ở 2048px, nên
+    # gửi nguyên trang A4 thì chữ tay chỉ còn ~0.52 px/px dù render DPI bao nhiêu.
+    # Đo thực tế trên trang 1468x2038 (số ảnh mỗi trang = rows x cols):
+    #     nguyên trang 1.00x (1 ảnh) | 2x1 1.33x (2) | 3x1 2.00x (3) | 4x1 2.67x (4)
+    #     5x1 2.67x (5 — hết tác dụng, đã chạm giới hạn cạnh dài)
+    # Cắt DỌC (cols>1) không lợi hơn: 1x2 chỉ 1.70x mà lại tách nhãn (trái) khỏi câu trả
+    # lời viết tay (phải) trên cùng một dòng của form → mặc định cols=1.
+    # Token tăng xấp xỉ theo số ảnh; hạ rows xuống 2–3 nếu cần tiết kiệm. rows=1,cols=1 = tắt.
+    ocr_worksheet_rows: int = 4
+    ocr_worksheet_cols: int = 1
     upload_dir: str = "uploads"
     export_dir: str = "exports"
     templates_dir: str = "templates/forms"

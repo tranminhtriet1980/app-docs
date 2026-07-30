@@ -41,6 +41,15 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.production}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      # OCR tài liệu (ảnh/chữ tay) — model vision riêng, mạnh hơn model chat.
+      # Trống → rơi về OPENAI_MODEL. Thiếu 3 biến này thì mọi tinh chỉnh OCR
+      # KHÔNG có hiệu lực trong container (.env bị .dockerignore loại khỏi image).
+      VISION_MODEL: ${VISION_MODEL:-}
+      OCR_API_KEY: ${OCR_API_KEY:-}
+      OCR_BASE_URL: ${OCR_BASE_URL:-}
+      OCR_WORKSHEET_ROWS: ${OCR_WORKSHEET_ROWS:-4}
+      OCR_WORKSHEET_COLS: ${OCR_WORKSHEET_COLS:-1}
       OPENAI_INPUT_COST_PER_1M: ${OPENAI_INPUT_COST_PER_1M:-0.15}
       OPENAI_OUTPUT_COST_PER_1M: ${OPENAI_OUTPUT_COST_PER_1M:-0.60}
       MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}

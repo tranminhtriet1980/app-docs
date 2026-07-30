@@ -22,8 +22,10 @@ def test_canonical_vn_city_municipality_only():
     assert canonical_vn_city("Hcm") == "Ho Chi Minh"
     assert canonical_vn_city("HCMC") == "Ho Chi Minh"
     assert canonical_vn_city("Tp HCM") == "Ho Chi Minh"
-    # 'Hue' là thành phố thuộc tỉnh — KHÔNG biến thành tên tỉnh.
-    assert canonical_vn_city("Hue") == ""
+    # Huế lên TP trực thuộc TW (01/2025) → in ra 'Hue', KHÔNG phải 'Thua Thien Hue'.
+    assert canonical_vn_city("Hue") == "Hue"
+    assert canonical_vn_city("Thua Thien Hue") == "Hue"
+    # Biên Hòa vẫn là TP thuộc tỉnh Đồng Nai — không phải trực thuộc TW.
     assert canonical_vn_city("Bien Hoa") == ""
 
 

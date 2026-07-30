@@ -176,10 +176,19 @@ def _match_location(segment: str) -> str:
 
 
 # Thành phố trực thuộc trung ương — DS-260: ghi vào ô City, ô State = N/A.
-# Tỉnh — ghi vào ô State, ô City = N/A (theo quy ước điền tay của nghiệp vụ).
+# Tỉnh — ghi vào ô State; ô City = tên TP/thị xã thuộc tỉnh nếu đọc được, ngược lại 'N/A'.
+# "Thua Thien Hue" là tên entry cũ trong province map; Huế lên TP trực thuộc TW từ 01/2025.
 VN_MUNICIPALITIES = frozenset(
-    {"Ho Chi Minh", "Ha Noi", "Da Nang", "Hai Phong", "Can Tho"}
+    {"Ho Chi Minh", "Ha Noi", "Da Nang", "Hai Phong", "Can Tho", "Thua Thien Hue"}
 )
+
+# Tên hiển thị trên DS-260 khi khác tên entry trong province map.
+_MUNICIPALITY_DISPLAY_NAME = {"Thua Thien Hue": "Hue"}
+
+
+def municipality_display_name(name: str) -> str:
+    """Tên TP trực thuộc TW dùng để in lên DS-260 ('Thua Thien Hue' → 'Hue')."""
+    return _MUNICIPALITY_DISPLAY_NAME.get(name, name)
 
 PROVINCE_MAP_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "province_to_postal_code.json"
@@ -221,15 +230,62 @@ def _locality_index() -> list[tuple[str, str, bool]]:
 
 def find_vn_locality(text: str, *, only_municipality: bool = False) -> str:
     """Tên tỉnh/TP trực thuộc TW chuẩn nếu nhận diện được trong chuỗi, else ''."""
+    name, _alias = find_vn_locality_match(text, only_municipality=only_municipality)
+    return name
+
+
+def find_vn_locality_match(
+    text: str, *, only_municipality: bool = False
+) -> tuple[str, str]:
+    """Như find_vn_locality nhưng trả kèm ALIAS đã khớp.
+
+    Cần alias để biết chuỗi khớp nhờ tên TỈNH ('Khanh Hoa') hay nhờ tên THÀNH PHỐ
+    thuộc tỉnh ('Nha Trang') — trường hợp sau phải giữ tên TP cho ô City of Birth.
+    """
     norm = normalize_location(text)
     if not norm:
-        return ""
+        return "", ""
     for alias, name, is_muni in _locality_index():
         if only_municipality and not is_muni:
             continue
         if alias in norm:
-            return name
-    return ""
+            return name, alias
+    return "", ""
+
+
+def _alias_is_province_name(alias_norm: str, province: str) -> bool:
+    """True khi alias chính là biến thể tên TỈNH (không phải tên TP thuộc tỉnh)."""
+    return alias_norm == normalize_location(province)
+
+
+def find_city_alias_in_province(text: str, province: str) -> str:
+    """Tên TP/thị xã THUỘC `province` xuất hiện trong chuỗi, else ''.
+
+    Quét toàn bộ alias của tỉnh thay vì lấy alias khớp đầu tiên: chuỗi
+    'Nha Trang, Khanh Hoa' chứa cả tên TP lẫn tên tỉnh, phải lấy được 'Nha Trang'.
+    """
+    norm = normalize_location(text)
+    if not norm or not province:
+        return ""
+
+    # Bỏ tên TỈNH khỏi chuỗi trước đã: 'ba ria vung tau' CHỨA cả 'ba ria' lẫn 'vung tau',
+    # quét thẳng sẽ tưởng nhầm là có tên thành phố trong khi chỉ có tên tỉnh.
+    province_aliases = sorted(
+        (a for a, n, _ in _locality_index() if n == province and _alias_is_province_name(a, province)),
+        key=len,
+        reverse=True,
+    )
+    residual = norm
+    for alias in province_aliases:
+        residual = residual.replace(alias, " ")
+
+    best = ""
+    for alias, name, _is_muni in _locality_index():
+        if name != province or _alias_is_province_name(alias, province):
+            continue
+        if alias in residual and len(alias) > len(best):
+            best = alias
+    return best
 
 
 @lru_cache(maxsize=1)
@@ -250,7 +306,8 @@ def canonical_vn_city(text: str) -> str:
     norm = normalize_location(text)
     if not norm:
         return ""
-    return _municipality_alias_set().get(norm, "")
+    name = _municipality_alias_set().get(norm, "")
+    return municipality_display_name(name) if name else ""
 
 
 def looks_like_address_or_facility(text: str) -> bool:
@@ -263,19 +320,28 @@ def looks_like_address_or_facility(text: str) -> bool:
 def split_birthplace_city_state(*blobs: str) -> tuple[str, str] | None:
     """
     Quy ước DS-260 (nơi sinh VN):
-      - TP trực thuộc TW  → (City=TP, State='N/A')
-      - Tỉnh              → (City='N/A', State=Tỉnh)
-      - Bệnh viện/địa chỉ → ('N/A', 'N/A')
+      - TP trực thuộc TW      → (City=TP, State='N/A')
+      - TP/thị xã thuộc tỉnh  → (City=TP, State=Tỉnh)   vd. ('Nha Trang', 'Khanh Hoa')
+      - Chỉ có tên tỉnh       → (City='N/A', State=Tỉnh)
+      - Bệnh viện/địa chỉ     → ('N/A', 'N/A')
       - Không nhận diện được & rỗng → None (giữ nguyên)
+
+    Địa danh đã sáp nhập (2025) giữ TÊN CŨ đúng như trên giấy khai sinh/hộ chiếu nộp kèm,
+    để form không lệch với giấy tờ gốc.
     """
     text = " , ".join(b for b in blobs if (b or "").strip())
     if not text.strip():
         return None
-    muni = find_vn_locality(text, only_municipality=True)
+    muni, _ = find_vn_locality_match(text, only_municipality=True)
     if muni:
-        return muni, "N/A"
-    prov = find_vn_locality(text)
+        return municipality_display_name(muni), "N/A"
+    prov, _alias = find_vn_locality_match(text)
     if prov:
+        # Có tên TP thuộc tỉnh trong chuỗi (vd. 'Nha Trang' của Khanh Hoa) → giữ tên TP,
+        # đừng bỏ đi thành 'N/A' như quy ước cũ.
+        city_alias = find_city_alias_in_province(text, prov)
+        if city_alias:
+            return format_place_name_title(city_alias), prov
         return "N/A", prov
     if looks_like_address_or_facility(text):
         return "N/A", "N/A"
