@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY templates ./templates
 COPY data ./data
+# Script chẩn đoán chạy trong container (vd. scripts/diag_ocr.py đối chiếu cấu hình
+# prod với local). Không có dòng này thì `docker exec ... python scripts/...` báo
+# không tìm thấy file.
+COPY scripts ./scripts
 
 RUN mkdir -p uploads exports backups templates/forms
 
