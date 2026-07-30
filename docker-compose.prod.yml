@@ -48,8 +48,11 @@ services:
       VISION_MODEL: ${VISION_MODEL:-}
       OCR_API_KEY: ${OCR_API_KEY:-}
       OCR_BASE_URL: ${OCR_BASE_URL:-}
-      OCR_WORKSHEET_ROWS: ${OCR_WORKSHEET_ROWS:-4}
+      # Cắt trang worksheet: mặc định TẮT (1x1). Bật lên sẽ nhân token mỗi request
+      # theo số ảnh và đụng trần tokens-per-minute → 429. Xem config.py.
+      OCR_WORKSHEET_ROWS: ${OCR_WORKSHEET_ROWS:-1}
       OCR_WORKSHEET_COLS: ${OCR_WORKSHEET_COLS:-1}
+      OCR_MAX_IMAGES_PER_REQUEST: ${OCR_MAX_IMAGES_PER_REQUEST:-20}
       OPENAI_INPUT_COST_PER_1M: ${OPENAI_INPUT_COST_PER_1M:-0.15}
       OPENAI_OUTPUT_COST_PER_1M: ${OPENAI_OUTPUT_COST_PER_1M:-0.60}
       MONTHLY_TOKEN_BUDGET: ${MONTHLY_TOKEN_BUDGET:-0}

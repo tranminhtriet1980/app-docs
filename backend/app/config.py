@@ -28,16 +28,21 @@ class Settings(BaseSettings):
     ocr_api_key: str = ""
     ocr_base_url: str = ""
     # Lưới cắt mỗi trang worksheet DS-260 viết tay trước khi gửi Vision API.
-    # Vision API (detail=high) nén ảnh về cạnh NGẮN 768px và kẹp cạnh DÀI ở 2048px, nên
-    # gửi nguyên trang A4 thì chữ tay chỉ còn ~0.52 px/px dù render DPI bao nhiêu.
-    # Đo thực tế trên trang 1468x2038 (số ảnh mỗi trang = rows x cols):
-    #     nguyên trang 1.00x (1 ảnh) | 2x1 1.33x (2) | 3x1 2.00x (3) | 4x1 2.67x (4)
-    #     5x1 2.67x (5 — hết tác dụng, đã chạm giới hạn cạnh dài)
-    # Cắt DỌC (cols>1) không lợi hơn: 1x2 chỉ 1.70x mà lại tách nhãn (trái) khỏi câu trả
-    # lời viết tay (phải) trên cùng một dòng của form → mặc định cols=1.
-    # Token tăng xấp xỉ theo số ảnh; hạ rows xuống 2–3 nếu cần tiết kiệm. rows=1,cols=1 = tắt.
-    ocr_worksheet_rows: int = 4
+    # Cắt trang làm chữ tay nét hơn, NHƯNG token tăng xấp xỉ theo số ảnh và trần
+    # tokens-per-minute của OpenAI áp cho TỪNG request — một request vượt trần thì
+    # không bao giờ thành công, retry vô ích. Đo trên worksheet 20 trang, tier 30k TPM:
+    #     rows=1  20 ảnh  ~22k token  → lọt
+    #     rows=2  40 ảnh  ~31k token  → 429
+    #     rows=4  80 ảnh  ~116k token → 429 (đã gây sự cố prod 30/07/2026)
+    # ⇒ mặc định TẮT (1x1). Chỉ tăng rows khi OCR đã chia nhỏ theo TPM, hoặc khi
+    # tài khoản ở tier cao hơn. Kiểm tra trần bằng header `x-ratelimit-limit-tokens`.
+    ocr_worksheet_rows: int = 1
     ocr_worksheet_cols: int = 1
+    # Số ảnh tối đa mỗi request Vision API; vượt thì chia thành nhiều request nối tiếp
+    # rồi gộp kết quả. Trần TPM áp cho TỪNG request nên chia nhỏ là cách duy nhất gửi
+    # được tài liệu nhiều trang. 20 ảnh nguyên trang ≈ 22k token — lọt trần 30k.
+    # 0 = không chia (hành vi cũ).
+    ocr_max_images_per_request: int = 20
     upload_dir: str = "uploads"
     export_dir: str = "exports"
     templates_dir: str = "templates/forms"

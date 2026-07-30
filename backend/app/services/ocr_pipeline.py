@@ -150,20 +150,21 @@ def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list
     return images
 
 
-# Vision API (detail=high) nén ảnh về CẠNH NGẮN 768px trước khi đọc, nên render DPI cao
-# KHÔNG làm chữ nét hơn — cả trang A4 luôn về ~768x1086.
+# Vision API (detail=high) thu ảnh vào khung 2048x2048 rồi co/giãn sao cho CẠNH NGẮN
+# bằng 768px. Nên render DPI cao KHÔNG tự động làm chữ nét hơn: cả trang A4 dựng đứng
+# luôn về ~768x1086, chữ tay chỉ còn quãng nửa số điểm ảnh ban đầu.
 #
-# Hệ quả quan trọng: độ phân giải hiệu dụng = 768 / CHIỀU RỘNG crop. Cắt băng NGANG giữ
-# nguyên chiều rộng → KHÔNG được lợi gì (đã đo: 0.523 px/px cả trước lẫn sau khi cắt).
-# Phải cắt HẸP CHIỀU NGANG. Lưới 2x2 cho ~2x độ phân giải trên chữ viết tay.
+# Cắt trang thành băng NGANG thì cạnh ngắn của mỗi băng là CHIỀU CAO, và chiều cao được
+# kéo lên 768 thay vì bị nén xuống — theo cơ chế trên thì phần chữ giữ được nhiều điểm
+# ảnh gốc hơn. CẢNH BÁO: đây là suy ra từ quy tắc co giãn, CHƯA đối chứng bằng kết quả
+# OCR thật, và ràng buộc thắt cổ chai trên thực tế không phải độ nét mà là trần
+# tokens-per-minute (xem ocr_max_images_per_request). Đừng tăng rows dựa vào comment này
+# — hãy đo trên hồ sơ thật trước.
 #
 # Chồng lấn rộng ở trục ngang vì form là cặp NHÃN (trái) – CÂU TRẢ LỜI viết tay (phải),
 # cắt dọc giữa trang dễ tách đôi cặp này.
 _TILE_OVERLAP_X = 0.18
 _TILE_OVERLAP_Y = 0.08
-
-# Vision API còn kẹp cạnh DÀI ở 2048px → tỉ lệ cao/rộng vượt ngưỡng này sẽ bị nén thêm.
-_MAX_TILE_ASPECT = 2048 / 768
 
 
 def _split_image_into_tiles(path: Path, rows: int, cols: int) -> list[Path]:
@@ -193,6 +194,68 @@ def _split_image_into_tiles(path: Path, rows: int, cols: int) -> list[Path]:
             return out
     except Exception:
         return [path]
+
+
+def _split_images_into_batches(
+    image_paths: list[Path], image_labels: list[str] | None, max_per_batch: int
+) -> list[tuple[list[Path], list[str] | None]]:
+    """Chia ảnh thành nhiều lô để mỗi request nằm dưới trần tokens-per-minute.
+
+    OpenAI áp trần TPM cho TỪNG request: một request vượt trần thì hỏng vĩnh viễn,
+    retry bao nhiêu lần cũng vô ích (sự cố prod 30/07/2026 — worksheet 20 trang cắt 4x1
+    thành 80 ảnh ≈ 116k token, đập vào trần 30k). Chia nhỏ rồi gộp kết quả thì mỗi
+    request đều lọt.
+    """
+    if max_per_batch <= 0 or len(image_paths) <= max_per_batch:
+        return [(image_paths, image_labels)]
+
+    batches: list[tuple[list[Path], list[str] | None]] = []
+    for start in range(0, len(image_paths), max_per_batch):
+        stop = start + max_per_batch
+        batches.append(
+            (
+                image_paths[start:stop],
+                image_labels[start:stop] if image_labels else None,
+            )
+        )
+    return batches
+
+
+def _is_blank_for_merge(value: object) -> bool:
+    """Giá trị coi như model không đọc được — để lô sau có quyền điền vào.
+
+    Tên phải khác `_is_empty_value` (đã có ở dưới, dùng cho việc khác): trùng tên thì
+    định nghĩa sau ghi đè định nghĩa trước và hàm gộp lặng lẽ dùng nhầm luật.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, dict)):
+        return len(value) == 0
+    return False
+
+
+def _merge_batch_results(results: list[dict]) -> dict:
+    """Gộp kết quả nhiều lô: giá trị KHÁC RỖNG đầu tiên thắng.
+
+    Mỗi lô chỉ nhìn thấy một phần tài liệu nên phần lớn field sẽ rỗng; lô nào thực sự
+    đọc được trang chứa field đó mới có giá trị. Không ghi đè giá trị đã có để một lô
+    đoán mò (bịa ra dù không nhìn thấy trang tương ứng) không đè mất số liệu đọc thật.
+    """
+    if not results:
+        return {}
+    if len(results) == 1:
+        return results[0]
+
+    merged: dict = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        for key, value in result.items():
+            if key not in merged or _is_blank_for_merge(merged[key]):
+                merged[key] = value
+    return merged
 
 
 def _pdf_text_excerpt(path: Path, max_chars: int = 12000) -> str:
@@ -557,11 +620,24 @@ def _build_llm_user_content(
     file_path: Path,
     task: str,
     image_labels: list[str] | None = None,
+    batch_position: tuple[int, int] | None = None,
 ) -> list[dict] | str:
     """Build OpenAI user message content (multimodal or text-only)."""
     if image_paths:
         parts: list[dict] = []
         intro = f"{task} Filename: {filename}."
+        if batch_position:
+            # Tài liệu bị chia làm nhiều request cho khỏi vượt trần TPM. Nói rõ để model
+            # KHÔNG đoán field nằm ở phần nó không nhìn thấy — kết quả các phần được gộp
+            # theo luật "giá trị khác rỗng đầu tiên thắng", nên một giá trị bịa sẽ khoá
+            # mất giá trị đọc thật ở phần sau.
+            part_no, part_total = batch_position
+            intro += (
+                f" IMPORTANT: this is PART {part_no} of {part_total} of the document —"
+                " you are seeing only some of its pages. Extract only what is VISIBLE in"
+                " these images. Leave every other field empty; do NOT guess or infer"
+                " fields whose page is not shown here."
+            )
         if image_labels:
             intro += (
                 f" Document has {len(image_labels)} image(s): each page is split into"
@@ -1019,36 +1095,45 @@ async def _openai_extract(
                 )
         image_paths, image_labels = tiled, labels
 
-    content = _build_llm_user_content(
+    usage_ctx = UsageContext(
+        user_id=ctx.user_id,
+        applicant_id=ctx.applicant_id,
+        document_id=ctx.document_id,
         filename=filename,
-        image_paths=image_paths,
-        hint=hint,
-        file_path=file_path,
-        task="Extract all fields from this document.",
-        image_labels=image_labels,
+        doc_type=doc_type,
     )
-    messages: list[dict] = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": content},
-    ]
+    client = get_ocr_client()
+    batches = _split_images_into_batches(
+        image_paths, image_labels, settings.ocr_max_images_per_request
+    )
 
-    response = await chat_completion(
-        db,
-        operation="document.extract",
-        context=UsageContext(
-            user_id=ctx.user_id,
-            applicant_id=ctx.applicant_id,
-            document_id=ctx.document_id,
+    results: list[dict] = []
+    for batch_no, (batch_paths, batch_labels) in enumerate(batches, start=1):
+        content = _build_llm_user_content(
             filename=filename,
-            doc_type=doc_type,
-        ),
-        messages=messages,
-        client=get_ocr_client(),
-        model=settings.ocr_model,
-        response_format={"type": "json_object"},
-        temperature=0,
-    )
-    return _parse_json_response(response.choices[0].message.content or "{}")
+            image_paths=batch_paths,
+            hint=hint,
+            file_path=file_path,
+            task="Extract all fields from this document.",
+            image_labels=batch_labels,
+            batch_position=(batch_no, len(batches)) if len(batches) > 1 else None,
+        )
+        response = await chat_completion(
+            db,
+            operation="document.extract",
+            context=usage_ctx,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": content},
+            ],
+            client=client,
+            model=settings.ocr_model,
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        results.append(_parse_json_response(response.choices[0].message.content or "{}"))
+
+    return _merge_batch_results(results)
 
 
 async def classify_document(

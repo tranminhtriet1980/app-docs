@@ -8,14 +8,22 @@ from typing import Annotated
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_owned_applicant
 from app.config import settings
 from app.database import async_session, get_db
-from app.models.entities import Applicant, ApplicantDocRecord, ApplicantStatus, Document, DocumentStatus
+from app.models.entities import (
+    ApiUsageLog,
+    Applicant,
+    ApplicantDocRecord,
+    ApplicantStatus,
+    Document,
+    DocumentStatus,
+    ProfileField,
+)
 from app.schemas import DocumentDetailOut, DocumentOut, DocumentTagsUpdate, DocumentTypeGuideOut, DocRecordOut, MessageOut
 from app.services.document_registry import (
     CANONICAL_FILENAME_EXAMPLES,
@@ -498,6 +506,27 @@ async def download_document_file(
     return FileResponse(path, filename=document.original_filename, media_type=document.mime_type)
 
 
+async def _detach_document_references(db: AsyncSession, document_id: uuid.UUID) -> None:
+    """Gỡ các khoá ngoại nullable trỏ tới document trước khi xoá.
+
+    Postgres ÉP khoá ngoại còn SQLite mặc định thì không, nên thiếu bước này chỉ lộ ra
+    ở prod: `ForeignKeyViolationError ... api_usage_logs_document_id_fkey`.
+
+    Đặt NULL chứ không xoá: `api_usage_logs` là số liệu token/chi phí đã tiêu (xoá đi là
+    mất dữ liệu đối soát), còn `profile_fields` là giá trị hồ sơ — mất document nguồn thì
+    chỉ mất dấu vết xuất xứ, giá trị vẫn đúng. `extracted_fields` thì ngược lại, thuộc về
+    document nên đã có cascade delete-orphan ở quan hệ.
+    """
+    await db.execute(
+        update(ApiUsageLog).where(ApiUsageLog.document_id == document_id).values(document_id=None)
+    )
+    await db.execute(
+        update(ProfileField)
+        .where(ProfileField.source_document_id == document_id)
+        .values(source_document_id=None)
+    )
+
+
 @router.delete("/applicants/{applicant_id}/documents/{document_id}", response_model=MessageOut)
 async def delete_document(
     document_id: uuid.UUID,
@@ -515,6 +544,7 @@ async def delete_document(
     folder_path = file_path.parent
 
     await delete_doc_records_for_document(db, document.id)
+    await _detach_document_references(db, document.id)
     await db.delete(document)
     await db.flush()
     await finalize_applicant_after_ocr(db, applicant.id)
