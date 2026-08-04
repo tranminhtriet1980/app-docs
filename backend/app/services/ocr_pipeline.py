@@ -47,6 +47,12 @@ ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền ta
 Chọn loại này cho MỌI worksheet khách tự khai, kể cả khi có nhiều mục — KHÔNG hạ xuống "other" hay
 "address_document". address_document chỉ dành cho hoá đơn/hợp đồng thuê/giấy xác nhận cư trú riêng lẻ.
 
+QUY TẮC CHỐNG BỊA:
+- KHÔNG ĐƯỢC đoán/suy luận loại tài liệu khi không rõ ràng từ nội dung.
+- Nếu ảnh không đủ sáng, mờ, bị cắt, hoặc nội dung không đọc được → đừng cố đoán.
+- Nếu không chắc chắn → ghi "other" với confidence thấp (< 0.5) và giải thích lý do trong "reason".
+- LUÔN ưu tiên chính xác hơn tìm kiếm sự hoàn hảo — nếu không rõ thì nói không rõ, không bịa loại.
+
 Trả về ONLY valid JSON:
 {"document_type": "<code>", "confidence": 0.0-1.0, "reason": "brief"}"""
 
@@ -60,15 +66,26 @@ Ví dụ passport có full_name; birth_certificate cũng có full_name — chỉ
 Trả về ONLY valid JSON:
 {{
   "document_type": "{doc_type}",
+  "image_quality": {{"readable": true/false, "issue": "<'' nếu ổn, hoặc 'blurry'/'glare'/'too_dark'/'cut_off'/'handwriting_illegible'>"}},
   "fields": {{
     "<field_key>": {{"value": "<string or null>", "confidence": 0.0-1.0, "source_page": "page_1"}}
-  }}
+  }},
+  "warnings": ["<danh sách các vấn đề/không rõ ràng>"]
 }}
 
-Quy tắc:
+QUY TẮC CHỐNG BỊA DỮ LIỆU:
+- CHỈ extract những gì thực sự thấy RÕ RÀNG trên tài liệu. KHÔNG được đoán/suy luận/fill gaps.
+- KHÔNG infer giá trị dựa trên ngữ cảnh hay logic. Ví dụ: không cố "guess" ngày sinh từ tuổi, không điền địa chỉ từ giả định.
+- Nếu field bị mờ/loá/thiếu sáng/bị cắt/chữ viết tay khó đọc → để null trong value và LUÔN thêm warning chi tiết.
+- Nếu có phần nào không đọc được → set image_quality.readable = false, dù phần khác vẫn trích được. Không "hy vọng" phần còn lại sẽ bù được.
+- KHÔNG bao giờ bịa dữ liệu để field "có vẻ đầy đủ hay hợp lý". Thà để null còn hơn bịa.
+- Nếu phát hiện lỗi (ảnh xoay, định dạng kỳ lạ, dữ liệu mâu thuẫn...) → thêm warning rõ ràng, KHÔNG bỏ qua.
+
+QUY TẮC ĐỊNH DẠNG:
 - ISO dates YYYY-MM-DD khi có thể
 - UPPERCASE cho tên như in trên giấy
 - null chỉ khi thật sự không đọc được
+- image_quality.readable = false khi ảnh mờ/loá/thiếu sáng/bị cắt khiến BẤT KỲ phần nội dung nào không đọc được rõ ràng.
 - CHỈ dùng các key sau (không thêm key ngoài schema):
 {expected_keys}"""
 
@@ -101,6 +118,34 @@ def _encode_image(path: Path) -> tuple[str, str]:
 # nén JPEG để payload chỉ còn vài MB/trang mà vẫn đủ nét cho OCR.
 _MAX_RENDER_PX = 2600
 _RENDER_JPEG_QUALITY = 85
+
+
+# Cạnh dài chuẩn hoá trước khi đo độ nét: phương sai Laplacian tăng theo độ phân giải
+# (ảnh gốc càng to càng nhiều chi tiết cạnh) nên phải resize về cùng kích thước mới so
+# sánh được với MỘT ngưỡng cố định — nếu không, ảnh chụp 12MP tự nhiên "nét" hơn ảnh
+# chụp cùng cảnh ở độ phân giải thấp dù độ mờ thật giống nhau.
+_BLUR_MEASURE_PX = 1000
+
+# Kernel Laplacian 3x3 chuẩn — làm nổi cạnh; ảnh mờ có ít cạnh sắc → phương sai thấp.
+_LAPLACIAN_KERNEL = (0, 1, 0, 1, -4, 1, 0, 1, 0)
+
+
+def _measure_blur_variance(path: Path) -> float | None:
+    """Phương sai Laplacian trên ảnh grayscale — thấp = mờ/out nét. None nếu đọc lỗi."""
+    try:
+        from PIL import Image, ImageFilter, ImageStat
+
+        with Image.open(path) as img:
+            gray = img.convert("L")
+            if max(gray.size) > _BLUR_MEASURE_PX:
+                scale = _BLUR_MEASURE_PX / max(gray.size)
+                gray = gray.resize(
+                    (max(1, round(gray.width * scale)), max(1, round(gray.height * scale)))
+                )
+            edges = gray.filter(ImageFilter.Kernel((3, 3), _LAPLACIAN_KERNEL, scale=1))
+            return ImageStat.Stat(edges).var[0]
+    except Exception:
+        return None
 
 
 def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list[Path]:
@@ -249,10 +294,38 @@ def _merge_batch_results(results: list[dict]) -> dict:
         return results[0]
 
     merged: dict = {}
+    # image_quality không theo luật "khác rỗng đầu tiên thắng": một lô bất kỳ báo ảnh khó
+    # đọc thì cả tài liệu coi như có vấn đề, dù lô đầu tiên báo "readable": true.
+    issues = []
+    unreadable = False
+    all_warnings: list[str] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        q = result.get("image_quality")
+        if isinstance(q, dict):
+            if q.get("readable") is False:
+                unreadable = True
+            issue = str(q.get("issue") or "").strip()
+            if issue and issue not in issues:
+                issues.append(issue)
+        warnings = result.get("warnings")
+        if isinstance(warnings, list):
+            for w in warnings:
+                w_str = str(w).strip()
+                if w_str and w_str not in all_warnings:
+                    all_warnings.append(w_str)
+    if unreadable or issues:
+        merged["image_quality"] = {"readable": not unreadable, "issue": ", ".join(issues)}
+    if all_warnings:
+        merged["warnings"] = all_warnings
+
     for result in results:
         if not isinstance(result, dict):
             continue
         for key, value in result.items():
+            if key in ("image_quality", "warnings"):
+                continue  # đã gộp riêng ở trên bằng luật OR, không phải "khác rỗng đầu tiên thắng"
             if key not in merged or _is_blank_for_merge(merged[key]):
                 merged[key] = value
     return merged
@@ -1149,6 +1222,80 @@ async def classify_document(
         raise
 
 
+_IMAGE_QUALITY_ISSUE_VI: dict[str, str] = {
+    "blurry": "ảnh mờ/out nét",
+    "glare": "ảnh bị loá sáng",
+    "too_dark": "ảnh thiếu sáng",
+    "cut_off": "ảnh bị cắt thiếu nội dung",
+    "handwriting_illegible": "chữ viết tay không đọc được",
+}
+
+
+def _image_quality_warning(extraction: dict) -> str | None:
+    """Model tự báo ảnh khó đọc dù không dưới ngưỡng blur cứng (vd. loá sáng, thiếu sáng)."""
+    quality = extraction.get("image_quality")
+    if not isinstance(quality, dict) or quality.get("readable") is not False:
+        return None
+    issue = str(quality.get("issue") or "").strip()
+    reason = _IMAGE_QUALITY_ISSUE_VI.get(issue, issue or "ảnh khó đọc")
+    return (
+        f"AI báo {reason} — một số trường có thể thiếu hoặc sai. "
+        "Vui lòng kiểm tra kỹ, hoặc chụp/scan lại ảnh rõ hơn rồi xử lý lại."
+    )
+
+
+def _low_confidence_field_warning(extraction: dict) -> str | None:
+    """Field CÓ giá trị nhưng model không chắc → chữ mực nhạt/thiếu sáng cục bộ mà
+    _measure_blur_variance (đo trên toàn ảnh) không bắt được. Field null (không đọc được)
+    không tính — đó là trường hợp model đã trung thực báo trống, không phải đoán mò.
+    """
+    threshold = settings.ocr_low_confidence_threshold
+    min_ratio = settings.ocr_low_confidence_field_ratio
+    if threshold <= 0:
+        return None
+    fields = extraction.get("fields")
+    if not isinstance(fields, dict):
+        return None
+
+    filled_count = 0
+    low_keys: list[str] = []
+    for key, meta in fields.items():
+        if not isinstance(meta, dict) or _is_empty_value(meta.get("value")):
+            continue
+        filled_count += 1
+        try:
+            confidence = float(meta.get("confidence"))
+        except (TypeError, ValueError):
+            continue
+        if confidence < threshold:
+            low_keys.append(key)
+
+    if not low_keys or filled_count == 0 or len(low_keys) / filled_count < min_ratio:
+        return None
+
+    shown = ", ".join(low_keys[:8])
+    if len(low_keys) > 8:
+        shown += f" và {len(low_keys) - 8} trường khác"
+    return (
+        f"{len(low_keys)}/{filled_count} trường có độ tin cậy thấp (có thể do chữ mờ/nhạt màu, "
+        f"không phải do ảnh out nét): {shown}. Vui lòng đối chiếu kỹ các trường này với bản gốc."
+    )
+
+
+def _extraction_warnings(extraction: dict) -> str | None:
+    """Collect warnings reported by the AI model during extraction."""
+    warnings = extraction.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return None
+    formatted = [str(w).strip() for w in warnings if str(w).strip()]
+    return " | ".join(formatted) if formatted else None
+
+
+def _combine_warnings(*warnings: str | None) -> str | None:
+    parts = [w for w in warnings if w]
+    return " | ".join(parts) if parts else None
+
+
 async def extract_document(
     file_path: Path, doc_type: str, filename: str, db: AsyncSession, ctx: UsageContext
 ) -> tuple[dict, str | None]:
@@ -1164,7 +1311,13 @@ async def extract_document(
             from app.services.ds260_customer_keys import coerce_ds260_customer_extraction
 
             enriched = coerce_ds260_customer_extraction(enriched)
-        return _filter_extraction_to_schema(doc_type, enriched), None
+        filtered = _filter_extraction_to_schema(doc_type, enriched)
+        warning = _combine_warnings(
+            _extraction_warnings(extracted),
+            _image_quality_warning(enriched),
+            _low_confidence_field_warning(filtered),
+        )
+        return filtered, warning
     except Exception as exc:
         if _is_quota_error(exc):
             raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
@@ -1196,6 +1349,24 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
     file_path = Path(document.file_path)
     document.status = DocumentStatus.processing
     await db.flush()
+
+    # Chỉ kiểm ảnh CHỤP trực tiếp (jpg/png/...) — PDF thường là bản scan/xuất từ máy,
+    # hiếm khi out nét kiểu chụp tay run, và _pdf_pages_to_images đã render riêng.
+    if (
+        settings.ocr_blur_variance_threshold > 0
+        and file_path.suffix.lower() in IMAGE_SUFFIXES
+        and file_path.exists()
+    ):
+        variance = _measure_blur_variance(file_path)
+        if variance is not None and variance < settings.ocr_blur_variance_threshold:
+            document.status = DocumentStatus.failed
+            document.error_message = (
+                f"Ảnh bị mờ/out nét (độ nét đo được {variance:.0f}, cần ≥ "
+                f"{settings.ocr_blur_variance_threshold:.0f}) — hệ thống chưa trích xuất để tránh "
+                "đọc sai dữ liệu. Vui lòng chụp lại ảnh rõ nét, đủ sáng, giữ máy ổn định rồi tải lên lại."
+            )
+            await db.flush()
+            return document
 
     applicant = await db.get(Applicant, document.applicant_id)
     usage_ctx = UsageContext(

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # được tài liệu nhiều trang. 20 ảnh nguyên trang ≈ 22k token — lọt trần 30k.
     # 0 = không chia (hành vi cũ).
     ocr_max_images_per_request: int = 20
+    ocr_blur_variance_threshold: float = 25.0
+    ocr_low_confidence_threshold: float = 0.5
+    ocr_low_confidence_field_ratio: float = 0.25
     upload_dir: str = "uploads"
     export_dir: str = "exports"
     templates_dir: str = "templates/forms"
