@@ -238,6 +238,7 @@ class DocumentOut(BaseModel):
     registry_doc_type: str | None = None
     is_exception: bool = False
     classification_confidence: float | None
+    classification_reason: str | None = None
     status: DocumentStatus
     error_message: str | None
     tags: list[str] = []

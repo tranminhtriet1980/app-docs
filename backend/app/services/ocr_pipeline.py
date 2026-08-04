@@ -376,8 +376,50 @@ def _pdf_text_excerpt(path: Path, max_chars: int = 12000) -> str:
 _DOCX_MAX_CHARS = 80000
 
 
+def _extract_docx_textbox_content(doc_obj) -> list[str]:
+    """Extract text từ VML text boxes (thường dùng trong Word forms cũ).
+
+    Word có 2 kiểu shape: VML (w:txbxContent) và DrawingML (a:t trong inline shape).
+    Function này đọc VML text box content từ XML trực tiếp.
+    """
+    textbox_texts: list[str] = []
+    try:
+        from docx.oxml import parse_xml
+        from lxml import etree
+    except ImportError:
+        return []
+
+    try:
+        # Duyệt qua tất cả paragraph để tìm VML shape
+        for para in doc_obj.paragraphs:
+            for run in para.runs:
+                # Check xem run có chứa drawing/shape element không
+                run_elem = run._element
+                if run_elem is not None:
+                    # Tìm w:pict (VML picture = text box)
+                    for pict in run_elem.findall('.//w:pict', namespaces=run_elem.nsmap or {}):
+                        # Tìm v:shapetype -> v:shape -> w:txbxContent
+                        for shape in pict.findall('.//v:shape', namespaces=pict.nsmap or {}):
+                            for txbx in shape.findall('.//w:txbxContent', namespaces=shape.nsmap or {}):
+                                # Lấy text từ txbxContent
+                                text_parts = []
+                                for elem in txbx.iter():
+                                    if elem.text:
+                                        text_parts.append(elem.text.strip())
+                                full_text = " ".join(t for t in text_parts if t)
+                                if full_text:
+                                    textbox_texts.append(full_text)
+    except Exception:
+        pass
+    return textbox_texts
+
+
 def _docx_text_excerpt(path: Path, max_chars: int = _DOCX_MAX_CHARS) -> str:
-    """Extract text from a Word worksheet — paragraphs + table cells (DS-260 form is a label/value table)."""
+    """Extract text from a Word worksheet — paragraphs + tables + text boxes.
+
+    Job Application forms thường dùng text box để input địa chỉ, điện thoại, email.
+    Phiên bản mới hơn chuyển sang table-based, nhưng form cũ/custom vẫn dùng text box.
+    """
     try:
         from docx import Document as _DocxDocument
     except ImportError:
@@ -387,16 +429,25 @@ def _docx_text_excerpt(path: Path, max_chars: int = _DOCX_MAX_CHARS) -> str:
     except Exception:
         return ""
     parts: list[str] = []
+
+    # Đọc paragraphs — style thường có nhãn trường (ví dụ "Current Address:")
     for para in doc.paragraphs:
         t = (para.text or "").strip()
         if t:
             parts.append(t)
+
+    # Đọc tables
     for table in doc.tables:
         for row in table.rows:
             cells = [(c.text or "").strip() for c in row.cells]
             line = " | ".join(c for c in cells if c)
             if line:
                 parts.append(line)
+
+    # Đọc text box từ VML shape (Word form cũ)
+    textbox_contents = _extract_docx_textbox_content(doc)
+    parts.extend(textbox_contents)
+
     merged = "\n".join(parts).strip()
     return merged[:max_chars]
 
@@ -1424,6 +1475,7 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
         document.registry_doc_type = doc_type if doc_type in RECORDABLE_DOC_TYPES else None
         document.is_exception = is_exception
         document.classification_confidence = float(classification.get("confidence", 0))
+        document.classification_reason = (classification.get("reason") or "")[:256]
 
         extraction, w2 = await extract_document(file_path, doc_type, document.original_filename, db, usage_ctx)
         if w2 and w2 not in warnings:
@@ -1445,6 +1497,7 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
             document.registry_doc_type = doc_type if doc_type in RECORDABLE_DOC_TYPES else None
             document.is_exception = is_exception
             document.classification_confidence = float(classification.get("confidence", 0))
+            document.classification_reason = (classification.get("reason") or "")[:256]
             extraction = _filter_extraction_to_schema(
                 doc_type,
                 _fallback_enrich_extraction(

@@ -136,6 +136,7 @@ class Document(Base):
     file_size: Mapped[int] = mapped_column()
     document_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    classification_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     status: Mapped[DocumentStatus] = mapped_column(Enum(DocumentStatus), default=DocumentStatus.uploaded)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
