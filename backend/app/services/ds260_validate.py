@@ -303,7 +303,9 @@ async def validate_ds260(
     has_ds260_worksheet = "ds260_customer_form" in present_docs
     has_application_form = "application_form" in present_docs
     worksheet_address_keys = {"current_address", "current_city", "current_state", "postal_code", "current_country"}
-    has_worksheet_address = any(flat.get(k, "").strip() for k in worksheet_address_keys)
+    has_worksheet_address = any(
+        str(flat.get(k, "")).strip() for k in worksheet_address_keys
+    )
 
     if has_ds260_worksheet and has_worksheet_address and not has_application_form:
         warnings.append(
