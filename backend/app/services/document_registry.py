@@ -232,6 +232,11 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         ),
         form_section="DS-260 D — Work / Education / Training",
         extract_keys=(
+            "current_address",
+            "address_city",
+            "address_state",
+            "postal_code",
+            "address_country",
             "primary_occupation",
             "occupation_other_specify",
             "present_employer",
@@ -314,13 +319,18 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
         return "ds260_customer_form", True
 
     # Application form (DS-260 D — công việc / học vấn) — Luồng 1 standard + _new
+    # Bắt: "application form", "job application", "immigrant application", "don nop", "don xin"
     if re.search(r"\bapplication\s+form\b", stem) or "immigrant application" in stem:
+        return "application_form", is_exception
+    if re.search(r"\bjob\s+application\b", stem):
         return "application_form", is_exception
     if re.search(r"\bdon\s+(nop|xin)\b", stem) and "ds" not in stem.replace(" ", ""):
         return "application_form", is_exception
 
     # Longer tokens first (birth certificate child before birth certificate)
-    ranked = sorted(DOCUMENT_REGISTRY, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)
+    # Quét cả SUPPLEMENTAL registry để bắt token "application" từ application_form
+    all_defs = list(DOCUMENT_REGISTRY) + list(SUPPLEMENTAL_DOCUMENT_REGISTRY)
+    ranked = sorted(all_defs, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)
     for defn in ranked:
         for token in defn.filename_tokens:
             if token in stem:

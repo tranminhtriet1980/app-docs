@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any
 
 from app.services.birth_location import (
@@ -120,6 +121,31 @@ _SKIP_KEYS = frozenset(
 )
 
 
+@lru_cache(maxsize=1)
+def _schema_yes_no_keys() -> frozenset[str]:
+    """Field key nào là câu hỏi Yes/No — suy từ schema (`default: "Yes"/"No"` hoặc nhãn có
+    "(Yes/No)"/"(Có/Không)"), KHÔNG liệt kê tay để khỏi lệch khi ds260_mapping.json đổi.
+
+    _YESNO_KEY_RE ở trên chỉ khớp vài pattern tên field (used/is_living/…) — bỏ sót gần hết
+    46 câu Security and Background + 3 câu SSN + US travel history, nên khách ghi "Có"/"Không"
+    bị title-case thành "Có"/"Không" thay vì chuẩn hóa "Yes"/"No" (báo lỗi 2026-08-04).
+    """
+    from app.services.ds260_mapping import flatten_ds260_mappings
+
+    keys: set[str] = set()
+    for key, mapping in flatten_ds260_mappings().items():
+        if mapping.default in ("Yes", "No"):
+            keys.add(key)
+            continue
+        label = mapping.label or ""
+        if any(
+            marker in label
+            for marker in ("(Yes/No)", "(Có/Không)", "Yes or No", "CÓ hay KHÔNG")
+        ):
+            keys.add(key)
+    return frozenset(keys)
+
+
 def _norm_token(s: str) -> str:
     from app.services.birth_location import normalize_location
 
@@ -206,7 +232,7 @@ def format_ds260_field_value(key: str, value: str) -> str:
         return format_gender(v)
     if _MARITAL_KEY_RE.search(key):
         return format_marital_status(v)
-    if _YESNO_KEY_RE.search(key):
+    if _YESNO_KEY_RE.search(key) or key in _schema_yes_no_keys():
         return format_yes_no(v)
     if _NAME_KEY_RE.search(key):
         return format_person_name_ascii(v)

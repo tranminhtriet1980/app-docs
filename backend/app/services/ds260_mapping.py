@@ -284,13 +284,16 @@ def _resolve_loose_from_record(
         nk = _norm_field_key(raw_key)
         if nk in norms:
             return val, raw_key
+    # CHỈ so khớp CHÍNH XÁC (không endswith/in) — "current_address" từng khớp NHẦM
+    # "child_1_current_address" vì target nằm trọn trong nk như một hậu tố, dẫn tới địa chỉ
+    # của CON bị hiển thị làm current_address của chính đương đơn (sự cố thực tế 2026-08-04).
+    # _norm_field_key chỉ bỏ ký tự không phải chữ/số, không có ranh giới từ, nên endswith/in
+    # không phân biệt được "field của người khác có tiền tố" với "đúng field cần tìm".
     target = _norm_field_key(mapping.key)
     field_n = _norm_field_key(mapping.field)
     for raw_key, val in merged.items():
         nk = _norm_field_key(raw_key)
-        if target and (nk == target or nk.endswith(target) or target in nk):
-            return val, raw_key
-        if field_n and field_n != target and (nk == field_n or nk.endswith(field_n)):
+        if (target and nk == target) or (field_n and nk == field_n):
             return val, raw_key
     return "", mapping.field
 
@@ -636,9 +639,14 @@ def _spouse_is_deceased(
 
 
 def _normalize_person_name_key(name: str) -> str:
-    from app.services.birth_location import normalize_location
+    """Điểm chốt DUY NHẤT mà _names_match/_names_same_person dùng để so khớp tên người —
+    sửa ở đây sửa cho MỌI nơi gọi (dedupe con, khớp vợ/chồng, khớp thành viên hồ sơ theo tên
+    OCR, khớp cha/mẹ trên lý lịch tư pháp...). Dùng normalize_person_name (chỉ bỏ dấu), KHÔNG
+    dùng normalize_location (dành cho địa danh, lọc mất từ hành chính trùng tên người — xem
+    docstring normalize_person_name)."""
+    from app.services.birth_location import normalize_person_name
 
-    return normalize_location(name)
+    return normalize_person_name(name)
 
 
 def _names_match(a: str, b: str) -> bool:
@@ -1465,7 +1473,27 @@ def enrich_applicant_birth_city_state_equal(
     *,
     passport_ref: ApplicantDocRecord | None = None,
 ) -> None:
-    """City of Birth và State/Province of Birth — cùng một giá trị (THÔNG TIN CÁ NHÂN)."""
+    """Chỉ điền City/State nơi sinh từ passport khi worksheet CHƯA có cả hai — không được đè
+    lên dữ liệu thật đã đọc từ worksheet.
+
+    Trước đây hàm này ép City = State cho MỌI hồ sơ (kể cả khi cả hai đã có giá trị THẬT và
+    KHÁC nhau từ worksheet, vd. City="Xã Vĩnh Lạc, Huyện Lục Yên, Tỉnh Yên Bái", State="Yên
+    Bái"): nếu City ngắn hơn (chỉ "Vĩnh Lạc") thì việc ép State = City làm MẤT tên tỉnh thật,
+    sau đó normalize_ds260_place_fields (chạy cuối pipeline, tự tách City/State đúng quy ước
+    DS-260: TP trực thuộc TW → State=N/A, TP/thị xã thuộc tỉnh → State=tỉnh đó) không còn đủ
+    dữ liệu để tách đúng và có thể match nhầm sang tỉnh khác (vd. "Vinh Lac" → "Vinh" của Nghệ
+    An thay vì Yên Bái — xác nhận bằng test thực tế 2026-08-04). Việc tách City/State đúng quy
+    ước đã có sẵn ở normalize_ds260_place_fields; hàm này chỉ còn nhiệm vụ fallback từ passport
+    khi worksheet hoàn toàn không có dữ liệu.
+    """
+    by_key = {f.get("key", ""): f for f in fields_out}
+    city_has_value = bool((by_key.get("birth_city", {}).get("value") or "").strip())
+    state_has_value = bool((by_key.get("birth_state", {}).get("value") or "").strip())
+    if city_has_value and state_has_value:
+        # Cả hai đã có dữ liệu thật (worksheet/OCR) — có thể khác nhau và đều đúng (vd. City
+        # là địa chỉ đầy đủ, State là tên tỉnh riêng). Không đè, để normalize_ds260_place_fields
+        # tách đúng theo quy ước DS-260 từ chính hai giá trị thật này.
+        return
     canonical = _canonical_applicant_birth_place(fields_out)
     if not canonical and (passport_rec or passport_ref):
         city = _resolve_from_record_luong1_fallback(
@@ -1496,11 +1524,13 @@ def enrich_marital_status_from_documents(
     death_rec: ApplicantDocRecord | None = None,
 ) -> None:
     """
-    Ly hôn → Divorced; kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ → Married;
-    không có giấy tờ → để trống.
+    Ly hôn → Single (quy ước của công ty: khách đã ly hôn khai "Single", KHÔNG dùng
+    "Divorced" dù đó cũng là lựa chọn hợp lệ trên DS-260 gốc — xác nhận trực tiếp với
+    consultant 2026-08-04); kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ →
+    Married; không có giấy tờ → để trống.
     """
     if divorce_rec:
-        status = "Divorced"
+        status = "Single"
         derived = "marital_status_from_divorce"
         doc_type = "divorce"
     elif has_applicable_marriage_certificate(
@@ -1733,7 +1763,16 @@ def _child_data_from_record(rec: ApplicantDocRecord) -> dict[str, str]:
 
 
 def _child_dedupe_key(data: dict[str, str]) -> tuple[str, str]:
-    name = re.sub(r"\s+", " ", (data.get("full_name") or "").strip().upper())
+    """`.strip().upper()` KHÔNG bỏ dấu — giấy khai sinh ghi có dấu ("Nguyễn Minh Phương") còn
+    worksheet khách khai thường gõ không dấu ("NGUYEN MINH PHUONG"), hai chuỗi khác nhau nên
+    không dedupe được → cùng một con bị tính 2 lần, children_count dư ra dù hiển thị "trùng
+    tên" trên form (form hiển thị đã qua bước bỏ dấu cuối pipeline nên nhìn giống hệt nhau —
+    báo lỗi thực tế 2026-08-04). Dùng format_person_name_ascii (chỉ bỏ dấu, KHÔNG lọc từ hành
+    chính như normalize_location — normalize_location từng cắt mất "Phương" vì trùng "phường").
+    """
+    from app.services.birth_location import format_person_name_ascii
+
+    name = format_person_name_ascii(data.get("full_name") or "")
     dob = (data.get("date_of_birth") or "").strip()
     parsed = parse_full_date(dob)
     if parsed:

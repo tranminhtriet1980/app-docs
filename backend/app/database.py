@@ -61,6 +61,8 @@ def _migrate_sqlite_columns(connection) -> None:
     _migrate_doc_records_per_file(connection)
     _add("form_templates", "is_active", "is_active BOOLEAN DEFAULT 1 NOT NULL")
     _add("form_templates", "created_at", "created_at DATETIME")
+    _add("conflicts", "majority_count", "majority_count INTEGER")
+    _add("conflicts", "total_count", "total_count INTEGER")
 
 
 def _migrate_postgres_columns(connection) -> None:
@@ -91,6 +93,8 @@ def _migrate_postgres_columns(connection) -> None:
     _add("documents", "is_exception BOOLEAN DEFAULT FALSE NOT NULL")
     _add("form_templates", "is_active BOOLEAN DEFAULT TRUE NOT NULL")
     _add("form_templates", "created_at TIMESTAMPTZ")
+    _add("conflicts", "majority_count INTEGER")
+    _add("conflicts", "total_count INTEGER")
 
 
 def _migrate_doc_records_per_file(connection) -> None:

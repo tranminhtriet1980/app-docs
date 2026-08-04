@@ -383,6 +383,11 @@ export const api = {
       method: "DELETE",
     }),
 
+  deleteAllDocuments: (applicantId: string) =>
+    request<{ message: string }>(`/api/v1/applicants/${applicantId}/documents`, {
+      method: "DELETE",
+    }),
+
   getProfile: (applicantId: string) =>
     request<Profile>(`/api/v1/applicants/${applicantId}/profile`),
 
@@ -850,6 +855,8 @@ export type Conflict = {
   status: string;
   conflict_type?: string | null;
   field_label?: string | null;
+  majority_count?: number | null;
+  total_count?: number | null;
 };
 
 export type Profile = {

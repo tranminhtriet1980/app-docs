@@ -119,13 +119,25 @@ function Ds260ConflictPanel({
       <div className="mt-4 space-y-3">
         {conflicts.map((c) => {
           const isWorksheet = c.conflict_type === "document_vs_worksheet";
+          const isOutlier = c.conflict_type === "identity_outlier";
           const title = c.field_label || c.field_key.replace(/^ds260\./, "");
           const custom = customById[c.id] ?? "";
           return (
-            <div key={c.id} className="rounded-lg border border-amber-200 bg-white p-3">
+            <div
+              key={c.id}
+              className={`rounded-lg border bg-white p-3 ${
+                isOutlier ? "border-rose-300" : "border-amber-200"
+              }`}
+            >
               <p className="text-sm font-medium text-slate-800">{title}</p>
               {isWorksheet && (
                 <p className="mt-0.5 text-xs text-slate-500">Loại: Giấy tờ vs DS-260 worksheet</p>
+              )}
+              {isOutlier && (
+                <p className="mt-0.5 text-xs font-medium text-rose-600">
+                  {c.majority_count ?? "?"}/{c.total_count ?? "?"} tài liệu cùng ghi giá trị này — tài
+                  liệu còn lại có thể bị trích xuất sai
+                </p>
               )}
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <button
@@ -135,7 +147,11 @@ function Ds260ConflictPanel({
                   onClick={() => onResolve(c.id, c.value_a || "")}
                 >
                   <span className="block text-xs font-medium text-green-700">
-                    {isWorksheet ? "Nguồn A — Giấy tờ chính (Luồng 1)" : "Nguồn A — Luồng 1 (mẫu)"}
+                    {isOutlier
+                      ? `Đa số tài liệu (${c.majority_count ?? "?"}/${c.total_count ?? "?"})`
+                      : isWorksheet
+                        ? "Nguồn A — Giấy tờ chính (Luồng 1)"
+                        : "Nguồn A — Luồng 1 (mẫu)"}
                   </span>
                   <span className="font-mono">{c.value_a || "—"}</span>
                   {c.document_a_filename && (
@@ -145,11 +161,21 @@ function Ds260ConflictPanel({
                 <button
                   type="button"
                   disabled={busyId === c.id}
-                  className="flex-1 rounded border border-amber-200 bg-amber-50/50 px-3 py-2 text-left text-sm hover:bg-amber-50"
+                  className={`flex-1 rounded border px-3 py-2 text-left text-sm ${
+                    isOutlier
+                      ? "border-rose-200 bg-rose-50/50 hover:bg-rose-50"
+                      : "border-amber-200 bg-amber-50/50 hover:bg-amber-50"
+                  }`}
                   onClick={() => onResolve(c.id, c.value_b || "")}
                 >
-                  <span className="block text-xs font-medium text-amber-700">
-                    {isWorksheet ? "Nguồn B — DS-260 khách khai" : "Nguồn B — Đối chiếu (_new)"}
+                  <span
+                    className={`block text-xs font-medium ${isOutlier ? "text-rose-700" : "text-amber-700"}`}
+                  >
+                    {isOutlier
+                      ? `${c.document_b_filename || "Tài liệu này"} — khác biệt`
+                      : isWorksheet
+                        ? "Nguồn B — DS-260 khách khai"
+                        : "Nguồn B — Đối chiếu (_new)"}
                   </span>
                   <span className="font-mono">{c.value_b || "—"}</span>
                   {c.document_b_filename && (

@@ -285,13 +285,21 @@ FIELD_MAP: dict[str, dict[str, str]] = {
         **DS160_EXTRACT_MAP,
     },
     "divorce": {
+        # KHÔNG map husband_full_name/defendant_name → identity.full_name: quyết định ly hôn
+        # có 2 PHÍA (nguyên đơn/bị đơn, chồng/vợ), map tĩnh không biết đương đơn là bên nào —
+        # từng khiến vote "đa số tài liệu" (identity_conflicts.py) coi tên VỢ/CHỒNG CŨ của
+        # đương đơn nữ là "khác biệt" so với chính tên đương đơn (sự cố thực tế 2026-08-04:
+        # đương đơn "TRIỆU THỊ DUYÊN" bị hỏi chọn giữa tên mình và "NGUYỄN VĂN HÙNG" — tên
+        # chồng cũ trên quyết định ly hôn). Cùng nguyên tắc đã áp dụng cho marriage_certificate
+        # (xem test_spouse_name_on_marriage_certificate_not_counted_as_applicant) — dồn cả 2
+        # phía vào một bucket "family.*" trung lập, không phía nào được coi là đương đơn.
         "full_name": "identity.full_name",
         "name": "identity.full_name",
-        "husband_full_name": "identity.full_name",
+        "husband_full_name": "family.previous_spouses_history",
         "wife_full_name": "family.previous_spouses_history",
         "spouse_name": "family.previous_spouses_history",
         "plaintiff_name": "family.previous_spouses_history",
-        "defendant_name": "identity.full_name",
+        "defendant_name": "family.previous_spouses_history",
         "marriage_date": "family.previous_spouses_history",
         "divorce_date": "family.previous_spouses_history",
         "document_number": "other.document_number",
@@ -377,6 +385,7 @@ FIELD_MAP: dict[str, dict[str, str]] = {
         "college_address": "education.college_address",
         "college_major": "education.college_major",
         "college_period": "education.college_period",
+        **CONTACT_ADDRESS_MAP,
         **DS160_EXTRACT_MAP,
     },
     "address_document": {

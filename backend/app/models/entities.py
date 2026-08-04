@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -195,6 +195,8 @@ class Conflict(Base):
     status: Mapped[ConflictStatus] = mapped_column(Enum(ConflictStatus), default=ConflictStatus.open)
     resolved_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    majority_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     applicant: Mapped["Applicant"] = relationship(back_populates="conflicts")
 

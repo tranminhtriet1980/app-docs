@@ -38,7 +38,9 @@ Bước 1: Xác định loại tài liệu từ nội dung (ảnh/PDF). Các lo�
 - birth_certificate_child
 - military_discharge
 
-Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, address_document, ds260_customer_form, photo, other
+Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, application_form, address_document, ds260_customer_form, photo, other
+
+application_form = đơn xin việc / Job Application — có mục "Applicant's Information" (địa chỉ cá nhân, số điện thoại, email, chức danh, lịch sử việc làm, học vấn). KHÁC employment_letter (chỉ xác nhận việc làm hiện tại). Đây là giấy tờ chính thức để đối chiếu địa chỉ trong DS-260 worksheet.
 
 ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền tay/đánh máy). Gồm cả:
 (a) bản CŨ ImmiPath nhiều mục (cá nhân, hộ chiếu, ĐỊA CHỈ, LIÊN LẠC, MXH, cha/mẹ/phối ngẫu/con,
@@ -468,6 +470,8 @@ def _mock_classification(filename: str) -> dict:
         ("military", "military_discharge"),
         ("transcript", "diploma_transcript"),
         ("diploma", "diploma_transcript"),
+        ("job application", "application_form"),
+        ("application form", "application_form"),
         ("employment", "employment_letter"),
         ("financial", "financial"),
         ("address", "address_document"),
@@ -1065,6 +1069,10 @@ Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG 
 APPLICATION_FORM_EXTRACT_HINT = """
 IMMIGRATION APPLICATION FORM — DS-260 Part D (Work / Education / Training).
 
+PERSONAL ADDRESS (nếu form có mục địa chỉ RIÊNG của người khai, KHÁC employer_address —
+đây là nơi người khai đang ở, dùng để đối chiếu với worksheet DS-260, KHÔNG phải địa chỉ
+công ty): current_address (street), address_city, address_state, postal_code, address_country.
+
 WORK: primary_occupation, occupation_other_specify, present_employer, employer_name,
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
 job_title, employment_start_date, prior_jobs_history.
@@ -1325,6 +1333,33 @@ async def extract_document(
         raise
 
 
+def _coerce_confidence_to_float(value: object) -> float | None:
+    """Cùng lớp lỗi với _coerce_field_value_to_str: cột FLOAT insert thẳng string ("high"…) cũng
+    ném DataError. Model thi thoảng trả confidence dạng chuỗi thay vì số dù prompt yêu cầu số."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_field_value_to_str(value: object) -> str | None:
+    """`ExtractedField.field_value` là cột VARCHAR/TEXT — asyncpg insert thẳng list/dict vào đó
+    ném DataError và ROLLBACK CẢ TRANSACTION (mất luôn mọi field khác đã đọc đúng của tài liệu).
+
+    Prompt đã yêu cầu "value" luôn là string, nhưng model vẫn có lúc trả về object/array lồng
+    nhau cho một field (sự cố thực tế 2026-08-04, OCR "01_7 JOB APPLICATION...docx" — model trả
+    value kiểu [{"surname": "NGUYEN", "given_names": "..."}] thay vì chuỗi). Không thể chỉ tin
+    prompt — phải chặn ở biên DB.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
 async def save_extracted_fields(db: AsyncSession, document_id, extraction: dict) -> list[ExtractedField]:
     await db.execute(delete(ExtractedField).where(ExtractedField.document_id == document_id))
     fields_data = extraction.get("fields", {})
@@ -1335,9 +1370,9 @@ async def save_extracted_fields(db: AsyncSession, document_id, extraction: dict)
         ef = ExtractedField(
             document_id=document_id,
             field_key=key,
-            field_value=meta.get("value"),
-            confidence=meta.get("confidence"),
-            source_page=meta.get("source_page"),
+            field_value=_coerce_field_value_to_str(meta.get("value")),
+            confidence=_coerce_confidence_to_float(meta.get("confidence")),
+            source_page=_coerce_field_value_to_str(meta.get("source_page")),
         )
         db.add(ef)
         saved.append(ef)

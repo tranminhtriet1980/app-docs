@@ -488,6 +488,8 @@ class ConflictOut(BaseModel):
     resolved_value: str | None
     conflict_type: str | None = None
     field_label: str | None = None
+    majority_count: int | None = None
+    total_count: int | None = None
 
     model_config = {"from_attributes": True}
 

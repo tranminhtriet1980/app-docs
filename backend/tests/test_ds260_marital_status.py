@@ -52,9 +52,10 @@ def test_marital_status_married_when_marriage_cert_applicable():
     assert fields[0]["source"]["derived"] == "marital_status_from_marriage"
 
 
-def test_marital_status_divorced_when_divorce_present():
+def test_marital_status_single_when_divorce_present():
+    """Quy ước công ty: đã ly hôn → khai "Single", không dùng "Divorced"."""
     fields = [{"key": "current_marital_status", "value": "", "source": {}}]
     divorce = _rec({"divorce_date": "2025-07-30"})
     enrich_marital_status_from_documents(fields, divorce)
-    assert fields[0]["value"] == "Divorced"
+    assert fields[0]["value"] == "Single"
     assert fields[0]["source"]["derived"] == "marital_status_from_divorce"

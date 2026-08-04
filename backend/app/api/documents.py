@@ -20,6 +20,7 @@ from app.models.entities import (
     Applicant,
     ApplicantDocRecord,
     ApplicantStatus,
+    Conflict,
     Document,
     DocumentStatus,
     ProfileField,
@@ -62,6 +63,11 @@ def _document_sort_key(doc: DocumentOut) -> tuple[int, int, str]:
     return (member_num, file_seq, (doc.original_filename or "").lower())
 
 router = APIRouter(tags=["documents"])
+
+# Applicant đang bị yêu cầu dừng xử lý (nút "Xoá tất cả tài liệu") — pipeline nền kiểm tra
+# trước mỗi file, không xử lý tiếp file nào nữa. Không huỷ được cuộc gọi OpenAI đang bay dở,
+# chỉ chặn file tiếp theo trong hàng đợi.
+_CANCELLED_APPLICANTS: set[uuid.UUID] = set()
 
 
 @lru_cache(maxsize=1)
@@ -260,6 +266,9 @@ async def _run_applicant_pipeline(applicant_id: uuid.UUID) -> None:
         logger.info("Pipeline start applicant=%s pending_docs=%d", applicant_id, len(pending))
 
         for document in pending:
+            if applicant_id in _CANCELLED_APPLICANTS:
+                logger.info("Pipeline cancelled applicant=%s", applicant_id)
+                return
             doc_id = document.id
             try:
                 await process_document(db, document)
@@ -290,6 +299,7 @@ async def _run_applicant_pipeline(applicant_id: uuid.UUID) -> None:
 
 def _schedule_pipeline(background_tasks: BackgroundTasks, applicant_id: uuid.UUID) -> None:
     """One background job per applicant — avoids lost tasks when batch-uploading many files."""
+    _CANCELLED_APPLICANTS.discard(applicant_id)
     background_tasks.add_task(_run_applicant_pipeline, applicant_id)
 
 
@@ -525,6 +535,48 @@ async def _detach_document_references(db: AsyncSession, document_id: uuid.UUID) 
         .where(ProfileField.source_document_id == document_id)
         .values(source_document_id=None)
     )
+    await db.execute(
+        update(Conflict).where(Conflict.document_a_id == document_id).values(document_a_id=None)
+    )
+    await db.execute(
+        update(Conflict).where(Conflict.document_b_id == document_id).values(document_b_id=None)
+    )
+
+
+@router.delete("/applicants/{applicant_id}/documents", response_model=MessageOut)
+async def delete_all_documents(
+    applicant: Annotated[Applicant, Depends(get_owned_applicant)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Dừng pipeline OCR đang chạy (nếu có) và xoá toàn bộ tài liệu + dữ liệu trích xuất
+    của hồ sơ này, để upload lại từ đầu. Không xoá hồ sơ applicant."""
+    _CANCELLED_APPLICANTS.add(applicant.id)
+
+    result = await db.execute(select(Document).where(Document.applicant_id == applicant.id))
+    documents = list(result.scalars().all())
+    if not documents:
+        raise HTTPException(status_code=404, detail="Không có tài liệu nào để xoá")
+
+    file_paths = [Path(document.file_path) for document in documents]
+    for document in documents:
+        await delete_doc_records_for_document(db, document.id)
+        await _detach_document_references(db, document.id)
+        await db.delete(document)
+    await db.flush()
+    await finalize_applicant_after_ocr(db, applicant.id)
+    await db.commit()
+
+    # Cleanup file/folder after DB commit; ignore filesystem errors.
+    for file_path in file_paths:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+            if file_path.parent.exists():
+                file_path.parent.rmdir()
+        except OSError:
+            pass
+
+    return MessageOut(message=f"Đã dừng xử lý và xoá {len(documents)} tài liệu")
 
 
 @router.delete("/applicants/{applicant_id}/documents/{document_id}", response_model=MessageOut)

@@ -701,6 +701,20 @@ def coerce_ds260_customer_extraction(extraction: dict[str, Any]) -> dict[str, An
         elif not _field_meta_value(remapped[key]):
             remapped[key]["value"] = val
 
+    _force_ssn_consent_yes(remapped)
+
     extraction["fields"] = remapped
     extraction["document_type"] = "ds260_customer_form"
     return extraction
+
+
+# Chính sách công ty (xác nhận với consultant 2026-08-04): hầu như khách hàng nào cũng
+# CHƯA có SSN, nên luôn trả lời YES cho cả hai câu — bất kể worksheet ghi gì (kể cả khi
+# khách tích No/để trống do không hiểu câu hỏi). KHÔNG áp dụng cho applied_ssn_before
+# (câu hỏi "đã từng xin SSN chưa" phản ánh sự thật, không phải câu xin cấp mới).
+_SSN_FORCE_YES_KEYS = ("want_ssn_issued", "authorize_ssn_disclosure")
+
+
+def _force_ssn_consent_yes(fields: dict[str, dict]) -> None:
+    for key in _SSN_FORCE_YES_KEYS:
+        fields[key] = {"value": "Yes", "confidence": 1.0, "source_page": "policy_default"}

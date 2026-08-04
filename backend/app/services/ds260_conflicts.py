@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
@@ -37,6 +38,19 @@ LUONG1_DOC_TYPES: frozenset[str] = frozenset(
 DS260_CONFLICT_PREFIX = "ds260."
 WORKSHEET_CONFLICT_SEGMENT = "document_vs_worksheet"
 DS260_MANUAL_SEGMENT = "manual"
+IDENTITY_OUTLIER_SEGMENT = "identity_outlier"
+
+def _application_form_worksheet_keys() -> frozenset[str]:
+    """Section D (công việc/học vấn) — mọi field nguồn application_form, trừ narrative tự do
+    (work_prior_jobs_history: so khớp chuỗi tuyệt đối luôn khác nhau dù nội dung đúng)."""
+    from app.services.ds260_mapping import flatten_ds260_mappings
+
+    return frozenset(
+        k
+        for k, m in flatten_ds260_mappings().items()
+        if m.document == "application_form" and k != "work_prior_jobs_history"
+    )
+
 
 # DS-260 mapping keys compared: official (Luồng 1 resolved) vs ds260_customer_form
 WORKSHEET_COMPARE_KEYS: frozenset[str] = frozenset(
@@ -51,15 +65,33 @@ WORKSHEET_COMPARE_KEYS: frozenset[str] = frozenset(
         "passport_expiration_date",
         "current_marital_status",
         "current_address",
+        "current_city",
+        "current_state",
+        "postal_code",
+        "current_country",
         "primary_phone",
         "email",
     }
-)
+) | _application_form_worksheet_keys()
 
 # Giá trị "chính thức" so với worksheet — override mapping.document khi cần.
-# Address/contact trên worksheet; nguồn đối chiếu thường là Passport_new.
+# Address/contact trên worksheet; nguồn đối chiếu là Application form (Job Application, mục 1.
+# Applicant's Information) — giấy tờ khách nộp có mục địa chỉ cá nhân riêng (Current Address,
+# City, State/Province, Country, Postal Code đầy đủ), dùng để đối chiếu chứ không tự điền
+# thẳng giá trị worksheet (báo lỗi thực tế 2026-08-04: current_address trước đó "cứ điền rồi
+# fill" không hề đối chiếu, vì override cũ trỏ vào "passport" — passport KHÔNG có
+# current_address nên _official_value_for_worksheet_compare luôn trả rỗng và
+# build_worksheet_conflict_rows luôn bỏ qua field này, im lặng không bao giờ tạo Conflict).
+# Khách khai worksheet nhiều khi ghi sai/thiếu (vd. bỏ trống City, đảo City↔State, Postal Code
+# ghi tên khu vực thay vì mã bưu điện — thấy trong hồ sơ thật TRIEU THI DUYEN 2026-08-04) nên
+# City/State/Postal/Country cũng phải đối chiếu với application_form như current_address,
+# không chỉ riêng mỗi địa chỉ đường phố.
 WORKSHEET_OFFICIAL_DOC_OVERRIDES: dict[str, str] = {
-    "current_address": "passport",
+    "current_address": "application_form",
+    "current_city": "application_form",
+    "current_state": "application_form",
+    "postal_code": "application_form",
+    "current_country": "application_form",
     "primary_phone": "passport",
     "email": "passport",
 }
@@ -98,6 +130,8 @@ def is_ds260_conflict_field(field_key: str) -> bool:
 def conflict_type_from_field_key(field_key: str) -> str:
     if f".{WORKSHEET_CONFLICT_SEGMENT}." in field_key:
         return "document_vs_worksheet"
+    if f".{IDENTITY_OUTLIER_SEGMENT}." in field_key:
+        return "identity_outlier"
     return "document_vs_exception"
 
 
@@ -107,6 +141,8 @@ def parse_ds260_conflict_key(field_key: str) -> tuple[str, str] | None:
     rest = field_key[len(DS260_CONFLICT_PREFIX) :]
     if rest.startswith(f"{WORKSHEET_CONFLICT_SEGMENT}."):
         return WORKSHEET_CONFLICT_SEGMENT, rest[len(WORKSHEET_CONFLICT_SEGMENT) + 1 :]
+    if rest.startswith(f"{IDENTITY_OUTLIER_SEGMENT}."):
+        return IDENTITY_OUTLIER_SEGMENT, rest[len(IDENTITY_OUTLIER_SEGMENT) + 1 :]
     doc_type, _, source_field = rest.partition(".")
     if doc_type and source_field:
         return doc_type, source_field
@@ -448,9 +484,8 @@ def build_worksheet_conflict_rows(
 def _sync_document_exception_conflicts(
     records: list[ApplicantDocRecord],
     resolutions: dict[str, str],
-    applicant_id,
-) -> list[Conflict]:
-    created: list[Conflict] = []
+) -> list[dict]:
+    rows: list[dict] = []
     for doc_type in LUONG1_DOC_TYPES:
         standard = pick_latest_by_variant(records, doc_type, "standard")
         reference = pick_latest_by_variant(records, doc_type, "exception")
@@ -471,18 +506,16 @@ def _sync_document_exception_conflicts(
             if fk in resolutions:
                 continue
 
-            created.append(
-                Conflict(
-                    applicant_id=applicant_id,
-                    field_key=fk,
-                    value_a=val_a,
-                    document_a_id=standard.source_document_id,
-                    value_b=val_b,
-                    document_b_id=reference.source_document_id,
-                    status=ConflictStatus.open,
-                )
+            rows.append(
+                {
+                    "field_key": fk,
+                    "value_a": val_a,
+                    "document_a_id": standard.source_document_id,
+                    "value_b": val_b,
+                    "document_b_id": reference.source_document_id,
+                }
             )
-    return created
+    return rows
 
 
 async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
@@ -490,11 +523,25 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     So sánh:
     1) Luồng 1 (standard) vs đối chiếu (exception) — document_vs_exception
     2) Giá trị Luồng 1 đã resolve vs ds260_customer_form — document_vs_worksheet
+    3) Đa số tài liệu vs tài liệu lệch (tên/ngày sinh/giới tính/tên cha-mẹ) — identity_outlier
 
-    Tạo / cập nhật Conflict mở; giữ conflict đã resolved.
+    Upsert theo field_key (KHÔNG xoá-hết-rồi-tạo-lại): sync chạy lại sau MỖI lần OCR xong
+    một file, kể cả khi nội dung không đổi — xoá/tạo lại toàn bộ sẽ cấp UUID mới cho conflict
+    id mỗi lần, khiến id đang hiển thị trên UI thành "mồ côi" giữa lúc người dùng bấm resolve
+    → 404 dù conflict thực chất vẫn còn đó. Giữ conflict cũ nguyên id, chỉ cập nhật giá trị.
     """
     records = await list_doc_records(db, applicant_id)
     resolutions = await load_ds260_field_resolutions(db, applicant_id)
+
+    from app.services.identity_conflicts import build_identity_outlier_conflict_rows
+
+    desired: dict[str, dict] = {}
+    for row in _sync_document_exception_conflicts(records, resolutions):
+        desired[row["field_key"]] = row
+    for row in build_worksheet_conflict_rows(records, resolutions):
+        desired[row["field_key"]] = row
+    for row in await build_identity_outlier_conflict_rows(db, applicant_id, resolutions):
+        desired[row["field_key"]] = row
 
     open_result = await db.execute(
         select(Conflict).where(
@@ -503,37 +550,90 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
             Conflict.status == ConflictStatus.open,
         )
     )
-    for old in open_result.scalars():
-        await db.delete(old)
+    existing_by_key: dict[str, Conflict] = {c.field_key: c for c in open_result.scalars()}
 
-    created = 0
-    for conflict in _sync_document_exception_conflicts(records, resolutions, applicant_id):
-        db.add(conflict)
-        created += 1
+    for field_key, existing in existing_by_key.items():
+        if field_key not in desired:
+            await db.delete(existing)
 
-    for row in build_worksheet_conflict_rows(records, resolutions):
-        db.add(
-            Conflict(
-                applicant_id=applicant_id,
-                field_key=row["field_key"],
-                value_a=row["value_a"],
-                document_a_id=row["document_a_id"],
-                value_b=row["value_b"],
-                document_b_id=row["document_b_id"],
-                status=ConflictStatus.open,
+    for field_key, row in desired.items():
+        existing = existing_by_key.get(field_key)
+        if existing:
+            existing.value_a = row["value_a"]
+            existing.document_a_id = row["document_a_id"]
+            existing.value_b = row["value_b"]
+            existing.document_b_id = row["document_b_id"]
+            existing.majority_count = row.get("majority_count")
+            existing.total_count = row.get("total_count")
+        else:
+            db.add(
+                Conflict(
+                    applicant_id=applicant_id,
+                    field_key=field_key,
+                    value_a=row["value_a"],
+                    document_a_id=row["document_a_id"],
+                    value_b=row["value_b"],
+                    document_b_id=row["document_b_id"],
+                    status=ConflictStatus.open,
+                    majority_count=row.get("majority_count"),
+                    total_count=row.get("total_count"),
+                )
             )
-        )
-        created += 1
 
     await db.flush()
-    return created
+    return len(desired)
 
 
-def conflict_label_vi(field_key: str) -> str:
+@lru_cache(maxsize=1)
+def _field_key_to_section_title() -> dict[str, str]:
+    """mapping_key → tiêu đề MỤC DS-260 chứa nó (vd. "DS-260 3 — ADDRESS / ĐỊA CHỈ") — để
+    nhãn conflict ghi rõ field đang xung đột thuộc mục nào trên form, thay vì nói chung chung
+    "DS-260 worksheet" (yêu cầu thực tế 2026-08-04: "ở mục gì trong DS260 luôn á")."""
+    from app.services.ds260_mapping import load_ds260_sections
+
+    out: dict[str, str] = {}
+    for sec in load_ds260_sections():
+        for f in sec.fields:
+            out[f.key] = sec.title
+    return out
+
+
+# identity_outlier dùng namespace canonical riêng ("identity.*"/"family.*", field_mapping.py)
+# khác với namespace mapping_key của ds260_mapping.json ("applicant_name", "father_surname"...)
+# — quy đổi thủ công cho đúng 5 key trong IDENTITY_VOTE_KEYS (identity_conflicts.py) để tra
+# được MỤC DS-260 chứa nó, thay vì hiển thị nhãn trần không rõ thuộc mục nào (yêu cầu thực tế
+# 2026-08-04: "nó đang không phân mục DS260 nào chứa").
+_IDENTITY_CANONICAL_TO_MAPPING_KEY: dict[str, str] = {
+    "identity.full_name": "applicant_name",
+    "identity.date_of_birth": "date_of_birth",
+    "identity.gender": "gender",
+    "family.father_name": "father_surname",
+    "family.mother_name": "mother_surname",
+}
+
+
+def conflict_label_vi(field_key: str, *, person_hint: str | None = None) -> str:
+    """`person_hint` — tên người (case member) mà conflict identity_outlier này thuộc về.
+
+    Hồ sơ gia đình nhiều người có thể phát sinh NHIỀU thẻ conflict cùng nhãn ("Họ và tên đầy
+    đủ — khác biệt với đa số tài liệu") — một thẻ cho mẹ, một thẻ cho con — nếu không ghi rõ
+    thuộc về ai ngay trên tiêu đề thì người dùng phải tự đọc tên file nhỏ bên dưới mới đoán
+    được, dễ chọn nhầm giữa 2 người (báo lỗi thực tế 2026-08-04).
+    """
     parsed = parse_ds260_conflict_key(field_key)
     if not parsed:
         return field_key
     kind, name = parsed
+    if kind == IDENTITY_OUTLIER_SEGMENT:
+        from app.services.field_mapping import FIELD_LABELS_VI
+
+        canonical_key, _, _document_id = name.rpartition(".")
+        label = FIELD_LABELS_VI.get(canonical_key, canonical_key or name)
+        who = f" ({person_hint})" if person_hint else ""
+        mapping_key = _IDENTITY_CANONICAL_TO_MAPPING_KEY.get(canonical_key)
+        section_title = _field_key_to_section_title().get(mapping_key or "", "")
+        section_prefix = f"{section_title} · " if section_title else ""
+        return f"⚠️ {section_prefix}{label}{who} — khác biệt với đa số tài liệu"
     if kind == WORKSHEET_CONFLICT_SEGMENT:
         labels = {
             "applicant_name": "Họ và tên",
@@ -548,8 +648,35 @@ def conflict_label_vi(field_key: str) -> str:
             "current_address": "Địa chỉ hiện tại",
             "primary_phone": "Số điện thoại",
             "email": "Email",
+            "work_primary_occupation": "Nghề nghiệp chính",
+            "work_occupation_other_specify": "Nghề khác (ghi rõ)",
+            "work_present_employer": "Công ty/nơi làm việc hiện tại",
+            "work_employer_address": "Địa chỉ công ty",
+            "work_employer_city": "Thành phố công ty",
+            "work_employer_state": "Tỉnh/Bang công ty",
+            "work_employer_postal_code": "Mã bưu điện công ty",
+            "work_employer_country": "Quốc gia công ty",
+            "work_job_title": "Chức danh",
+            "work_start_date": "Ngày bắt đầu làm việc",
+            "edu_middle_school_name": "Tên trường THCS",
+            "edu_middle_school_address": "Địa chỉ trường THCS",
+            "edu_middle_school_period": "Thời gian học THCS",
+            "edu_high_school_name": "Tên trường THPT",
+            "edu_high_school_address": "Địa chỉ trường THPT",
+            "edu_high_school_period": "Thời gian học THPT",
+            "edu_college_name": "Tên trường ĐH/CĐ",
+            "edu_college_address": "Địa chỉ trường ĐH/CĐ",
+            "edu_college_major": "Chuyên ngành",
+            "edu_college_period": "Thời gian học ĐH/CĐ",
         }
-        return f"DS-260 worksheet · {labels.get(name, name)}"
+        field_label = labels.get(name)
+        if not field_label:
+            from app.services.ds260_mapping import flatten_ds260_mappings
+
+            mapping = flatten_ds260_mappings().get(name)
+            field_label = mapping.label if mapping else name
+        section_title = _field_key_to_section_title().get(name, "DS-260 worksheet")
+        return f"{section_title} · {field_label}"
     doc_type, source_field = kind, name
     doc_labels = {
         "passport": "Passport",

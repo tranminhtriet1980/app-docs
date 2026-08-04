@@ -117,6 +117,32 @@ def test_union_worksheet_and_birth_certs_dedupe():
     assert by_key["child_3_full_name"] == "LE VAN C"
 
 
+def test_dedupe_same_child_diacritics_vs_ascii_worksheet_spelling():
+    """Bug thực tế 2026-08-04: giấy khai sinh ghi có dấu, worksheet gõ không dấu — cùng một
+    con nhưng chuỗi tên khác nhau ở bước dedupe (trước khi hiển thị bỏ dấu ở cuối pipeline,
+    lúc đó nhìn "trùng tên" nhưng đã bị tính thành 2 con riêng)."""
+    child1 = _rec({"child_full_name": "Nguyễn Minh Phương", "child_date_of_birth": "2007-01-29"})
+    ws = _rec(
+        {
+            "children_count": "1",
+            "child_1_full_name": "NGUYEN MINH PHUONG",
+            "child_1_date_of_birth": "2007-01-29",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(fields, [child1], all_records=[child1, ws])
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_count"] == "1"
+    assert by_key["child_1_full_name"] == "Nguyễn Minh Phương"
+    assert by_key["child_2_full_name"] == ""
+
+
 def test_standard_and_new_same_child_count_as_one():
     """2 con × (standard + _new) = 4 file nhưng chỉ 2 slot con trên Review."""
     child_a_std = _rec(

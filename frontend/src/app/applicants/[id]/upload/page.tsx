@@ -32,6 +32,7 @@ export default function UploadPage() {
   const [deletingId, setDeletingId] = useState<string>("");
   const [reprocessingId, setReprocessingId] = useState<string>("");
   const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [docTypes, setDocTypes] = useState<DocumentTypeGuide[]>([]);
   const [deletingApplicant, setDeletingApplicant] = useState(false);
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -156,6 +157,23 @@ export default function UploadPage() {
     }
   };
 
+  const deleteAllDocuments = async () => {
+    if (!documents.length) return;
+    const ok = window.confirm(
+      `Xoá toàn bộ ${documents.length} tài liệu đã upload?\n\nMọi xử lý AI đang chạy sẽ dừng lại, dữ liệu đã trích xuất sẽ mất hết. Bạn có thể upload lại tài liệu mới sau đó. Không thể hoàn tác.`
+    );
+    if (!ok) return;
+    setDeletingAll(true);
+    try {
+      await api.deleteAllDocuments(id);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Không thể xoá tài liệu");
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   const deleteApplicant = async () => {
     if (!applicant) return;
     const ok = window.confirm(
@@ -245,6 +263,14 @@ export default function UploadPage() {
               onClick={reprocessAll}
             >
               {reprocessingAll ? "Đang reprocess..." : "Reprocess tất cả (gồm .docx)"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-red-700 hover:border-red-200 hover:bg-red-50"
+              disabled={deletingAll || documents.length === 0}
+              onClick={deleteAllDocuments}
+            >
+              {deletingAll ? "Đang xoá..." : "Xoá tất cả tài liệu"}
             </button>
           </div>
         </div>
