@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.entities import Applicant, ApplicantDocRecord, CaseMember, PersonRole
+from app.models.entities import Applicant, ApplicantDocRecord, CaseMember, Document, PersonRole
 
 _MEMBER_FILE_PREFIX = re.compile(r"^(\d{2})_(\d+)(?:[\s\-_.]|$)", re.I)
 _MEMBER_NUMBER_PREFIX = re.compile(r"^(\d{2})[\s\-_.]+", re.I)
@@ -295,6 +295,66 @@ def members_for_document_labeling(
     if applicant:
         return [synthetic_principal_member(applicant)]
     return []
+
+
+async def resolve_doc_records_member_numbers(
+    db: AsyncSession,
+    applicant_id: uuid.UUID,
+    records: list[ApplicantDocRecord],
+) -> dict[int, str]:
+    """id(record) → member_number ('01', '02', …) — xác định ApplicantDocRecord thuộc về AI
+    trong bộ hồ sơ gia đình, dùng tên file (ưu tiên) + tên OCR trích xuất (fallback), tái dùng
+    đúng cơ chế resolve_document_member_labels_batch/_resolve_member_identity đã áp dụng cho
+    identity_outlier (2026-08-04). Record không xác định được (source_document_id thiếu, hoặc
+    không khớp filename/tên ai) → KHÔNG có trong dict trả về — nơi gọi phải loại record đó khỏi
+    vòng so sánh/điền chéo, không đoán mò gán bừa cho một người (báo lỗi thực tế 2026-08-05: xung
+    đột địa chỉ so nhầm giữa 2 thành viên khác nhau trong cùng bộ hồ sơ — TRIEU THI DUYEN vs
+    NGUYEN MINH PHUONG)."""
+    doc_ids = {r.source_document_id for r in records if r.source_document_id}
+    docs_by_id: dict[uuid.UUID, Document] = {}
+    if doc_ids:
+        result = await db.execute(select(Document).where(Document.id.in_(doc_ids)))
+        docs_by_id = {d.id: d for d in result.scalars()}
+
+    applicant = await db.get(Applicant, applicant_id)
+    members = await load_case_members(db, applicant_id)
+    resolved_members = members_for_document_labeling(applicant, members)
+    if not resolved_members:
+        return {}
+    numbers = member_number_map(resolved_members)
+    by_num = member_by_number(resolved_members)
+
+    out: dict[int, str] = {}
+    for rec in records:
+        doc = docs_by_id.get(rec.source_document_id) if rec.source_document_id else None
+        filename = doc.original_filename if doc else ""
+        member_number, _name, _idx, _dtype = _resolve_member_identity(
+            filename=filename or "",
+            registry_doc_type=rec.doc_type,
+            doc_record=rec,
+            members=resolved_members,
+            numbers=numbers,
+            by_num=by_num,
+        )
+        if member_number:
+            out[id(rec)] = member_number
+    return out
+
+
+async def group_doc_records_by_member(
+    db: AsyncSession,
+    applicant_id: uuid.UUID,
+    records: list[ApplicantDocRecord],
+) -> dict[str, list[ApplicantDocRecord]]:
+    """records chia theo member_number — xem resolve_doc_records_member_numbers()."""
+    numbers_by_record = await resolve_doc_records_member_numbers(db, applicant_id, records)
+    groups: dict[str, list[ApplicantDocRecord]] = {}
+    for rec in records:
+        num = numbers_by_record.get(id(rec))
+        if not num:
+            continue
+        groups.setdefault(num, []).append(rec)
+    return groups
 
 
 def _assign_file_slots(
@@ -994,6 +1054,55 @@ def enrich_child_parent_details_from_case(
                 )
 
 
+def enrich_child_parent_details_from_own_worksheet(
+    fields_out: list[dict[str, Any]],
+    parent: str,
+    records: list[ApplicantDocRecord],
+) -> None:
+    """Bổ sung ngày sinh/nơi sinh cha-mẹ từ CHÍNH worksheet DS-260 của người con (khách tự
+    khai) — dùng khi các nguồn khác (hộ chiếu/GKS/ly hôn/kết hôn của cha-mẹ, nếu họ CŨNG là
+    case member trong bộ hồ sơ) không có dữ liệu. Chạy SAU enrich_child_parent_details_from_case
+    nên chỉ điền field còn trống — nguồn giấy tờ chính thức vẫn ưu tiên hơn worksheet khách khai.
+
+    Báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG — worksheet "03_6 DS260 - NGUYEN MINH
+    PHUONG.pdf" ghi rõ City/State/Country of Birth của cả cha lẫn mẹ, nhưng DS-260 form vẫn để
+    trống các field này vì KHÔNG có luồng nào từng đọc tới worksheet của chính người con cho
+    mục cha/mẹ — enrich_child_parent_details_from_case chỉ đọc giấy tờ của member khác (cha/mẹ
+    nếu họ có mặt trong bộ hồ sơ như một người riêng), không đọc worksheet của chính đứa con.
+    """
+    from app.services.ds260_conflicts import pick_latest_by_variant
+    from app.services.ds260_mapping import _resolve_from_record, pick_latest_record
+
+    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
+        records, "ds260_customer_form"
+    )
+    if not ws_rec:
+        return
+    rid = str(ws_rec.id)
+
+    dob = _resolve_from_record(ws_rec, f"{parent}_date_of_birth", ())
+    _fill_empty_parent_ds260_field(
+        fields_out,
+        f"{parent}_date_of_birth",
+        dob,
+        document_type="ds260_customer_form",
+        source_field=f"{parent}_date_of_birth",
+        record_id=rid,
+        derived=f"child_{parent}_from_own_worksheet",
+    )
+    for suffix in ("birth_city", "birth_state", "birth_country"):
+        val = _resolve_from_record(ws_rec, f"{parent}_{suffix}", ())
+        _fill_empty_parent_ds260_field(
+            fields_out,
+            f"{parent}_{suffix}",
+            val,
+            document_type="ds260_customer_form",
+            source_field=f"{parent}_{suffix}",
+            record_id=rid,
+            derived=f"child_{parent}_from_own_worksheet",
+        )
+
+
 def enrich_child_parent_section_from_birth_cert(
     fields_out: list[dict[str, Any]],
     child_rec: ApplicantDocRecord,
@@ -1142,6 +1251,8 @@ def apply_child_sections_from_birth_cert(
                     enrich_child_parent_details_from_case(
                         sec["fields"], "father", father_name, records, members
                     )
+                if records is not None:
+                    enrich_child_parent_details_from_own_worksheet(sec["fields"], "father", records)
             else:
                 apply_father_absent_rule(sec["fields"])
         elif sec["id"] == "section_mother":
@@ -1168,6 +1279,8 @@ def apply_child_sections_from_birth_cert(
                     enrich_child_parent_details_from_case(
                         sec["fields"], "mother", mother_name, records, members
                     )
+                if records is not None:
+                    enrich_child_parent_details_from_own_worksheet(sec["fields"], "mother", records)
             else:
                 apply_mother_absent_rule(sec["fields"])
         elif sec["id"] == "section_birth_certificate" and child_rec:

@@ -164,17 +164,20 @@ def test_build_worksheet_conflict_address_passport_no_longer_used_as_source():
 
 
 def test_build_worksheet_conflict_phone_and_email():
-    passport_ref = _rec(
+    """Nguồn đối chiếu SĐT/email là application_form (Job Application, mục Applicant's
+    Information) — KHÔNG phải passport (passport không có số điện thoại/email; override cũ
+    trỏ "passport" là bug cùng lớp với current_address, sửa 2026-08-05)."""
+    application_form_ref = _rec(
         {"primary_phone_number": "+84901112233", "email_address": "a@example.com"},
-        "passport",
-        variant="exception",
+        "application_form",
+        variant="standard",
     )
     ds260 = _rec(
         {"primary_phone_number": "+84909998888", "email_address": "b@example.com"},
         "ds260_customer_form",
         variant="exception",
     )
-    rows = build_worksheet_conflict_rows([passport_ref, ds260], {})
+    rows = build_worksheet_conflict_rows([application_form_ref, ds260], {})
     keys = {r["field_key"] for r in rows}
     assert worksheet_conflict_field_key("primary_phone") in keys
     assert worksheet_conflict_field_key("email") in keys
@@ -270,3 +273,78 @@ def test_apply_ds260_resolved_conflicts_worksheet_and_luong1():
     assert by_key["applicant_name"]["source"]["derived"] == "worksheet_conflict_resolution"
     assert by_key["gender"]["value"] == "Female"
     assert by_key["gender"]["source"]["derived"] == "conflict_resolution"
+
+
+def test_worksheet_compare_keys_include_parent_info():
+    """Thông tin cha/mẹ trước đây KHÔNG có trong danh sách so worksheet — báo lỗi thực tế
+    2026-08-05: birth_certificate và worksheet DS-260 khách khai chưa bao giờ được đối chiếu
+    cho họ tên/ngày sinh/nơi sinh cha mẹ."""
+    assert "father_full_name" in WORKSHEET_COMPARE_KEYS
+    assert "father_surname" in WORKSHEET_COMPARE_KEYS
+    assert "father_date_of_birth" in WORKSHEET_COMPARE_KEYS
+    assert "mother_full_name" in WORKSHEET_COMPARE_KEYS
+    assert "mother_surname" in WORKSHEET_COMPARE_KEYS
+    assert "mother_date_of_birth" in WORKSHEET_COMPARE_KEYS
+
+
+def test_principal_parent_info_conflict_uses_own_birth_certificate():
+    """Đương đơn: nguồn chính thức là birth_certificate CỦA CHÍNH HỌ — khác worksheet thì
+    tạo conflict như các field khác."""
+    birth_cert = _rec(
+        {
+            "father_surname": "NGUYEN",
+            "father_given_names": "VAN HUNG",
+            "father_date_of_birth": "1975-05-05",
+        },
+        "birth_certificate",
+    )
+    ws = _rec(
+        {
+            "father_surname": "TRAN",
+            "father_given_names": "VAN HUNG",
+            "father_date_of_birth": "1975-05-05",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([birth_cert, ws], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("father_surname") in keys
+    assert worksheet_conflict_field_key("father_given_names") not in keys  # khớp nhau — không tạo
+
+
+def test_child_parent_info_conflict_falls_back_to_birth_certificate_child():
+    """Con cái: không có birth_certificate riêng (chỉ có birth_certificate_child do cha/mẹ
+    khai) — vẫn phải so được father_full_name/mother_full_name với worksheet CỦA CHÍNH CON,
+    dùng birth_certificate_child làm nguồn chính thức thay thế."""
+    child_bc = _rec(
+        {"child_full_name": "NGUYEN MINH PHUONG", "father_name": "NGUYEN VAN HUNG", "mother_name": "TRIEU THI DUYEN"},
+        "birth_certificate_child",
+    )
+    child_ws = _rec(
+        {"father_full_name": "NGUYEN VAN HAI", "mother_full_name": "TRIEU THI DUYEN"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([child_bc, child_ws], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("father_full_name") in keys, (
+        f"father_full_name phải so được qua fallback birth_certificate_child, rows={rows}"
+    )
+    assert worksheet_conflict_field_key("mother_full_name") not in keys  # khớp nhau
+
+
+def test_child_parent_info_no_conflict_when_only_birth_cert_child_present_and_matches():
+    """Con cái: worksheet khớp với birth_certificate_child — không tạo conflict thừa."""
+    child_bc = _rec(
+        {"child_full_name": "NGUYEN MINH PHUONG", "father_name": "NGUYEN VAN HUNG"},
+        "birth_certificate_child",
+    )
+    child_ws = _rec(
+        {"father_full_name": "NGUYEN VAN HUNG"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([child_bc, child_ws], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("father_full_name") not in keys

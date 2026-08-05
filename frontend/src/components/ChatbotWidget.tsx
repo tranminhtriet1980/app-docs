@@ -101,7 +101,7 @@ export default function ChatbotWidget() {
     <>
       {/* Nút mở — viên thuốc gradient, có chấm trạng thái + vòng viền gradient xoay */}
       {!open && (
-        <div className="group fixed bottom-5 right-5 z-50">
+        <div className="group fixed bottom-36 right-6 z-50">
           <div className="relative">
             {/* Glow mờ xoay phía sau — sáng lên khi hover */}
             <span
@@ -123,14 +123,14 @@ export default function ChatbotWidget() {
                 <BotIcon className="h-6 w-6" />
                 <span className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700" />
               </span>
-              <span className="text-sm">AI Assistant</span>
+              {/* <span className="text-sm">AI Assistant</span> */}
             </button>
           </div>
         </div>
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 flex h-[560px] w-[min(92vw,392px)] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div className="fixed bottom-20 right-6 z-50 flex h-[560px] w-[min(92vw,392px)] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
           {/* Header gradient */}
           <div className="flex items-center gap-3 bg-gradient-to-r from-brand-600 to-brand-700 px-4 py-3.5 text-white">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">

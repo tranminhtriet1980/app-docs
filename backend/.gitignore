@@ -1,5 +1,6 @@
 uploads/
 exports/
+ocr_debug/
 .venv/
 __pycache__/
 *.pyc

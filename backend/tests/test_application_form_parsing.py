@@ -84,10 +84,12 @@ class TestApplicationFormFilenameDetection:
         assert is_exc is False
 
     def test_ds260_not_confused_with_application(self):
-        """DS-260 không bị nhầm thành application_form dù có chữ 'form'."""
+        """DS-260 không bị nhầm thành application_form dù có chữ 'form'.
+        DS-260 worksheet khách khai luôn là variant=exception (nguồn đối chiếu),
+        bất kể tên file có hậu tố _new hay không — xem parse_document_filename()."""
         doc_type, is_exc = parse_document_filename("DS260.pdf")
         assert doc_type == "ds260_customer_form"
-        assert is_exc is False
+        assert is_exc is True
 
     def test_employment_letter_not_confused(self):
         """employment_letter không phải application_form — cấu trúc khác."""

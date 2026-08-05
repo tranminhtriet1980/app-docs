@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # được tài liệu nhiều trang. 20 ảnh nguyên trang ≈ 22k token — lọt trần 30k.
     # 0 = không chia (hành vi cũ).
     ocr_max_images_per_request: int = 20
+    # Trần số trang PDF render cho worksheet DS-260 khách khai — cũ cố định 20 trang (ước tính
+    # cho worksheet "điển hình" ~18 trang), nhưng bản scan/chụp thực tế có thể dài hơn NHIỀU
+    # (bản 146 trang gặp thực tế 2026-08-05 — mỗi trang giấy có thể bị chụp/scan thành nhiều
+    # trang PDF). Vượt trần 20 trang cũ → các mục cuối form (Work/Education Part D, An ninh,
+    # SSN) NẰM SAU trang 20 không bao giờ được render/gửi AI đọc — trống âm thầm không cảnh
+    # báo. Nâng trần cao hơn nhiều + để _openai_extract tự đo SỐ TRANG THẬT của file, lấy
+    # min(số trang thật, trần này) — không render thừa cho file ngắn, không cắt cụt file dài.
+    # ocr_max_images_per_request vẫn lo việc chia nhỏ request theo TPM như cũ.
+    ocr_ds260_worksheet_max_pages: int = 150
     ocr_blur_variance_threshold: float = 25.0
     ocr_low_confidence_threshold: float = 0.5
     ocr_low_confidence_field_ratio: float = 0.25

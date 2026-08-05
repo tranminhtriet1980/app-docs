@@ -8,8 +8,10 @@ Khi Luồng 1 và đối chiếu khác nhau → user chọn giá trị (Conflict
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -237,6 +239,8 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
             "address_state",
             "postal_code",
             "address_country",
+            "primary_phone_number",
+            "email_address",
             "primary_occupation",
             "occupation_other_specify",
             "present_employer",
@@ -346,6 +350,36 @@ def canonical_upload_name(doc_type: str, *, exception: bool = False) -> str:
     return f"{base}{EXCEPTION_SUFFIX}" if exception else base
 
 
+# Toàn bộ giá trị coi là "Yes"/"No" hợp lệ — cả không dấu lẫn có dấu (OCR có lúc mất dấu),
+# gồm cả kiểu Việt Nam theo thì ("Đã từng...chưa?" → Đã = Yes, Chưa = No).
+_YES_TOKENS = frozenset({"YES", "Y", "CO", "CÓ", "TRUE", "1", "DA", "ĐÃ"})
+_NO_TOKENS = frozenset({"NO", "N", "KHONG", "KHÔNG", "FALSE", "0", "CHUA", "CHƯA"})
+
+
+@lru_cache(maxsize=1)
+def _yes_no_field_keys() -> frozenset[str]:
+    """Field key/field/alias của MỌI câu hỏi Yes/No trong ds260_mapping.json — nhận diện qua
+    label có dấu "?" (quy ước nhất quán trong file mapping), thay vì đoán theo tên field
+    (nhiều field như been_in_us, issued_us_visa, father_is_living không khớp pattern
+    _used/is_ cũ nên trước đây không được chuẩn hoá — báo lỗi thực tế 2026-08-05)."""
+    path = Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "ds260_mapping.json"
+    if not path.is_file():
+        return frozenset()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for sec in data.get("sections", []):
+        for f in sec.get("fields", []):
+            label = f.get("label") or ""
+            if "?" not in label:
+                continue
+            keys.add((f.get("key") or "").lower())
+            keys.add((f.get("field") or "").lower())
+            for alias in f.get("aliases") or ():
+                keys.add(alias.lower())
+    keys.discard("")
+    return frozenset(keys)
+
+
 def format_field_value(key: str, value: str | None) -> str:
     """Normalize extracted values for form fill."""
     if value is None:
@@ -365,11 +399,11 @@ def format_field_value(key: str, value: str | None) -> str:
             val = "FEMALE"
     elif "name" in key_l or key_l.endswith("_name"):
         val = val.upper()
-    elif key_l.endswith("_used") or key_l.startswith("is_"):
+    elif key_l.endswith("_used") or key_l.startswith("is_") or key_l in _yes_no_field_keys():
         u = val.upper()
-        if u in {"YES", "Y", "CO", "CÓ", "TRUE", "1"}:
+        if u in _YES_TOKENS:
             val = "Yes"
-        elif u in {"NO", "N", "KHONG", "KHÔNG", "FALSE", "0"}:
+        elif u in _NO_TOKENS:
             val = "No"
     return re.sub(r"\s+", " ", val).strip()
 

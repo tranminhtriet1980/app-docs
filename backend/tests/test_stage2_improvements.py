@@ -126,7 +126,7 @@ class TestUIDisplayFrontend:
         ui_label = f"✓ {doc_type.replace('_', ' ').title()} ({int(confidence * 100)}% confidence)"
         ui_help = f"Nhận diện từ: {reason}"
 
-        assert "Application form" in ui_label
+        assert "Application Form" in ui_label
         assert "92%" in ui_label
         assert "filename registry" in ui_help
         print(f"✓ Frontend display: {ui_label}")

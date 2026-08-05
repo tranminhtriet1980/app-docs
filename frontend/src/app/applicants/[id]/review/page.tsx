@@ -78,7 +78,6 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
   "section_divorce",
   "section_previous_spouse",
   "section_children",
-  "section_work_education",
 ]);
 
 function memberPanelClass(role: CaseMember["role"]) {
@@ -107,7 +106,7 @@ function Ds260ConflictPanel({
 
   if (conflicts.length === 0) return null;
   return (
-    <div className="card mb-6 border-amber-300 bg-amber-50/50">
+    <div id="ds260-conflicts-section" className="card mb-6 border-amber-300 bg-amber-50/50 scroll-mt-24">
       <h2 className="text-lg font-semibold text-slate-900">
         Xung đột dữ liệu DS-260 ({conflicts.length})
       </h2>
@@ -692,6 +691,17 @@ export default function ReviewPage() {
   const [templateCode, setTemplateCode] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [ds260Conflicts, setDs260Conflicts] = useState<Conflict[]>([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [hasShownConflictModal, setHasShownConflictModal] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    onConfirm: () => {},
+  });
   const [conflictBusy, setConflictBusy] = useState("");
   const [busy, setBusy] = useState("");
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -779,6 +789,13 @@ export default function ReviewPage() {
     setTemplates(tpls);
     setDs260Validation(validation);
     setDs260Conflicts(conflicts);
+    setHasShownConflictModal((prev) => {
+      if (!prev && conflicts.length > 0) {
+        setShowConflictModal(true);
+        return true;
+      }
+      return prev;
+    });
     setDocTables(tables);
     setReferenceTables(refTables);
 
@@ -886,32 +903,7 @@ export default function ReviewPage() {
     return `ds260_${safe}.docx`;
   };
 
-  const confirmSkipValidation = () => {
-    if (!ds260Validation || ds260Validation.valid) return true;
-    return window.confirm(
-      `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
-        ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n")
-    );
-  };
 
-  const exportDs260ForMember = async (member: CaseMember) => {
-    if (!confirmSkipValidation()) return;
-
-    setBusy(`export-ds260-${member.id}`);
-    try {
-      const result = await api.exportDs260(id, Boolean(ds260Validation && !ds260Validation.valid), ds260TemplateCode, member.id);
-      await api.downloadExportFile(
-        result.id,
-        result.download_url,
-        exportFilenameForMember(member.display_name)
-      );
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
-    } finally {
-      setBusy("");
-    }
-  };
 
   const saveFamilyMembers = async () => {
     const principal = setupPrincipalName.trim() || applicant?.display_name?.trim() || "";
@@ -1025,67 +1017,135 @@ export default function ReviewPage() {
 
   const deleteMember = async (member: CaseMember) => {
     if (member.role === "principal") return;
-    const ok = window.confirm(
-      `Xóa ${memberRoleLabel(member.role)} "${member.display_name}" khỏi hồ sơ?\n\nChỉ xóa khi nhầm người / hồ sơ test.`
-    );
-    if (!ok) return;
-
-    setBusy(`delete-member-${member.id}`);
-    try {
-      const res = await api.deleteCaseMember(id, member.id);
-      await reloadMembers();
-      await load();
-      alert(res.message || "Đã xóa");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa thành viên");
-    } finally {
-      setBusy("");
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa ${memberRoleLabel(member.role)} "${member.display_name}" khỏi hồ sơ?\n\nChỉ xóa khi nhầm người / hồ sơ test.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy(`delete-member-${member.id}`);
+        try {
+          const res = await api.deleteCaseMember(id, member.id);
+          await reloadMembers();
+          await load();
+          alert(res.message || "Đã xóa");
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa thành viên");
+        } finally {
+          setBusy("");
+        }
+      }
+    });
   };
 
   const exportDs260 = async () => {
-    if (!confirmSkipValidation()) return;
+    const runExport = async () => {
+      setBusy("export-ds260");
+      try {
+        const memberId = selectedMemberId || undefined;
+        const member = caseMembers.find((m) => m.id === memberId);
+        const result = await api.exportDs260(
+          id,
+          Boolean(ds260Validation && !ds260Validation.valid),
+          ds260TemplateCode,
+          memberId
+        );
+        const label = member?.display_name || applicant?.display_name || id;
+        await api.downloadExportFile(result.id, result.download_url, exportFilenameForMember(label));
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
 
-    setBusy("export-ds260");
-    try {
-      const memberId = selectedMemberId || undefined;
-      const member = caseMembers.find((m) => m.id === memberId);
-      const result = await api.exportDs260(id, Boolean(ds260Validation && !ds260Validation.valid), ds260TemplateCode, memberId);
-      const label = member?.display_name || applicant?.display_name || id;
-      await api.downloadExportFile(result.id, result.download_url, exportFilenameForMember(label));
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
-    } finally {
-      setBusy("");
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
+          ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n"),
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport();
+        }
+      });
+    } else {
+      void runExport();
+    }
+  };
+
+  const exportDs260ForMember = async (member: CaseMember) => {
+    const runExport = async () => {
+      setBusy(`export-ds260-${member.id}`);
+      try {
+        const result = await api.exportDs260(
+          id,
+          Boolean(ds260Validation && !ds260Validation.valid),
+          ds260TemplateCode,
+          member.id
+        );
+        await api.downloadExportFile(
+          result.id,
+          result.download_url,
+          exportFilenameForMember(member.display_name)
+        );
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
+
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
+          ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n"),
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport();
+        }
+      });
+    } else {
+      void runExport();
     }
   };
 
   const exportDs260Batch = async () => {
-    const skipValidation =
-      ds260Validation &&
-      !ds260Validation.valid &&
-      window.confirm(`Một số trường chưa hợp lệ. Vẫn xuất tất cả thành viên?`);
-    if (ds260Validation && !ds260Validation.valid && !skipValidation) return;
+    const runExport = async (skipValidation: boolean) => {
+      setBusy("export-ds260-batch");
+      try {
+        const result = await api.exportDs260Batch(id, skipValidation, ds260TemplateCode);
+        for (const exp of result.exports) {
+          const name = exp.member_name || caseMembers.find((m) => m.id === exp.member_id)?.display_name || exp.id;
+          await api.downloadExportFile(exp.id, exp.download_url, exportFilenameForMember(name));
+        }
+        if (result.failed.length) {
+          alert(
+            `Đã xuất ${result.exports.length} file. Lỗi:\n` +
+              result.failed.map((f) => `• ${f.member}: ${f.error}`).join("\n")
+          );
+        }
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất hàng loạt thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
 
-    setBusy("export-ds260-batch");
-    try {
-      const result = await api.exportDs260Batch(id, Boolean(skipValidation), ds260TemplateCode);
-      for (const exp of result.exports) {
-        const name = exp.member_name || caseMembers.find((m) => m.id === exp.member_id)?.display_name || exp.id;
-        await api.downloadExportFile(exp.id, exp.download_url, exportFilenameForMember(name));
-      }
-      if (result.failed.length) {
-        alert(
-          `Đã xuất ${result.exports.length} file. Lỗi:\n` +
-            result.failed.map((f) => `• ${f.member}: ${f.error}`).join("\n")
-        );
-      }
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất hàng loạt thất bại");
-    } finally {
-      setBusy("");
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: "Một số trường chưa hợp lệ. Vẫn xuất tất cả thành viên?",
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport(true);
+        }
+      });
+    } else {
+      void runExport(false);
     }
   };
 
@@ -1094,22 +1154,28 @@ export default function ReviewPage() {
       alert("Không thể xóa template hệ thống mặc định.");
       return;
     }
-    if (!confirm(`Xóa mẫu form "${tpl.name}" (${tpl.code})?\n\nFile .docx trên server cũng sẽ bị xóa.`)) return;
-    setBusy(`del-tpl-${tpl.id}`);
-    try {
-      const res = await api.deleteFormTemplate(tpl.id);
-      alert(res.message || "Đã xóa");
-      const tpls = await api.listTemplates();
-      setTemplates(tpls);
-      if (ds260TemplateCode === tpl.code) {
-        const next = tpls.find(isDs260FormTemplate)?.code || DS260_DEFAULT_TEMPLATE_CODE;
-        setDs260TemplateCode(next);
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa mẫu form "${tpl.name}" (${tpl.code})?\n\nFile .docx trên server cũng sẽ bị xóa.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy(`del-tpl-${tpl.id}`);
+        try {
+          const res = await api.deleteFormTemplate(tpl.id);
+          alert(res.message || "Đã xóa");
+          const tpls = await api.listTemplates();
+          setTemplates(tpls);
+          if (ds260TemplateCode === tpl.code) {
+            const next = tpls.find(isDs260FormTemplate)?.code || DS260_DEFAULT_TEMPLATE_CODE;
+            setDs260TemplateCode(next);
+          }
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa mẫu form");
+        } finally {
+          setBusy("");
+        }
       }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa mẫu form");
-    } finally {
-      setBusy("");
-    }
+    });
   };
 
   const uploadTemplate = async (file: File) => {
@@ -1150,19 +1216,22 @@ export default function ReviewPage() {
 
   const deleteApplicant = async () => {
     if (!applicant) return;
-    const ok = window.confirm(
-      `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`
-    );
-    if (!ok) return;
-    setBusy("delete");
-    try {
-      await api.deleteApplicant(id, { permanent: true, force: true });
-      router.push("/dashboard");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
-    } finally {
-      setBusy("");
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy("delete");
+        try {
+          await api.deleteApplicant(id, { permanent: true, force: true });
+          router.push("/dashboard");
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
+        } finally {
+          setBusy("");
+        }
+      }
+    });
   };
 
   const canEditDs260 =
@@ -1823,6 +1892,117 @@ export default function ReviewPage() {
         </div>
 
         <AiChatPanel applicantId={id} />
+
+        {showConflictModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setShowConflictModal(false)}
+            />
+            <div className="relative z-10 w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100">
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500 shadow-inner ring-4 ring-amber-100/50">
+                  <svg
+                    className="h-7 w-7"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                </div>
+
+                <h3 className="text-xl font-bold text-slate-900 mb-2">
+                  Phát hiện xung đột dữ liệu!
+                </h3>
+                
+                <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                  Hệ thống phát hiện có sự bất nhất hoặc xung đột dữ liệu giữa các giấy tờ đã upload. Vui lòng nhờ nhân viên đối chiếu và chọn giá trị chính xác nhất.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition duration-200"
+                  onClick={() => setShowConflictModal(false)}
+                >
+                  Đã biết
+                </button>
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-semibold text-white hover:from-amber-600 hover:to-orange-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                  onClick={() => {
+                    setShowConflictModal(false);
+                    const element = document.getElementById("ds260-conflicts-section");
+                    if (element) {
+                      element.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}
+                >
+                  Xử lý ngay
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+            />
+            <div className="relative z-10 w-full max-w-sm transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500 shadow-inner ring-4 ring-amber-100/50">
+                <svg
+                  className="h-7 w-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2.5"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
+                  />
+                </svg>
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900 mb-2">
+                Xác nhận yêu cầu
+              </h3>
+
+              <p className="text-sm text-slate-500 mb-6 leading-relaxed whitespace-pre-line text-center">
+                {confirmModal.message}
+              </p>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition duration-200"
+                  onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-semibold text-white hover:from-amber-600 hover:to-orange-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none"
+                  onClick={confirmModal.onConfirm}
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

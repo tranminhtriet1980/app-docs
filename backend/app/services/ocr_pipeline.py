@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from app.services.ds260_mapping import get_extract_keys_for_doc_type
 from app.services.field_mapping import DOCUMENT_TYPES
 from app.services.llm_client import get_ocr_client, get_openai_client, is_openai_configured
 from app.services.llm_usage import UsageContext, chat_completion
+
+logger = logging.getLogger(__name__)
 
 QUOTA_WARNING = (
     "OpenAI hết quota/credits (lỗi 429). Đã dùng chế độ demo từ tên file — "
@@ -148,6 +151,26 @@ def _measure_blur_variance(path: Path) -> float | None:
             return ImageStat.Stat(edges).var[0]
     except Exception:
         return None
+
+
+def _pdf_page_count(path: Path) -> int:
+    """Đếm số trang PDF thật — chỉ đọc metadata (rẻ, không render) để quyết định max_pages
+    động thay vì đoán cố định (xem settings.ocr_ds260_worksheet_max_pages)."""
+    try:
+        import fitz
+
+        doc = fitz.open(str(path))
+        count = len(doc)
+        doc.close()
+        return count
+    except Exception:
+        pass
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(str(path)).pages)
+    except Exception:
+        return 0
 
 
 def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list[Path]:
@@ -956,12 +979,30 @@ Use ISO dates YYYY-MM-DD when the FULL date (day+month+year) is printed. If only
 (vd. 1945), output just the year "1945" — do NOT invent day/month ("01 January 1945"). Same for
 month+year only → "MM/YYYY". Do not use applicant nationality for parent country fields.
 Do NOT skip parent date/address/nationality when they are printed on the certificate.
+
+CẢNH BÁO QUAN TRỌNG — giấy khai sinh Việt Nam có nhiều số/ngày dễ nhầm với ngày sinh: góc trên
+phải "Số: .../20xx" và "Quyển số: .../20xx" là SỐ ĐĂNG KÝ/SỐ QUYỂN, KHÔNG PHẢI ngày sinh dù trông
+giống định dạng ngày. "Ngày, tháng, năm sinh" (thường có phần viết bằng chữ đi kèm để xác nhận)
+mới là date_of_birth thật. "Ngày, tháng, năm đăng ký" gần cuối form là ngày làm giấy tờ, KHÔNG
+được lấy làm date_of_birth. Ưu tiên số có phần chữ viết kèm xác nhận đúng ngày sinh.
 """
 
 DIVORCE_EXTRACT_HINT = """
-For DIVORCE DECREE, extract BOTH parties:
+For DIVORCE DECREE / COURT JUDGMENT (Bản án / Quyết định ly hôn), extract BOTH parties:
 husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth,
 marriage_date, divorce_date, document_number, document_type.
+
+Vietnamese court judgment/decision header — read the TOP of page 1 carefully, it usually reads:
+  "Bản án số: <number>/<year>/<code>-ST" (hoặc "Quyết định số: ...")
+  "Ngày <dd-mm-yyyy>" hoặc "Ngày <dd> tháng <mm> năm <yyyy>" — ngay dưới/cạnh dòng số bản án
+  "V/v <loại việc>" (vd. Ly hôn / Không công nhận quan hệ vợ chồng / Thuận tình ly hôn)
+document_number = giá trị "Bản án số"/"Quyết định số" đúng như in (vd. "62/2023/HNGĐ-ST").
+divorce_date = ngày "Ngày ..." in ngay TRÊN CÙNG trang 1, cạnh "Bản án số"/"Quyết định số" —
+đây là ngày tuyên án/ra quyết định, dùng làm ngày ly hôn cho DS-260. KHÔNG lấy nhầm ngày khác
+xuất hiện trong nội dung bản án (vd. ngày kết hôn cũ, ngày sinh).
+Ngày tháng tiếng Việt luôn viết THEO THỨ TỰ ngày-tháng-năm (dd-mm-yyyy), KHÔNG BAO GIỜ là
+tháng-ngày-năm. Trích xuất đúng NGUYÊN VĂN như in (vd. "13-6-2023") — không tự quy đổi định dạng,
+hệ thống sẽ tự chuẩn hóa.
 If date of birth is printed for either party, use ISO YYYY-MM-DD.
 Names UPPERCASE as printed (strip titles like MR./MRS. only in values, not keys).
 """
@@ -994,6 +1035,18 @@ child_birth_city, child_birth_state, child_birth_country, child_gender,
 father_name, mother_name, registration_number.
 Use ISO dates YYYY-MM-DD. Names UPPERCASE as printed.
 If place of birth is one line, also split into city/state/country when possible.
+
+CẢNH BÁO QUAN TRỌNG — giấy khai sinh Việt Nam ("Giấy khai sinh") có NHIỀU số/ngày dễ nhầm với
+ngày sinh, PHẢI phân biệt rõ:
+- Góc trên phải "Số: .../20xx" và "Quyển số: .../20xx" — đây là SỐ ĐĂNG KÝ/SỐ QUYỂN, KHÔNG PHẢI
+  ngày sinh, dù trông giống định dạng ngày (vd. "208/2015").
+- "Ngày, tháng, năm sinh" (thường có phần viết bằng chữ đi kèm, vd. "Ngày hai mươi chín, tháng
+  một, năm hai nghìn không trăm linh bảy") — ĐÂY MỚI LÀ child_date_of_birth. Luôn ưu tiên đọc
+  phần chữ viết ra để xác nhận đúng số.
+- "Ngày, tháng, năm đăng ký" (gần cuối form, có thể là "Đăng ký lại") — đây là NGÀY LÀM GIẤY TỜ,
+  thường trễ hơn ngày sinh thật nhiều năm, KHÔNG được lấy làm child_date_of_birth.
+Nếu không chắc số nào là ngày sinh thật, ưu tiên số có phần chữ viết kèm theo xác nhận; nếu vẫn
+không rõ ràng, để trống và thêm warning — TUYỆT ĐỐI không lấy số đăng ký/số quyển làm ngày sinh.
 """
 
 MILITARY_EXTRACT_HINT = """
@@ -1124,6 +1177,10 @@ PERSONAL ADDRESS (nếu form có mục địa chỉ RIÊNG của người khai, 
 đây là nơi người khai đang ở, dùng để đối chiếu với worksheet DS-260, KHÔNG phải địa chỉ
 công ty): current_address (street), address_city, address_state, postal_code, address_country.
 
+CONTACT (nếu form có số điện thoại/email RIÊNG của người khai trong mục Applicant's
+Information — dùng để đối chiếu với worksheet DS-260, KHÔNG phải số điện thoại/email công ty):
+primary_phone_number (Phone/Tel/Contact number), email_address (Email).
+
 WORK: primary_occupation, occupation_other_specify, present_employer, employer_name,
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
 job_title, employment_start_date, prior_jobs_history.
@@ -1193,7 +1250,16 @@ async def _openai_extract(
     ) + extra
     # DS-260 worksheet khách khai thường là bản SCAN/VIẾT TAY nhiều trang (≈18 trang) →
     # đọc hết trang + render DPI cao hơn cho rõ nét chữ tay.
+    # Trần cố định 20 trang trước đây cắt cụt các bản scan dài hơn (146 trang gặp thực tế
+    # 2026-08-05) khiến mục Work/Education Part D, An ninh, SSN — nằm sau trang 20 — không bao
+    # giờ được AI đọc, form trống âm thầm không cảnh báo. Đo SỐ TRANG THẬT của file, lấy
+    # min(số trang thật, ocr_ds260_worksheet_max_pages) — không cắt cụt file dài trong phạm vi
+    # trần mới, không render thừa cho file ngắn.
     is_ds260_ws = doc_type == "ds260_customer_form"
+    ds260_ws_max_pages = min(
+        _pdf_page_count(file_path) or settings.ocr_ds260_worksheet_max_pages,
+        settings.ocr_ds260_worksheet_max_pages,
+    ) if is_ds260_ws else 0
     image_paths, hint = _resolve_document_images(
         file_path,
         max_pages=3
@@ -1201,7 +1267,7 @@ async def _openai_extract(
         else (
             4
             if doc_type in {"birth_certificate", "marriage_certificate"}
-            else (20 if is_ds260_ws else 2)
+            else (ds260_ws_max_pages if is_ds260_ws else 2)
         ),
         dpi=300 if is_ds260_ws else 180,
     )
@@ -1265,7 +1331,18 @@ async def _openai_extract(
         )
         results.append(_parse_json_response(response.choices[0].message.content or "{}"))
 
-    return _merge_batch_results(results)
+    merged = _merge_batch_results(results)
+    if is_ds260_ws:
+        actual_pages = _pdf_page_count(file_path)
+        if actual_pages and actual_pages > ds260_ws_max_pages:
+            warnings_list = merged.setdefault("warnings", [])
+            if isinstance(warnings_list, list):
+                warnings_list.append(
+                    f"Worksheet có {actual_pages} trang, hệ thống chỉ đọc {ds260_ws_max_pages} "
+                    "trang đầu — một số mục ở cuối form có thể chưa được trích xuất. "
+                    "Vui lòng kiểm tra thủ công các mục cuối (An ninh, SSN…)."
+                )
+    return merged
 
 
 async def classify_document(
@@ -1356,11 +1433,26 @@ def _combine_warnings(*warnings: str | None) -> str | None:
 
 
 async def extract_document(
-    file_path: Path, doc_type: str, filename: str, db: AsyncSession, ctx: UsageContext
-) -> tuple[dict, str | None]:
+    file_path: Path,
+    doc_type: str,
+    filename: str,
+    db: AsyncSession,
+    ctx: UsageContext,
+    *,
+    capture_debug: bool = False,
+) -> tuple[dict, str | None, dict | None]:
+    """`capture_debug=True` trả thêm dict {extraction_raw, extraction_enriched,
+    extraction_filtered} — dùng để dump debug JSON (vd. application_form), không ảnh hưởng
+    luồng chính khi False (None)."""
     if not is_openai_configured():
         raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
-        return _filter_extraction_to_schema(doc_type, raw), None
+        filtered = _filter_extraction_to_schema(doc_type, raw)
+        debug = (
+            {"extraction_raw": raw, "extraction_enriched": raw, "extraction_filtered": filtered}
+            if capture_debug
+            else None
+        )
+        return filtered, None, debug
     try:
         extracted = await _openai_extract(file_path, doc_type, filename, db, ctx)
         enriched = _fallback_enrich_extraction(doc_type, filename, extracted)
@@ -1376,12 +1468,70 @@ async def extract_document(
             _image_quality_warning(enriched),
             _low_confidence_field_warning(filtered),
         )
-        return filtered, warning
+        debug = (
+            {"extraction_raw": extracted, "extraction_enriched": enriched, "extraction_filtered": filtered}
+            if capture_debug
+            else None
+        )
+        return filtered, warning, debug
     except Exception as exc:
         if _is_quota_error(exc):
             raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
-            return _filter_extraction_to_schema(doc_type, raw), QUOTA_WARNING
+            filtered = _filter_extraction_to_schema(doc_type, raw)
+            debug = (
+                {"extraction_raw": raw, "extraction_enriched": raw, "extraction_filtered": filtered}
+                if capture_debug
+                else None
+            )
+            return filtered, QUOTA_WARNING, debug
         raise
+
+
+# Loại tài liệu được dump debug JSON toàn bộ response OCR — bật thêm ở đây khi cần soi field
+# bị thiếu/nhầm cho loại giấy tờ khác, không cần sửa gì khác trong process_document().
+OCR_DEBUG_DUMP_DOC_TYPES: frozenset[str] = frozenset(
+    {"application_form", "birth_certificate", "ds260_customer_form"}
+)
+
+
+def _dump_ocr_debug(
+    *,
+    doc_type: str,
+    document_id,
+    applicant_id,
+    filename: str,
+    classification: dict,
+    extraction_raw: dict | None,
+    extraction_enriched: dict | None,
+    extraction_filtered: dict | None,
+    warning: str | None,
+) -> None:
+    """Lưu TOÀN BỘ response OCR (classify + extract) ra file JSON riêng theo từng loại giấy tờ
+    (`ocr_debug/{doc_type}/...`) để đối chiếu thủ công khi field bị thiếu/nhầm — chỉ phục vụ
+    debug, không được đọc lại bởi bất kỳ luồng nào khác. Lỗi ghi file không được làm hỏng
+    pipeline OCR chính."""
+    try:
+        from datetime import datetime, timezone
+
+        debug_dir = settings.base_dir / "ocr_debug" / doc_type
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", filename or "unknown")[:80]
+        out_path = debug_dir / f"{ts}_{document_id}_{safe_name}.json"
+        payload = {
+            "document_id": str(document_id),
+            "applicant_id": str(applicant_id) if applicant_id else None,
+            "filename": filename,
+            "classification": classification,
+            "extraction_raw": extraction_raw,
+            "extraction_enriched": extraction_enriched,
+            "extraction_filtered": extraction_filtered,
+            "warning": warning,
+        }
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("%s OCR debug dump written: %s", doc_type, out_path)
+    except Exception:
+        logger.exception("Failed to write %s OCR debug dump for doc=%s", doc_type, document_id)
 
 
 def _coerce_confidence_to_float(value: object) -> float | None:
@@ -1477,9 +1627,30 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
         document.classification_confidence = float(classification.get("confidence", 0))
         document.classification_reason = (classification.get("reason") or "")[:256]
 
-        extraction, w2 = await extract_document(file_path, doc_type, document.original_filename, db, usage_ctx)
+        needs_debug_dump = doc_type in OCR_DEBUG_DUMP_DOC_TYPES
+        extraction, w2, extract_debug = await extract_document(
+            file_path,
+            doc_type,
+            document.original_filename,
+            db,
+            usage_ctx,
+            capture_debug=needs_debug_dump,
+        )
         if w2 and w2 not in warnings:
             warnings.append(w2)
+
+        if needs_debug_dump and extract_debug is not None:
+            _dump_ocr_debug(
+                doc_type=doc_type,
+                document_id=document.id,
+                applicant_id=document.applicant_id,
+                filename=document.original_filename or "",
+                classification=classification,
+                extraction_raw=extract_debug.get("extraction_raw"),
+                extraction_enriched=extract_debug.get("extraction_enriched"),
+                extraction_filtered=extract_debug.get("extraction_filtered"),
+                warning=w2,
+            )
 
         await save_extracted_fields(db, document.id, extraction)
 

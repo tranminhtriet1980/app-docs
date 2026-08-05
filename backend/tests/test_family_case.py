@@ -69,6 +69,39 @@ def test_clear_child_adult_only_ds260_sections():
     assert sections[4]["fields"][0]["value"] == ""
 
 
+def test_clear_child_adult_only_sections_keeps_work_education():
+    """Báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG (con, đang đi học) — worksheet của
+    chính cô ấy ghi rõ "STUDENT" + tên trường, enrich_work_education_from_worksheet điền đúng
+    vào form, nhưng clear_child_adult_only_ds260_sections XOÁ TRẮNG NGAY SAU ĐÓ vì
+    section_work_education từng nằm trong _child_excluded_section_ids() — sai, vì DS-260 yêu
+    cầu mục Work/Education cho MỌI đương đơn kể cả con đang đi học/đi làm."""
+    from app.services.ds260_mapping import clear_child_adult_only_ds260_sections
+
+    sections = [
+        {
+            "id": "section_work_education",
+            "fields": [
+                {
+                    "key": "work_primary_occupation",
+                    "value": "STUDENT",
+                    "source": {"derived": "ds260_worksheet_fill"},
+                },
+                {
+                    "key": "edu_high_school_name",
+                    "value": "TRUNG HOC PHO THONG HOANG VAN THU",
+                    "source": {"derived": "ds260_worksheet_fill"},
+                },
+            ],
+        },
+    ]
+    clear_child_adult_only_ds260_sections(sections)
+    work_edu = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert work_edu["work_primary_occupation"] == "STUDENT", (
+        "section_work_education không được xoá cho hồ sơ con — DS-260 yêu cầu mục này cho mọi đương đơn"
+    )
+    assert work_edu["edu_high_school_name"] == "TRUNG HOC PHO THONG HOANG VAN THU"
+
+
 def test_apply_child_sections_from_birth_cert_parents():
     import json
     from types import SimpleNamespace
@@ -961,3 +994,227 @@ def test_pick_passport_for_husband_in_family_upload():
     assert std is records[0]
     std2, _ = pick_luong1_pair_for_person(records, "passport", "MAI THI HUONG")
     assert std2 is records[1]
+
+
+def test_child_parent_birth_place_filled_from_own_worksheet_when_no_other_source():
+    """Báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG — worksheet của chính con ghi rõ
+    City/State/Country of Birth cha mẹ, nhưng cha/mẹ không có hộ chiếu/GKS riêng trong bộ hồ
+    sơ (không phải case member khác) nên enrich_child_parent_details_from_case không có gì để
+    lấy — phải fallback đọc từ CHÍNH worksheet của người con."""
+    import uuid
+
+    from app.models.entities import CaseMember, PersonRole
+    from app.services.family_case import apply_child_sections_from_birth_cert
+
+    child_bc = _rec(
+        {
+            "child_full_name": "NGUYEN MINH PHUONG",
+            "father_name": "NGUYEN VAN HUNG",
+            "mother_name": "TRIEU THI DUYEN",
+        },
+        "birth_certificate_child",
+    )
+    child_bc.id = "child-bc"
+    own_worksheet = _rec(
+        {
+            "father_date_of_birth": "1978-02-08",
+            "father_birth_city": "MINH TIEN",
+            "father_birth_state": "YEN BAI",
+            "father_birth_country": "VIETNAM",
+            "mother_date_of_birth": "1977-08-26",
+            "mother_birth_city": "VINH LAC",
+            "mother_birth_state": "YEN BAI",
+            "mother_birth_country": "VIETNAM",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    own_worksheet.id = "own-ws"
+    members = [
+        CaseMember(
+            id=uuid.uuid4(),
+            applicant_id=uuid.uuid4(),
+            role=PersonRole.principal.value,
+            display_name="TRIEU THI DUYEN",
+            sort_order=0,
+        ),
+        CaseMember(
+            id=uuid.uuid4(),
+            applicant_id=uuid.uuid4(),
+            role=PersonRole.child.value,
+            display_name="NGUYEN MINH PHUONG",
+            sort_order=1,
+        ),
+    ]
+    records = [child_bc, own_worksheet]
+
+    sections = [
+        {
+            "id": "section_father",
+            "fields": [
+                {"key": "father_full_name", "value": "", "source": {}},
+                {"key": "father_date_of_birth", "value": "", "source": {}},
+                {"key": "father_birth_city", "value": "", "source": {}},
+                {"key": "father_birth_state", "value": "", "source": {}},
+                {"key": "father_birth_country", "value": "", "source": {}},
+            ],
+        },
+        {
+            "id": "section_mother",
+            "fields": [
+                {"key": "mother_full_name", "value": "", "source": {}},
+                {"key": "mother_date_of_birth", "value": "", "source": {}},
+                {"key": "mother_birth_city", "value": "", "source": {}},
+                {"key": "mother_birth_state", "value": "", "source": {}},
+                {"key": "mother_birth_country", "value": "", "source": {}},
+            ],
+        },
+    ]
+    apply_child_sections_from_birth_cert(sections, child_bc, records=records, members=members)
+    father = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    mother = {f["key"]: f["value"] for f in sections[1]["fields"]}
+
+    assert father["father_date_of_birth"] == "1978-02-08"
+    assert father["father_birth_city"] == "MINH TIEN"
+    assert father["father_birth_state"] == "YEN BAI"
+    assert father["father_birth_country"] == "VIETNAM"
+    assert mother["mother_date_of_birth"] == "1977-08-26"
+    assert mother["mother_birth_city"] == "VINH LAC"
+    assert mother["mother_birth_state"] == "YEN BAI"
+    assert mother["mother_birth_country"] == "VIETNAM"
+
+
+def test_child_parent_birth_place_official_source_wins_over_own_worksheet():
+    """Nếu cha/mẹ CŨNG là case member có hộ chiếu riêng (nguồn chính thức), giá trị đó vẫn
+    ưu tiên hơn worksheet của người con — worksheet chỉ là fallback khi thiếu."""
+    import uuid
+
+    from app.models.entities import CaseMember, PersonRole
+    from app.services.family_case import apply_child_sections_from_birth_cert
+
+    child_bc = _rec(
+        {"child_full_name": "NGUYEN MINH PHUONG", "mother_name": "TRIEU THI DUYEN"},
+        "birth_certificate_child",
+    )
+    child_bc.id = "child-bc"
+    mother_passport = _rec(
+        {
+            "full_name": "TRIEU THI DUYEN",
+            "date_of_birth": "1977-08-26",
+        },
+        "passport",
+    )
+    mother_passport.id = "mother-pp"
+    own_worksheet = _rec(
+        {
+            "mother_date_of_birth": "1990-01-01",  # sai — khác hộ chiếu
+            "mother_birth_city": "WRONG CITY FROM WORKSHEET",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    own_worksheet.id = "own-ws"
+    members = [
+        CaseMember(
+            id=uuid.uuid4(),
+            applicant_id=uuid.uuid4(),
+            role=PersonRole.principal.value,
+            display_name="TRIEU THI DUYEN",
+            sort_order=0,
+        ),
+        CaseMember(
+            id=uuid.uuid4(),
+            applicant_id=uuid.uuid4(),
+            role=PersonRole.child.value,
+            display_name="NGUYEN MINH PHUONG",
+            sort_order=1,
+        ),
+    ]
+    records = [child_bc, mother_passport, own_worksheet]
+
+    sections = [
+        {
+            "id": "section_mother",
+            "fields": [
+                {"key": "mother_full_name", "value": "", "source": {}},
+                {"key": "mother_date_of_birth", "value": "", "source": {}},
+                {"key": "mother_birth_city", "value": "", "source": {}},
+            ],
+        },
+    ]
+    apply_child_sections_from_birth_cert(sections, child_bc, records=records, members=members)
+    mother = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert mother["mother_date_of_birth"] == "1977-08-26", (
+        "Nguồn hộ chiếu (chính thức) phải thắng ngày sinh sai trên worksheet, "
+        f"ra: {mother['mother_date_of_birth']}"
+    )
+
+
+def test_child_work_education_survives_full_enrich_and_clear_pipeline():
+    """Tái hiện đúng ca thực tế 2026-08-05 với dữ liệu OCR THẬT của NGUYEN MINH PHUONG (từ
+    ocr_debug/ds260_customer_form/...json): enrich_work_education_from_worksheet điền đúng,
+    rồi clear_child_adult_only_ds260_sections chạy sau (mô phỏng đúng thứ tự trong
+    resolve_ds260_form) — kết quả cuối phải VẪN CÒN dữ liệu, không bị xoá."""
+    import json
+    from types import SimpleNamespace
+
+    from app.services.ds260_mapping import (
+        clear_child_adult_only_ds260_sections,
+        enrich_work_education_from_worksheet,
+    )
+
+    # Dữ liệu OCR thật trích từ worksheet của chính NGUYEN MINH PHUONG.
+    raw = {
+        "primary_occupation": "STUDENT",
+        "work_primary_occupation": "STUDENT",
+        "middle_school_name": "TIEU HOC - TRUNG HOC MINH TIEN SO 2",
+        "edu_middle_school_name": "TIEU HOC - TRUNG HOC MINH TIEN SO 2",
+        "middle_school_address": "THON KHUAN PUC",
+        "edu_middle_school_address": "THON KHUAN PUC",
+        "middle_school_period": "05/09/2018 to 10/06/2022",
+        "edu_middle_school_period": "05/09/2018 to 10/06/2022",
+        "high_school_name": "TRUNG HOC PHO THONG HOANG VAN THU",
+        "edu_high_school_name": "TRUNG HOC PHO THONG HOANG VAN THU",
+        "high_school_address": "TO 11, THI TRAN YEN THE, LUC YEN, YEN BAI",
+        "edu_high_school_address": "TO 11, THI TRAN YEN THE, LUC YEN, YEN BAI",
+        "high_school_period": "05/09/2022 to 23/11/2023",
+        "edu_high_school_period": "05/09/2022 to 23/11/2023",
+    }
+    ws_rec = SimpleNamespace(
+        doc_type="ds260_customer_form",
+        variant="exception",
+        raw_data=json.dumps(raw, ensure_ascii=False),
+        form_data=json.dumps(raw, ensure_ascii=False),
+        updated_at=None,
+        id="ws-phuong",
+        source_document_id="doc-phuong",
+    )
+
+    sections = [
+        {
+            "id": "section_work_education",
+            "fields": [
+                {"key": "work_primary_occupation", "value": "", "source": {}},
+                {"key": "edu_middle_school_name", "value": "", "source": {}},
+                {"key": "edu_middle_school_address", "value": "", "source": {}},
+                {"key": "edu_high_school_name", "value": "", "source": {}},
+                {"key": "edu_high_school_address", "value": "", "source": {}},
+            ],
+        },
+    ]
+
+    # Bước 1: enrich từ worksheet (đúng thứ tự trong resolve_ds260_form).
+    enrich_work_education_from_worksheet(sections[0]["fields"], [ws_rec], {})
+    after_enrich = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert after_enrich["work_primary_occupation"] == "STUDENT"
+    assert after_enrich["edu_high_school_name"] == "TRUNG HOC PHO THONG HOANG VAN THU"
+
+    # Bước 2: clear_child_adult_only_ds260_sections chạy sau đó cho hồ sơ con — TRƯỚC ĐÂY xoá
+    # trắng mất dữ liệu vừa điền ở bước 1.
+    clear_child_adult_only_ds260_sections(sections)
+    after_clear = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert after_clear["work_primary_occupation"] == "STUDENT", "Dữ liệu bị xoá sau clear_child_adult_only!"
+    assert after_clear["edu_middle_school_name"] == "TIEU HOC - TRUNG HOC MINH TIEN SO 2"
+    assert after_clear["edu_middle_school_address"] == "THON KHUAN PUC"
+    assert after_clear["edu_high_school_name"] == "TRUNG HOC PHO THONG HOANG VAN THU"
+    assert after_clear["edu_high_school_address"] == "TO 11, THI TRAN YEN THE, LUC YEN, YEN BAI"

@@ -37,16 +37,24 @@ def test_nationality_allows_passport_and_birth_certificate():
     }
 
 
-def test_address_city_and_phone_are_worksheet_only():
-    assert FIELD_ALLOWED_DOCS["current_city"] == ["ds260_customer_form"]
-    assert FIELD_ALLOWED_DOCS["postal_code"] == ["ds260_customer_form"]
-    assert FIELD_ALLOWED_DOCS["primary_phone"] == ["ds260_customer_form"]
-    assert FIELD_ALLOWED_DOCS["email"] == ["ds260_customer_form"]
+def test_address_city_and_phone_allow_worksheet_and_application_form():
+    """current_city/postal_code/primary_phone/email cho phép worksheet + application_form
+    (Job Application, mục Applicant's Information có city/postal/phone/email riêng của người
+    khai) — mở rộng 2026-08-05, trước đó chỉ worksheet nên field bị bỏ trống nếu worksheet
+    thiếu dù application_form OCR đã đọc được."""
+    assert set(FIELD_ALLOWED_DOCS["current_city"]) == {"ds260_customer_form", "application_form"}
+    assert set(FIELD_ALLOWED_DOCS["postal_code"]) == {"ds260_customer_form", "application_form"}
+    assert set(FIELD_ALLOWED_DOCS["primary_phone"]) == {"ds260_customer_form", "application_form"}
+    assert set(FIELD_ALLOWED_DOCS["email"]) == {"ds260_customer_form", "application_form"}
 
 
 def test_current_address_allows_passport_not_city_from_passport():
+    """Passport vẫn KHÔNG được điền city/postal (không có field đáng tin cậy cho 2 mục này) —
+    khác với application_form, có city/postal/country cấu trúc rõ ràng nên được whitelist
+    riêng (xem test_current_address_and_city_fill_from_application_form)."""
     assert set(FIELD_ALLOWED_DOCS["current_address"]) == {
         "ds260_customer_form",
+        "application_form",
         "passport",
         "address_document",
     }
@@ -74,6 +82,48 @@ def test_current_address_allows_passport_not_city_from_passport():
     assert by_key["current_address"] == "123 LE LOI"
     assert by_key["current_city"] == ""
     assert by_key["postal_code"] == ""
+
+
+def test_current_address_and_city_fill_from_application_form():
+    """Application form (Job Application) có current_address/address_city/postal_code/
+    primary_phone_number/email_address riêng của người khai → fill được khi worksheet trống
+    (báo lỗi thực tế TRIEU THI DUYEN 2026-08-04/05: OCR đọc đúng nhưng field DS-260 3/4 vẫn
+    trống vì whitelist cũ không có application_form)."""
+    app_form_ref = _rec(
+        {
+            "current_address": "123 LE LOI",
+            "address_city": "DA NANG",
+            "postal_code": "550000",
+            "primary_phone_number": "0901112233",
+            "email_address": "duyen@example.com",
+        },
+        "application_form",
+        variant="standard",
+    )
+    sections = [
+        {
+            "id": "section_address",
+            "fields": [
+                {"key": "current_address", "value": "", "source": {}},
+                {"key": "current_city", "value": "", "source": {}},
+                {"key": "postal_code", "value": "", "source": {}},
+            ],
+        },
+        {
+            "id": "section_contact",
+            "fields": [
+                {"key": "primary_phone", "value": "", "source": {}},
+                {"key": "email", "value": "", "source": {}},
+            ],
+        },
+    ]
+    enrich_empty_fields_from_all_doc_records(sections, [app_form_ref], {})
+    by_key = {f["key"]: f["value"] for sec in sections for f in sec["fields"]}
+    assert by_key["current_address"] == "123 LE LOI"
+    assert by_key["current_city"] == "DA NANG"
+    assert by_key["postal_code"] == "550000"
+    assert by_key["primary_phone"] == "0901112233"
+    assert by_key["email"] == "duyen@example.com"
 
 
 def test_judicial_certificate_number_whitelist_is_strict():
