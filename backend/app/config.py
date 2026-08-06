@@ -55,9 +55,36 @@ class Settings(BaseSettings):
     ocr_blur_variance_threshold: float = 25.0
     ocr_low_confidence_threshold: float = 0.5
     ocr_low_confidence_field_ratio: float = 0.25
+    # Hướng dẫn đọc chữ viết tay bổ sung (quy ước "..." = giống địa chỉ đã ghi trước đó, ưu tiên
+    # nét đậm hơn khi có chữ sửa đè, cảnh báo nhầm "/" với số "1") — đúc kết từ script thử nghiệm
+    # scripts/test_handwriting_ocr.py. BẬT RIÊNG TỪNG LOẠI TÀI LIỆU (không dùng 1 cờ chung) vì hint
+    # này chỉ có ích cho tài liệu có phần VIẾT TAY (worksheet khách khai, giấy khai sinh bản chính
+    # cũ thường viết tay trong sổ hộ tịch...) — bật tràn lan cho giấy tờ in sẵn hoàn toàn (passport,
+    # ly hôn, kết hôn...) chỉ tốn thêm token vô ích mỗi request.
+    # Thêm field mới ocr_handwriting_correction_rules_<doc_type> khi cần bật cho loại tài liệu khác
+    # (đọc qua Settings.handwriting_correction_rules_enabled(doc_type), không cần sửa ocr_pipeline.py).
+    ocr_handwriting_correction_rules_ds260_customer_form: bool = False
+    ocr_handwriting_correction_rules_birth_certificate: bool = False
+    ocr_handwriting_correction_rules_birth_certificate_child: bool = False
+    # Gọi lại toàn bộ OCR N lần cho CÙNG tài liệu rồi gộp theo đa số phiếu mỗi field (xem
+    # _merge_consensus_runs trong ocr_pipeline.py) — field bất đồng giữa các lần bị hạ confidence
+    # + thêm warning, thay vì tin mù 1 lần chạy duy nhất (model không deterministic, đã quan sát
+    # field số nhà/tên đường đổi giữa các lần gọi). CHI PHÍ NHÂN N LẦN — mặc định TẮT (1 = không lặp).
+    ocr_consensus_runs: int = 1
     upload_dir: str = "uploads"
     export_dir: str = "exports"
     templates_dir: str = "templates/forms"
+    # Lưu trữ đối tượng (MinIO/S3-compatible) cho document upload + export file — TẮT khi
+    # s3_endpoint_url rỗng (mặc định), lúc đó mọi thứ dùng đĩa cục bộ y hệt trước đây (KHÔNG
+    # thay đổi hành vi). Bật bằng cách set S3_ENDPOINT_URL trong .env (xem docker-compose.yml
+    # / docker-compose.prod.yml — service "minio"). CHỈ áp dụng cho file MỚI: file cũ đã lưu
+    # trên đĩa (file_path là đường dẫn cục bộ, không có tiền tố "s3://") vẫn đọc được bình
+    # thường — xem app/services/storage.py (is_s3_uri phân biệt 2 loại qua tiền tố).
+    s3_endpoint_url: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "immipath-documents"
+    s3_region: str = "us-east-1"
     cors_origins: str = "http://localhost:3000"
     access_token_expire_minutes: int = 60 * 24
     app_name: str = "ImmiPath"
@@ -109,9 +136,21 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
+    def s3_enabled(self) -> bool:
+        return bool((self.s3_endpoint_url or "").strip())
+
+    @property
     def ocr_model(self) -> str:
         """Model dùng cho OCR tài liệu — vision_model nếu đặt, ngược lại openai_model."""
         return (self.vision_model or "").strip() or self.openai_model
+
+    def handwriting_correction_rules_enabled(self, doc_type: str) -> bool:
+        """True nếu field ocr_handwriting_correction_rules_<doc_type> tồn tại và = true.
+
+        Loại tài liệu chưa có field riêng (giấy tờ in sẵn, không cần hint chữ viết tay) → luôn
+        False, KHÔNG fallback về 1 cờ chung — tránh bật nhầm hàng loạt khi thêm field mới.
+        """
+        return bool(getattr(self, f"ocr_handwriting_correction_rules_{doc_type}", False))
 
     @property
     def resolved_database_url(self) -> str:

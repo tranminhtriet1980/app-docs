@@ -2533,6 +2533,114 @@ def _eligible_records_for_field_fill(
     return out
 
 
+# Bộ field "công việc HIỆN TẠI" (Primary Occupation/Present Employer + địa chỉ/job title/ngày
+# bắt đầu đi kèm) — DS-260 khách khai (ds260_customer_form) LUÔN được ưu tiên hơn Application
+# form cho nhóm này, vì khách có thể nộp Job Application cũ (mô tả công việc đã nghỉ) trong khi
+# DS-260 tự khai mới hơn phản ánh đúng công việc hiện tại (vd. khách chuyển sang tự làm/nghề khác
+# sau khi đã điền Application form). Việc làm cũ mà Application form liệt kê là "hiện tại" (do
+# form không có trường ngày kết thúc) vẫn được giữ lại — nhưng chỉ qua work_other_occupation_detail
+# (nguồn ds260_customer_form, xem ds260_mapping.json), không được ghi đè lên nghề nghiệp chính.
+_WORK_CURRENT_JOB_KEYS: frozenset[str] = frozenset(
+    {
+        "work_primary_occupation",
+        "work_occupation_other_specify",
+        "work_present_employer",
+        "work_employer_address",
+        "work_employer_city",
+        "work_employer_state",
+        "work_employer_postal_code",
+        "work_employer_country",
+        "work_job_title",
+        "work_start_date",
+    }
+)
+
+
+def _job_identity_tokens(occupation: str, employer: str) -> set[str]:
+    """Token hoá nghề nghiệp + tên công ty để so khớp mờ (khác cách viết, cùng ý nghĩa)."""
+    import unicodedata
+
+    text = f"{occupation or ''} {employer or ''}"
+    text = text.replace("Đ", "D").replace("đ", "d")
+    text = "".join(ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn")
+    cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", text.upper())
+    stopwords = {"THE", "AND", "OF", "CO", "LTD", "INC", "TU", "VA", "CUA"}
+    return {t for t in cleaned.split() if len(t) >= 2 and t not in stopwords}
+
+
+def _worksheet_declared_current_job(
+    records: list[ApplicantDocRecord],
+) -> tuple[str, str] | None:
+    """(primary_occupation, present_employer) khách tự khai HIỆN TẠI trên DS-260 worksheet."""
+    from app.services.ds260_conflicts import pick_latest_by_variant
+
+    rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_by_variant(
+        records, "ds260_customer_form", "standard"
+    )
+    if not rec:
+        return None
+    mappings = flatten_ds260_mappings()
+    occ, _ = _resolve_ds260_field_value(mappings["work_primary_occupation"], rec)
+    emp, _ = _resolve_ds260_field_value(mappings["work_present_employer"], rec)
+    if not occ.strip() and not emp.strip():
+        return None
+    return occ, emp
+
+
+def _application_form_matches_worksheet_current_job(
+    app_rec: ApplicantDocRecord,
+    ws_current_job: tuple[str, str] | None,
+) -> bool:
+    """So sánh (mờ, không phân biệt cách viết) công việc trên Application form với công việc
+    HIỆN TẠI mà khách khai trên DS-260 — quyết định Application form có được dùng bổ sung
+    (địa chỉ, job title, ngày bắt đầu, ...) cho công việc hiện tại hay không.
+
+    Không có gì để so sánh (worksheet chưa khai nghề hiện tại) → coi như khớp, giữ hành vi cũ
+    (tin Application form) thay vì chặn nhầm dữ liệu hợp lệ.
+    """
+    if ws_current_job is None:
+        return True
+    ws_occ, ws_emp = ws_current_job
+    mappings = flatten_ds260_mappings()
+    app_occ, _ = _resolve_ds260_field_value(mappings["work_primary_occupation"], app_rec)
+    app_emp, _ = _resolve_ds260_field_value(mappings["work_present_employer"], app_rec)
+    ws_tokens = _job_identity_tokens(ws_occ, ws_emp)
+    app_tokens = _job_identity_tokens(app_occ, app_emp)
+    if not ws_tokens or not app_tokens:
+        return True
+    overlap = len(ws_tokens & app_tokens) / len(ws_tokens | app_tokens)
+    return overlap >= 0.34
+
+
+def resolve_work_current_job_field(
+    records: list[ApplicantDocRecord],
+    mapping: Ds260FieldMapping,
+    resolutions: dict[str, str],
+    *,
+    person_name: str | None = None,
+) -> tuple[str, str, ApplicantDocRecord | None, dict[str, Any]]:
+    """DS-260 khách khai trước (mới hơn) → thiếu mới rơi về Application form (Luồng 1), NHƯNG
+    chỉ khi Application form mô tả cùng một công việc với công việc hiện tại đã khai trên
+    DS-260 (so khớp mờ nghề nghiệp + tên công ty) — nếu Application form thực chất đang liệt
+    kê một công việc CŨ/khác, không cho nó bổ sung địa chỉ/chi tiết vào công việc hiện tại."""
+    ws_value, ws_source_field, ws_rec, ws_extra = resolve_customer_form_field(
+        records, "ds260_customer_form", mapping
+    )
+    if not _is_empty_for_fallback(ws_value):
+        return ws_value, ws_source_field, ws_rec, {**ws_extra, "derived": "ds260_worksheet_current_job_priority"}
+
+    app_value, app_source_field, app_rec, app_extra = resolve_luong1_ds260_field(
+        records, mapping.document, mapping, resolutions, person_name=person_name
+    )
+    if not app_value or app_rec is None:
+        return app_value, app_source_field, app_rec, app_extra
+
+    ws_current_job = _worksheet_declared_current_job(records)
+    if _application_form_matches_worksheet_current_job(app_rec, ws_current_job):
+        return app_value, app_source_field, app_rec, app_extra
+    return "", mapping.field, None, {"derived": "application_form_stale_job_skipped"}
+
+
 def resolve_luong1_ds260_field(
     records: list[ApplicantDocRecord],
     doc_type: str,
@@ -3590,7 +3698,14 @@ async def resolve_ds260_form(
                 src_extra = {}
             else:
                 src_extra: dict[str, Any] = {}
-                if mapping.document in LUONG1_DOC_TYPES:
+                if mapping.key in _WORK_CURRENT_JOB_KEYS:
+                    value, source_field, rec, src_extra = resolve_work_current_job_field(
+                        records,
+                        mapping,
+                        resolutions,
+                        person_name=person_name if member_ctx else None,
+                    )
+                elif mapping.document in LUONG1_DOC_TYPES:
                     value, source_field, rec, src_extra = resolve_luong1_ds260_field(
                         records,
                         mapping.document,

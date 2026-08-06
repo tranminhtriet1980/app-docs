@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -7,7 +8,7 @@ from typing import Annotated
 
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -218,12 +219,20 @@ async def _save_upload(
 ) -> Document:
     doc_id = uuid.uuid4()
     ext = Path(filename or "upload.bin").suffix or ".bin"
-    dest_dir = settings.upload_path / str(applicant.id) / str(doc_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / f"original{ext}"
 
-    async with aiofiles.open(dest_path, "wb") as f:
-        await f.write(content)
+    if settings.s3_enabled:
+        from app.services import storage
+
+        key = f"applicants/{applicant.id}/documents/{doc_id}/original{ext}"
+        await asyncio.to_thread(storage.put_bytes, key, content, content_type or None)
+        stored_path = storage.make_s3_uri(key)
+    else:
+        dest_dir = settings.upload_path / str(applicant.id) / str(doc_id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / f"original{ext}"
+        async with aiofiles.open(dest_path, "wb") as f:
+            await f.write(content)
+        stored_path = str(dest_path)
 
     fhash = file_sha256(content)
     dup = await find_duplicate(db, file_hash=fhash, applicant_id=applicant.id)
@@ -232,7 +241,7 @@ async def _save_upload(
         id=doc_id,
         applicant_id=applicant.id,
         original_filename=filename or "unknown",
-        file_path=str(dest_path),
+        file_path=stored_path,
         mime_type=content_type or "application/octet-stream",
         file_size=len(content),
         status=DocumentStatus.uploaded,
@@ -510,10 +519,43 @@ async def download_document_file(
     document = result.scalar_one_or_none()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    from app.services import storage
+
+    if storage.is_s3_uri(document.file_path):
+        data = await asyncio.to_thread(storage.get_bytes_from_uri, document.file_path)
+        return Response(
+            content=data,
+            media_type=document.mime_type,
+            headers={"Content-Disposition": f'attachment; filename="{document.original_filename}"'},
+        )
     path = Path(document.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(path, filename=document.original_filename, media_type=document.mime_type)
+
+
+async def _cleanup_stored_files(stored_paths: list[str]) -> None:
+    """Xoá file vật lý sau khi đã xoá bản ghi Document khỏi DB — nhận file_path THÔ (chuỗi),
+    tự phân biệt s3://... (MinIO) với đường dẫn đĩa cục bộ (file cũ), lỗi lưu trữ bỏ qua vì
+    bản ghi DB đã xoá xong (không rollback được nữa, chỉ log rác)."""
+    from app.services import storage
+
+    for stored_path in stored_paths:
+        if storage.is_s3_uri(stored_path):
+            try:
+                await asyncio.to_thread(storage.delete_uri, stored_path)
+            except Exception:
+                logger.warning("Không xoá được object S3: %s", stored_path)
+            continue
+        file_path = Path(stored_path)
+        try:
+            if file_path.exists():
+                file_path.unlink()
+            if file_path.parent.exists():
+                file_path.parent.rmdir()
+        except OSError:
+            pass
 
 
 async def _detach_document_references(db: AsyncSession, document_id: uuid.UUID) -> None:
@@ -557,7 +599,7 @@ async def delete_all_documents(
     if not documents:
         raise HTTPException(status_code=404, detail="Không có tài liệu nào để xoá")
 
-    file_paths = [Path(document.file_path) for document in documents]
+    stored_paths = [document.file_path for document in documents]
     for document in documents:
         await delete_doc_records_for_document(db, document.id)
         await _detach_document_references(db, document.id)
@@ -566,15 +608,8 @@ async def delete_all_documents(
     await finalize_applicant_after_ocr(db, applicant.id)
     await db.commit()
 
-    # Cleanup file/folder after DB commit; ignore filesystem errors.
-    for file_path in file_paths:
-        try:
-            if file_path.exists():
-                file_path.unlink()
-            if file_path.parent.exists():
-                file_path.parent.rmdir()
-        except OSError:
-            pass
+    # Cleanup file/folder after DB commit; ignore storage errors.
+    await _cleanup_stored_files(stored_paths)
 
     return MessageOut(message=f"Đã dừng xử lý và xoá {len(documents)} tài liệu")
 
@@ -592,8 +627,7 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    file_path = Path(document.file_path)
-    folder_path = file_path.parent
+    stored_path = document.file_path
 
     await delete_doc_records_for_document(db, document.id)
     await _detach_document_references(db, document.id)
@@ -602,13 +636,7 @@ async def delete_document(
     await finalize_applicant_after_ocr(db, applicant.id)
     await db.commit()
 
-    # Cleanup file/folder after DB commit; ignore filesystem errors.
-    try:
-        if file_path.exists():
-            file_path.unlink()
-        if folder_path.exists():
-            folder_path.rmdir()
-    except OSError:
-        pass
+    # Cleanup file/folder after DB commit; ignore storage errors.
+    await _cleanup_stored_files([stored_path])
 
     return MessageOut(message="Document deleted")

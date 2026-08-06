@@ -358,6 +358,29 @@ async def delete_form_template(db: AsyncSession, template_id) -> FormTemplate:
     return tpl
 
 
+async def _finalize_export_file(out_path: Path, applicant_id) -> str:
+    """python-docx chỉ ghi ra 1 path đĩa thật (Document.save nhận str path), nên vẫn để
+    generate_word_export/generate_ds260_export_file ghi ra settings.export_path như cũ —
+    hàm này chỉ xử lý BƯỚC SAU: nếu S3 đang bật thì upload file vừa sinh lên MinIO, xoá bản
+    cục bộ, trả về "s3://..." để lưu vào Export.file_path; nếu tắt thì giữ nguyên hành vi cũ
+    (trả lại đường dẫn đĩa, không đụng gì thêm)."""
+    if not settings.s3_enabled:
+        return str(out_path)
+
+    import asyncio
+
+    from app.services import storage
+
+    key = f"applicants/{applicant_id}/exports/{out_path.name}"
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    uri = await asyncio.to_thread(storage.upload_file, out_path, key, docx_mime)
+    try:
+        out_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return uri
+
+
 async def create_export(
     db: AsyncSession,
     applicant: Applicant,
@@ -371,11 +394,12 @@ async def create_export(
 
     profile = _profile_dict(fields)
     out_path = generate_word_export(applicant, template, profile)
+    stored_path = await _finalize_export_file(out_path, applicant.id)
 
     export = Export(
         applicant_id=applicant.id,
         template_id=template.id,
-        file_path=str(out_path),
+        file_path=stored_path,
     )
     db.add(export)
     applicant.status = ApplicantStatus.exported

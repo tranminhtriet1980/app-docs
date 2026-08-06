@@ -1223,10 +1223,14 @@ async def create_ds260_export(
     template = await resolve_ds260_template(db, template_code or DS260_DEFAULT_TEMPLATE_CODE)
     out_path = generate_ds260_export_file(applicant, template, form, member_label=form.get("member"))
 
+    from app.services.export import _finalize_export_file
+
+    stored_path = await _finalize_export_file(out_path, applicant.id)
+
     export = Export(
         applicant_id=applicant.id,
         template_id=template.id,
-        file_path=str(out_path),
+        file_path=stored_path,
     )
     db.add(export)
     applicant.status = ApplicantStatus.exported

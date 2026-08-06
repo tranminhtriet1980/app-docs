@@ -16,5 +16,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # Lưu trữ đối tượng cho document upload + export (S3-compatible). Backend chạy ngoài
+  # Docker khi dev (xem README) — chỉ cần set trong backend/.env:
+  #   S3_ENDPOINT_URL=http://localhost:9000
+  #   S3_ACCESS_KEY=minioadmin
+  #   S3_SECRET_KEY=minioadmin
+  # Để trống S3_ENDPOINT_URL thì backend dùng lại đĩa cục bộ như cũ (mặc định, không cần
+  # container này) — xem app/config.py (s3_enabled) và app/services/storage.py.
+  minio:
+    image: minio/minio:latest
+    container_name: immigration-ai-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Console web (đăng nhập bằng MINIO_ROOT_USER/PASSWORD ở trên)
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
+  minio_data:

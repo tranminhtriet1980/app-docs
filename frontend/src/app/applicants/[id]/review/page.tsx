@@ -231,15 +231,81 @@ function deriveSourceHint(derived: string | undefined, sourceField: string): str
   return "";
 }
 
+function isFieldConflicted(
+  f: Ds260Form["sections"][0]["fields"][0],
+  conflicts: Conflict[],
+  memberNumber: string | undefined,
+  isFamilyCase: boolean
+): boolean {
+  if (!conflicts || conflicts.length === 0) return false;
+
+  return conflicts.some((c) => {
+    let cleanKey = c.field_key;
+    let suffixMember: string | null = null;
+
+    // Check for member suffix .memberNN
+    const suffixMatch = cleanKey.match(/\.member(\d{2})$/);
+    if (suffixMatch) {
+      suffixMember = suffixMatch[1];
+      cleanKey = cleanKey.substring(0, cleanKey.length - suffixMatch[0].length);
+    }
+
+    // Check if suffix matches
+    if (isFamilyCase) {
+      const targetSuffix = memberNumber || "01";
+      const currentSuffix = suffixMember || "01";
+      if (currentSuffix !== targetSuffix) {
+        return false;
+      }
+    }
+
+    // 1. Worksheet conflict
+    if (cleanKey.startsWith("ds260.document_vs_worksheet.")) {
+      const mappingKey = cleanKey.substring("ds260.document_vs_worksheet.".length);
+      return mappingKey === f.key;
+    }
+
+    // 2. Standard document conflict
+    if (cleanKey.startsWith("ds260.")) {
+      const rest = cleanKey.substring("ds260.".length);
+      const firstDot = rest.indexOf(".");
+      if (firstDot !== -1) {
+        const docType = rest.substring(0, firstDot);
+        const sourceField = rest.substring(firstDot + 1);
+        return docType === f.source.document_type && sourceField === f.source.source_field;
+      }
+    }
+
+    return false;
+  });
+}
+
+function InputTooltip({ value }: { value: string }) {
+  if (!value || value.length <= 18) return null;
+  return (
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-72 bg-slate-900 text-white text-xs rounded-lg p-2.5 shadow-xl border border-slate-700/50 pointer-events-none break-all">
+      <div className="font-semibold text-slate-400 mb-1 border-b border-slate-800 pb-0.5">Dữ liệu chi tiết:</div>
+      <div className="font-mono text-[13px] text-white whitespace-pre-wrap leading-relaxed">{value}</div>
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+    </div>
+  );
+}
+
 function Ds260FieldGrid({
   applicantId,
   memberId,
+  memberNumber,
+  isFamilyCase,
+  ds260Conflicts,
   fields,
   canEdit,
   onFieldSaved,
 }: {
   applicantId: string;
   memberId?: string;
+  memberNumber?: string;
+  isFamilyCase: boolean;
+  ds260Conflicts: Conflict[];
   fields: Ds260Form["sections"][0]["fields"];
   canEdit: boolean;
   onFieldSaved: () => void;
@@ -302,16 +368,19 @@ function Ds260FieldGrid({
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {fields.filter((f) => !f.review_hidden).map((f) => {
         const isManual = f.source.derived === "manual_override";
+        const isConflicted = isFieldConflicted(f, ds260Conflicts, memberNumber, isFamilyCase);
         const busy = savingKey === f.key;
         return (
           <div
             key={f.key}
             className={`rounded-md border p-2 ${
-              isManual
-                ? "border-amber-300 bg-amber-50/40"
-                : canEdit
-                  ? "border-slate-200 bg-slate-50/80"
-                  : "border-transparent"
+              isConflicted
+                ? "border-red-400 bg-rose-50/30 ring-1 ring-red-100"
+                : isManual
+                  ? "border-amber-300 bg-amber-50/40"
+                  : canEdit
+                    ? "border-slate-200 bg-slate-50/80"
+                    : "border-transparent"
             }`}
           >
             <p className="text-xs font-medium text-slate-500">
@@ -322,17 +391,20 @@ function Ds260FieldGrid({
             </p>
             {canEdit ? (
               <div className="mt-1 flex gap-1">
-                <input
-                  className="input min-h-0 flex-1 border-brand-200 bg-white py-1.5 font-mono text-sm shadow-sm ring-1 ring-brand-100 focus:ring-brand-400"
-                  value={displayValue(f)}
-                  disabled={busy}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void saveField(f.key, e.currentTarget.value, f.value);
-                    }
-                  }}
-                />
+                <div className="relative flex-1 group">
+                  <input
+                    className="input min-h-0 w-full border-brand-200 bg-white py-1.5 font-mono text-sm shadow-sm ring-1 ring-brand-100 focus:ring-brand-400"
+                    value={displayValue(f)}
+                    disabled={busy}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        void saveField(f.key, e.currentTarget.value, f.value);
+                      }
+                    }}
+                  />
+                  <InputTooltip value={displayValue(f)} />
+                </div>
                 <button
                   type="button"
                   title={isDirty(f) ? "Lưu thay đổi" : "Sửa ô trước, rồi bấm Lưu"}
@@ -359,7 +431,15 @@ function Ds260FieldGrid({
                 )}
               </div>
             ) : (
-              <p className="mt-0.5 break-words font-mono text-sm text-slate-900">{f.value || "—"}</p>
+              <div className="relative group inline-block max-w-full">
+                <p className="mt-0.5 break-words font-mono text-sm text-slate-900">{f.value || "—"}</p>
+                <InputTooltip value={f.value || ""} />
+              </div>
+            )}
+            {isConflicted && (
+              <p className="mt-1 text-xs font-semibold text-red-600 flex items-center gap-1">
+                <span>⚠️ Cần chọn trong xung đột</span>
+              </p>
             )}
             {isManual && (
               <p className="mt-1 text-xs font-medium text-amber-800">Đã chỉnh tay trước export</p>
@@ -402,6 +482,8 @@ function Ds260MemberMappingBlock({
   onFieldSaved,
   onExport,
   exportBusy,
+  ds260Conflicts,
+  isFamilyCase,
 }: {
   applicantId: string;
   member: CaseMember;
@@ -410,8 +492,11 @@ function Ds260MemberMappingBlock({
   onFieldSaved: () => void;
   onExport: (member: CaseMember) => void;
   exportBusy: boolean;
+  ds260Conflicts: Conflict[];
+  isFamilyCase: boolean;
 }) {
   const sections = visibleDs260Sections(form.sections, member.role);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
     <section
@@ -442,64 +527,95 @@ function Ds260MemberMappingBlock({
             )}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary shrink-0"
-          disabled={exportBusy}
-          onClick={() => onExport(member)}
-        >
-          {exportBusy ? "Đang xuất…" : `Xuất DS-260 — ${member.display_name}`}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary flex items-center gap-1.5 shrink-0"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            title={isCollapsed ? "Mở rộng" : "Thu nhỏ"}
+          >
+            {isCollapsed ? (
+              <>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+                <span>Mở rộng</span>
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+                <span>Thu nhỏ</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary shrink-0"
+            disabled={exportBusy}
+            onClick={() => onExport(member)}
+          >
+            {exportBusy ? "Đang xuất…" : `Xuất DS-260 — ${member.display_name}`}
+          </button>
+        </div>
       </div>
 
-      {canEdit ? (
-        <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
-          <strong>Chỉnh sửa DS-260:</strong> mỗi ô có viền xanh và nút <strong>Lưu</strong> bên
-          phải (sáng khi đã sửa). Bấm Lưu hoặc Enter để ghi — không có nút lưu chung cho cả bộ.
-        </div>
-      ) : (
-        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-          Chế độ <strong>chỉ xem</strong> — chỉ admin, chủ hồ sơ, hoặc staff được phân công mới
-          sửa được.
-        </div>
-      )}
+      {!isCollapsed && (
+        <>
+          {canEdit ? (
+            <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
+              <strong>Chỉnh sửa DS-260:</strong> mỗi ô có viền xanh và nút <strong>Lưu</strong> bên
+              phải (sáng khi đã sửa). Bấm Lưu hoặc Enter để ghi — không có nút lưu chung cho cả bộ.
+            </div>
+          ) : (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Chế độ <strong>chỉ xem</strong> — chỉ admin, chủ hồ sơ, hoặc staff được phân công mới
+              sửa được.
+            </div>
+          )}
 
-      <div className="space-y-4">
-        {sections.map((sec) => (
-          <div key={`${member.id}-${sec.id}`} className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h4 className="font-semibold text-slate-900">{sec.title}</h4>
-              <span className="text-xs text-slate-500">
-                {sec.filled_count ?? sec.fields.filter((f) => f.value?.trim()).length} /{" "}
-                {sec.total_count ?? sec.fields.length}
-                {sec.document_missing && (
-                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">
-                    chưa có tài liệu
+          <div className="space-y-4">
+            {sections.map((sec) => (
+              <div key={`${member.id}-${sec.id}`} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h4 className="font-semibold text-slate-900">{sec.title}</h4>
+                  <span className="text-xs text-slate-500">
+                    {sec.filled_count ?? sec.fields.filter((f) => f.value?.trim()).length} /{" "}
+                    {sec.total_count ?? sec.fields.length}
+                    {sec.document_missing && (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">
+                        chưa có tài liệu
+                      </span>
+                    )}
+                    {!sec.document_missing &&
+                      sec.applicable_count != null &&
+                      sec.applicable_filled_count != null &&
+                      sec.applicable_count < (sec.total_count ?? sec.fields.length) && (
+                        <span className="ml-2 text-slate-400">
+                          ({sec.applicable_filled_count}/{sec.applicable_count} áp dụng)
+                        </span>
+                      )}
                   </span>
-                )}
-                {!sec.document_missing &&
-                  sec.applicable_count != null &&
-                  sec.applicable_filled_count != null &&
-                  sec.applicable_count < (sec.total_count ?? sec.fields.length) && (
-                    <span className="ml-2 text-slate-400">
-                      ({sec.applicable_filled_count}/{sec.applicable_count} áp dụng)
-                    </span>
-                  )}
-              </span>
-            </div>
-            {sec.subtitle && <p className="mt-0.5 text-xs text-slate-500">{sec.subtitle}</p>}
-            <div className="mt-3">
-              <Ds260FieldGrid
-                applicantId={applicantId}
-                memberId={member.id === PRINCIPAL_ONLY_ID ? undefined : member.id}
-                fields={sec.fields}
-                canEdit={canEdit}
-                onFieldSaved={onFieldSaved}
-              />
-            </div>
+                </div>
+                {sec.subtitle && <p className="mt-0.5 text-xs text-slate-500">{sec.subtitle}</p>}
+                <div className="mt-3">
+                  <Ds260FieldGrid
+                    applicantId={applicantId}
+                    memberId={member.id === PRINCIPAL_ONLY_ID ? undefined : member.id}
+                    memberNumber={member.member_number || undefined}
+                    isFamilyCase={isFamilyCase}
+                    ds260Conflicts={ds260Conflicts}
+                    fields={sec.fields}
+                    canEdit={canEdit}
+                    onFieldSaved={onFieldSaved}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </section>
   );
 }
@@ -1602,6 +1718,8 @@ export default function ReviewPage() {
                             ? busy === "export-ds260"
                             : busy === `export-ds260-${m.id}`
                         }
+                        ds260Conflicts={ds260Conflicts}
+                        isFamilyCase={caseMembers.length > 1}
                       />
                     );
                   })}

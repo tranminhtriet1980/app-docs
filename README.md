@@ -9,49 +9,46 @@ Next.js (Upload + Review Dashboard)
     ↓
 FastAPI (Auth, Upload, OCR Pipeline, Export)
     ↓
-PostgreSQL/SQLite + Local Storage (uploads/, exports/)
+PostgreSQL (dữ liệu) + MinIO/S3 (file upload + export)
     ↓
 OpenAI GPT-4.1 (classification + extraction) — demo mode nếu không có API key
 ```
 
 ## Yêu cầu
 
-- Docker Desktop (PostgreSQL)
+- Docker Desktop (PostgreSQL + MinIO)
 - Python 3.11+
 - Node.js 18+
 
 ## Cài đặt nhanh
 
-### 1. Database (tùy chọn)
+### 1. PostgreSQL + MinIO
 
-**Cách A — SQLite (mặc định, không cần Docker):**  
-File `backend/.env` đã cấu hình `sqlite+aiosqlite:///./immigration.db`
-
-**Cách B — PostgreSQL (production):**
-
-```powershell
-cd "d:\app docs"
+```bash
 docker compose up -d
 ```
 
-Đổi `DATABASE_URL` trong `backend/.env`:
+Khởi động 2 container:
 
-```
-DATABASE_URL=postgresql+asyncpg://immigration:immigration_dev@localhost:5432/immigration_ai
-```
+- `immigration-ai-db` — PostgreSQL, port 5432
+- `immigration-ai-minio` — MinIO (S3 API port 9000, console web port 9001)
 
 ### 2. Backend
 
-```powershell
+```bash
 cd backend
-copy .env.example .env
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+cp .env.example .env
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-Thêm `OPENAI_API_KEY` vào `backend/.env` để dùng OCR thật. Không có key → **demo mode** (dữ liệu mẫu từ tên file).
+Sửa `backend/.env`:
+
+- `POSTGRES_*` — khớp với `docker-compose.yml` (mặc định user/db `immigration`/`ImmigrationDevDB`)
+- `S3_ACCESS_KEY` / `S3_SECRET_KEY` — **phải điền giá trị thật**, khớp với `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (không dùng cú pháp `${...}`, `.env` không tự expand biến)
+- `OPENAI_API_KEY` — thêm để dùng OCR thật, không có key thì chạy demo mode (dữ liệu mẫu từ tên file)
 
 ```env
 OPENAI_API_KEY=sk-your-openai-key
@@ -60,29 +57,24 @@ OPENAI_MODEL=gpt-4.1
 
 Lấy API key tại [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
 
+Bảng DB được tự tạo lúc khởi động backend (`init_db()` → `create_all`), **không cần chạy Alembic** trên DB mới. Sau lần chạy đầu tiên, đánh dấu Alembic ở baseline để các migration sau này áp dụng đúng:
+
+```bash
+alembic stamp head
+```
+
 Kiểm tra: `GET http://localhost:8000/health` → `"openai_configured": true`
 
 ### 3. Frontend
 
-```powershell
+```bash
 cd frontend
-copy .env.local.example .env.local
+cp .env.local.example .env.local
 npm install
 npm run dev
 ```
 
 Mở http://localhost:3000
-
-### Chạy 1 lệnh (Backend + Frontend)
-
-```powershell
-cd "d:\app docs"
-npm start
-```
-
-Hoặc double-click **`run.bat`**, hoặc `.\dev.ps1` — cùng một việc.
-
-Một terminal chạy cả hai — mở **http://localhost:3000**
 
 ## Quy trình sử dụng
 
@@ -112,24 +104,29 @@ Swagger: http://localhost:8000/docs
 ```
 backend/
   app/api/          # REST endpoints
-  app/services/     # OCR, merge, export
-  uploads/          # File gốc
-  exports/          # Word đã generate
+  app/services/      # OCR, merge, export, storage (MinIO/S3)
+  alembic/           # Migration schema (baseline — xem alembic/versions/)
+  uploads/, exports/ # Fallback đĩa cục bộ khi không bật S3 (xem app/config.py s3_enabled)
 frontend/
-  src/app/          # Pages (dashboard, upload, review)
-docker-compose.yml      # PostgreSQL (dev)
-docker-compose.prod.yml # Full stack HTTPS port 2026
+  src/app/           # Pages (dashboard, upload, review)
+docker-compose.yml      # PostgreSQL + MinIO (dev)
+docker-compose.prod.yml # Full stack HTTPS port 2026 (Postgres + MinIO + Backend + Frontend + Caddy)
 deploy/                 # Caddy, certs, hướng dẫn triển khai
 ```
+
+## Lưu trữ file (MinIO / S3)
+
+Mặc định file upload + export lưu qua MinIO (S3-compatible). Để trống `S3_ENDPOINT_URL` trong `backend/.env` thì backend rơi về đĩa cục bộ (`backend/uploads`, `backend/exports`) như trước — xem `app/config.py` (`s3_enabled`) và `app/services/storage.py`.
+
+Console web MinIO: http://localhost:9001 (đăng nhập bằng `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`).
 
 ## Triển khai Docker (HTTPS port 2026)
 
 Xem chi tiết: [deploy/README.md](deploy/README.md)
 
-```powershell
-cd "d:\app docs"
-copy .env.production.example .env.production
-# Sửa .env.production: SECRET_KEY, POSTGRES_PASSWORD, DOMAIN, OPENAI_API_KEY, ...
+```bash
+cp .env.production.example .env.production
+# Sửa .env.production: SECRET_KEY, POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, DOMAIN, OPENAI_API_KEY, ...
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 

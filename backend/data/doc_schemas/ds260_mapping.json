@@ -261,7 +261,7 @@
     {
       "id": "section_work_education",
       "title": "DS-260 D — Work / Education / Training",
-      "subtitle": "Nguồn chính: Application form (Luồng 1); bổ sung DS-260 khách khai (01_6) nếu thiếu",
+      "subtitle": "Nghề nghiệp/công ty hiện tại: ưu tiên DS-260 khách khai (mới hơn Application form). Các trường còn lại: nguồn chính Application form (Luồng 1), bổ sung DS-260 khách khai (01_6) nếu thiếu",
       "fields": [
         {"key": "work_primary_occupation", "label": "Primary Occupation / Nghề nghiệp chính", "document": "application_form", "field": "primary_occupation", "aliases": ["occupation", "job_category"]},
         {"key": "work_occupation_other_specify", "label": "Specify Other Occupation / Ghi rõ nghề khác", "document": "application_form", "field": "occupation_other_specify", "aliases": ["occupation_other"]},

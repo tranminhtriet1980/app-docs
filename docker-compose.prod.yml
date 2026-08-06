@@ -26,6 +26,27 @@ services:
     networks:
       - appnet
 
+  # Không mở port ra ngoài (chỉ backend gọi nội bộ qua network appnet) — an toàn hơn expose
+  # thẳng console/API MinIO ra internet. Cần xem console thì tạm thêm "ports: - 9001:9001"
+  # hoặc dùng `docker compose -f docker-compose.prod.yml port minio 9001` / SSH port-forward.
+  minio:
+    image: minio/minio:latest
+    container_name: immigration-ai-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.production}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - appnet
+
   backend:
     build:
       context: ./backend
@@ -68,12 +89,21 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@immipath.local}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # Lưu trữ document/export qua MinIO thay vì volume đĩa. Để trống S3_ENDPOINT_URL thì
+      # backend rơi về đĩa cục bộ (backend_uploads/backend_exports ở dưới) như trước — xem
+      # app/config.py (s3_enabled). Endpoint trỏ vào service "minio" cùng network appnet.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.production}
+      S3_BUCKET: ${S3_BUCKET:-immipath-documents}
     volumes:
       - backend_uploads:/app/uploads
       - backend_exports:/app/exports
       - backend_backups:/app/backups
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -127,6 +157,7 @@ networks:
 
 volumes:
   postgres_data:
+  minio_data:
   backend_uploads:
   backend_exports:
   backend_backups:
