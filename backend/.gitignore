@@ -2,6 +2,7 @@ uploads/
 exports/
 ocr_debug/
 .venv/
+venv/
 __pycache__/
 *.pyc
 .env
