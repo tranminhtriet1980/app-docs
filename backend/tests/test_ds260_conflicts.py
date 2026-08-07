@@ -251,6 +251,62 @@ def test_build_worksheet_conflict_job_title_and_employer():
     assert worksheet_conflict_field_key("work_job_title") in keys
 
 
+def test_build_worksheet_conflict_skipped_when_application_form_job_confirmed_as_prior():
+    """Xuan Vu garment pattern (2026-08-07): khách nộp Job Application liệt kê công ty may CŨ
+    (Manager, Xuan Vu garment) là "Present" (form không có end date), nhưng DS-260 tự khai
+    (mới hơn) nói rõ công ty đó ĐÃ NGHỈ và hiện tự làm may ở nhà — worksheet mô tả công ty cũ
+    trong other_occupation_detail. Đây KHÔNG phải xung đột thật (application_form đang mô tả
+    một job cũ, không phải "hiện tại") nên không được tạo Conflict cho cụm present_employer."""
+    application = _rec(
+        {
+            "primary_occupation": "Manager",
+            "present_employer": "Xuan Vu garment private enterprise",
+            "employer_address": "41/40, Street #13, Ward 5, Go Vap District",
+            "job_title": "Manager",
+            "employment_start_date": "2009-01-01",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "primary_occupation": "May (Tu quan)",
+            "present_employer": "May (Tu quan)",
+            "other_occupation_used": "Yes",
+            "other_occupation_detail": (
+                "Ten cong ty: Xuan Vu garment private enterprise. Vi tri cong viec: quan ly. "
+                "Tu 01/01/2009 - 8/8/2018."
+            ),
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_primary_occupation") not in keys
+    assert worksheet_conflict_field_key("work_present_employer") not in keys
+    assert worksheet_conflict_field_key("work_job_title") not in keys
+
+
+def test_build_worksheet_conflict_job_title_and_employer_still_flagged_without_prior_job_evidence():
+    """Không có bằng chứng nào cho thấy Application form đang mô tả việc CŨ (worksheet không
+    nhắc gì tới công ty đó trong other_occupation_detail/prior_jobs_history) — vẫn là xung đột
+    thật, phải tạo Conflict như trước (không bị nuốt bởi rule "công việc hiện tại")."""
+    application = _rec(
+        {"primary_occupation": "Sales Staff", "present_employer": "ABC Co", "job_title": "Manager"},
+        "application_form",
+    )
+    ds260 = _rec(
+        {"primary_occupation": "Tailor", "present_employer": "XYZ Co", "job_title": "Staff"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_primary_occupation") in keys
+    assert worksheet_conflict_field_key("work_present_employer") in keys
+    assert worksheet_conflict_field_key("work_job_title") in keys
+
+
 def test_apply_ds260_resolved_conflicts_worksheet_and_luong1():
     from app.services.ds260_conflicts import apply_ds260_resolved_conflicts
 

@@ -709,6 +709,78 @@ def has_applicable_marriage_certificate(
     return bool(_pick_spouse_side_from_marriage(primary, passport_rec, passport_ref))
 
 
+def _divorce_ex_spouse_full_name(
+    divorce_rec: ApplicantDocRecord | None,
+    passport_rec: ApplicantDocRecord | None,
+    passport_ref: ApplicantDocRecord | None = None,
+) -> str:
+    """Tên đầy đủ của người đã ly hôn với chủ hồ sơ trên quyết định ly hôn (rỗng nếu không xác
+    định được — dùng chung bởi enrich_previous_spouse_from_divorce và _marriage_is_the_divorced_one."""
+    if not divorce_rec:
+        return ""
+    side = _pick_spouse_side_from_marriage(divorce_rec, passport_rec, passport_ref)
+    ex_full = _strip_person_title(
+        _resolve_from_record(
+            divorce_rec,
+            f"{side}_full_name" if side else "spouse_full_name",
+            (f"{side}_name" if side else "spouse_name", "spouse_full_name", "spouse_name"),
+        )
+    )
+    if not ex_full:
+        ex_full = _strip_person_title(
+            _resolve_from_record(
+                divorce_rec,
+                "wife_full_name" if side == "wife" else "husband_full_name",
+                ("wife_name", "husband_name", "plaintiff_name", "defendant_name"),
+            )
+        )
+    if not ex_full:
+        combined = _resolve_from_record(divorce_rec, "spouse_name", ())
+        if combined and " AND " in combined.upper():
+            parts = [p.strip() for p in re.split(r"\s+AND\s+", combined, flags=re.I) if p.strip()]
+            applicant = _resolve_from_record_luong1_fallback(
+                passport_rec, passport_ref, "full_name", ("name",)
+            )
+            for part in parts:
+                if applicant and _names_match(applicant, part):
+                    continue
+                ex_full = _strip_person_title(part)
+                break
+    return ex_full
+
+
+def _marriage_is_the_divorced_one(
+    marriage_rec: ApplicantDocRecord | None,
+    marriage_ref: ApplicantDocRecord | None,
+    divorce_rec: ApplicantDocRecord | None,
+    passport_rec: ApplicantDocRecord | None,
+    passport_ref: ApplicantDocRecord | None = None,
+) -> bool:
+    """True nếu vợ/chồng trên giấy kết hôn đang xét TRÙNG với người đã ly hôn trên quyết định ly
+    hôn — tức đây chính là cuộc hôn nhân đã chấm dứt, KHÔNG phải vợ/chồng hiện tại.
+
+    False nghĩa là chủ hồ sơ đã tái hôn với người khác sau ly hôn cũ: giấy kết hôn đang xét là
+    hôn nhân hiện tại (Married), giấy ly hôn chỉ mô tả cuộc hôn nhân trước (Previous Spouse).
+
+    Không xác định được tên 1 trong 2 bên (OCR thiếu) → mặc định coi là CÙNG một cuộc hôn nhân
+    (True) — tránh suy đoán "đã tái hôn" khi không có bằng chứng, giữ nguyên hành vi an toàn cũ
+    (marital_status = Single khi có giấy ly hôn)."""
+    if not divorce_rec:
+        return False
+    primary = marriage_rec or marriage_ref
+    if not primary:
+        return False
+    ex_full = _divorce_ex_spouse_full_name(divorce_rec, passport_rec, passport_ref)
+    if not ex_full:
+        return True
+    current_spouse_full = _spouse_field_from_marriage(
+        marriage_rec, passport_rec, "full_name", marriage_ref=marriage_ref, passport_ref=passport_ref
+    )
+    if not current_spouse_full:
+        return True
+    return _names_same_person(ex_full, current_spouse_full)
+
+
 @lru_cache(maxsize=1)
 def _spouse_section_field_keys() -> frozenset[str]:
     keys: set[str] = set()
@@ -1535,8 +1607,19 @@ def enrich_marital_status_from_documents(
     "Divorced" dù đó cũng là lựa chọn hợp lệ trên DS-260 gốc — xác nhận trực tiếp với
     consultant 2026-08-04); kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ →
     Married; không có giấy tờ → để trống.
+
+    Có cả giấy ly hôn LẪN giấy kết hôn: nếu vợ/chồng trên giấy kết hôn trùng người đã ly hôn
+    → vẫn là Single (giấy kết hôn đó chính là cuộc hôn nhân đã chấm dứt). Nếu KHÁC người (tái
+    hôn) → giấy ly hôn chỉ mô tả cuộc hôn nhân trước, giấy kết hôn đang xét mới là hiện tại
+    → Married/Widowed như bình thường (xem _marriage_is_the_divorced_one).
     """
-    if divorce_rec:
+    remarried_after_divorce = bool(divorce_rec) and has_applicable_marriage_certificate(
+        marriage_rec, marriage_ref, passport_rec, passport_ref
+    ) and not _marriage_is_the_divorced_one(
+        marriage_rec, marriage_ref, divorce_rec, passport_rec, passport_ref
+    )
+
+    if divorce_rec and not remarried_after_divorce:
         status = "Single"
         derived = "marital_status_from_divorce"
         doc_type = "divorce"
@@ -2641,6 +2724,28 @@ def resolve_work_current_job_field(
     return "", mapping.field, None, {"derived": "application_form_stale_job_skipped"}
 
 
+def resolve_work_prior_jobs_field(
+    records: list[ApplicantDocRecord],
+    mapping: Ds260FieldMapping,
+    resolutions: dict[str, str],
+    *,
+    person_name: str | None = None,
+) -> tuple[str, str, ApplicantDocRecord | None, dict[str, Any]]:
+    """work_prior_jobs_history: DS-260 khách khai trước (mới hơn, thường có ngày kết thúc rõ
+    ràng) → thiếu mới rơi về Application form. Khác _WORK_CURRENT_JOB_KEYS (không cần so khớp
+    mờ nghề nghiệp) vì đây là lịch sử việc làm CŨ — Application form liệt kê job cũ vốn dĩ đúng
+    chỗ của nó ở đây, không phải "stale" cần loại bỏ."""
+    ws_value, ws_source_field, ws_rec, ws_extra = resolve_customer_form_field(
+        records, "ds260_customer_form", mapping
+    )
+    if not _is_empty_for_fallback(ws_value):
+        return ws_value, ws_source_field, ws_rec, {**ws_extra, "derived": "ds260_worksheet_prior_jobs_priority"}
+
+    return resolve_luong1_ds260_field(
+        records, mapping.document, mapping, resolutions, person_name=person_name
+    )
+
+
 def resolve_luong1_ds260_field(
     records: list[ApplicantDocRecord],
     doc_type: str,
@@ -3705,6 +3810,13 @@ async def resolve_ds260_form(
                         resolutions,
                         person_name=person_name if member_ctx else None,
                     )
+                elif mapping.key == "work_prior_jobs_history":
+                    value, source_field, rec, src_extra = resolve_work_prior_jobs_field(
+                        records,
+                        mapping,
+                        resolutions,
+                        person_name=person_name if member_ctx else None,
+                    )
                 elif mapping.document in LUONG1_DOC_TYPES:
                     value, source_field, rec, src_extra = resolve_luong1_ds260_field(
                         records,
@@ -3834,8 +3946,11 @@ async def resolve_ds260_form(
             enrich_divorce_section_from_record(fields_out, divorce_rec)
         if sec.id == "section_spouse" and not is_child_member:
             marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+            divorce_rec = pick_latest_record(records, "divorce")
             if has_applicable_marriage_certificate(
                 marriage_rec, marriage_ref, passport_rec, passport_ref
+            ) and not _marriage_is_the_divorced_one(
+                marriage_rec, marriage_ref, divorce_rec, passport_rec, passport_ref
             ):
                 birth_certs = list_birth_certificate_records(records)
                 enrich_spouse_section_from_marriage(
@@ -3919,8 +4034,11 @@ async def resolve_ds260_form(
                 enrich_child_member_personal(sec["fields"], child_bc, passport_rec)
 
     marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+    divorce_rec = pick_latest_record(records, "divorce")
     if not has_applicable_marriage_certificate(
         marriage_rec, marriage_ref, passport_rec, passport_ref
+    ) or _marriage_is_the_divorced_one(
+        marriage_rec, marriage_ref, divorce_rec, passport_rec, passport_ref
     ):
         for sec in sections_out:
             if sec["id"] == "section_spouse":

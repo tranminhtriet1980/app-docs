@@ -496,6 +496,52 @@ def _strict_field_value(
     return "", mapping.field
 
 
+_WORK_CURRENT_JOB_KEYS = frozenset(
+    {
+        "work_primary_occupation",
+        "work_occupation_other_specify",
+        "work_present_employer",
+        "work_employer_address",
+        "work_employer_city",
+        "work_employer_state",
+        "work_employer_postal_code",
+        "work_employer_country",
+        "work_job_title",
+        "work_start_date",
+    }
+)
+
+
+def _application_form_job_confirmed_as_prior(
+    records: list[ApplicantDocRecord],
+    app_rec: ApplicantDocRecord,
+) -> bool:
+    """True khi worksheet DS-260 tự xác nhận công việc trên Application form là công việc CŨ
+    (tên công ty khớp trong work_other_occupation_detail/work_prior_jobs_history) — không phải
+    chỉ vì worksheet khai nghề nghiệp hiện tại khác đi (điều đó vẫn có thể là xung đột thật)."""
+    from app.services.ds260_mapping import _job_identity_tokens
+
+    app_occ, _ = _strict_field_value(app_rec, "work_primary_occupation")
+    app_emp, _ = _strict_field_value(app_rec, "work_present_employer")
+    app_tokens = _job_identity_tokens(app_occ, app_emp)
+    if not app_tokens:
+        return False
+
+    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_by_variant(
+        records, "ds260_customer_form", "standard"
+    )
+    if not ws_rec:
+        return False
+    detail_val, _ = _strict_field_value(ws_rec, "work_other_occupation_detail")
+    prior_val, _ = _strict_field_value(ws_rec, "work_prior_jobs_history")
+    narrative_tokens = _job_identity_tokens("", f"{detail_val} {prior_val}")
+    if not narrative_tokens:
+        return False
+
+    overlap = len(app_tokens & narrative_tokens) / len(app_tokens)
+    return overlap >= 0.5
+
+
 def _official_value_for_worksheet_compare(
     records: list[ApplicantDocRecord],
     mapping_key: str,
@@ -527,6 +573,21 @@ def _official_value_for_worksheet_compare(
             fb_reference = pick_latest_by_variant(records, fallback_doc_type, "exception")
             if fb_standard or fb_reference:
                 doc_type, standard, reference = fallback_doc_type, fb_standard, fb_reference
+
+    if doc_type == "application_form":
+        # Cụm "công việc HIỆN TẠI" (present_employer/job_title/địa chỉ/ngày bắt đầu...): nếu
+        # worksheet DS-260 đã tự xác nhận công ty trong Application form là công việc CŨ (mô tả
+        # trong other_occupation_detail/prior_jobs_history — vd. khách nộp Job Application cũ
+        # của công ty may Xuân Vũ, nhưng DS-260 tự khai nói rõ đó là việc đã nghỉ và hiện tại tự
+        # làm), thì không có gì để "đối chiếu" giữa hai nguồn — coi như application_form không
+        # cung cấp giá trị công việc HIỆN TẠI, tránh báo xung đột giả giữa việc cũ và việc hiện
+        # tại thực sự. Chỉ bỏ qua khi có bằng chứng rõ ràng (tên công ty khớp trong narrative) —
+        # nếu worksheet chỉ đơn thuần khai nghề khác mà KHÔNG nhắc gì tới công ty trong
+        # Application form, đó vẫn là một xung đột thật cần người dùng xem xét (giữ hành vi cũ).
+        if mapping_key in _WORK_CURRENT_JOB_KEYS:
+            app_rec = standard or reference
+            if app_rec and _application_form_job_confirmed_as_prior(records, app_rec):
+                return "", None
 
     conflict_keys = (
         ds260_conflict_field_key(doc_type, mapping.field, member_suffix),
