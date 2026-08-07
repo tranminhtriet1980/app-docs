@@ -11,6 +11,7 @@ from app.services.ds260_mapping import (
     flatten_ds260_mappings,
     load_ds260_sections,
     resolve_work_current_job_field,
+    resolve_work_prior_jobs_field,
 )
 
 
@@ -237,3 +238,41 @@ def test_current_job_subfields_from_application_form_used_when_same_job():
 
     assert addr_value == "41/40, Street #13, Ward 5, Go Vap District"
     assert addr_rec.doc_type == "application_form"
+
+
+def test_prior_jobs_history_prefers_worksheet_over_application_form():
+    """DS-260 worksheet khai lịch sử việc làm cũ MỚI HƠN và có ngày kết thúc rõ ràng — phải ưu
+    tiên hơn Application form (thường ghi "Present" vì form không có trường end date)."""
+    app_form = _app_form(
+        {
+            "prior_jobs_history": "Xuan Vu garment private enterprise - Manager - from 2009 - Present"
+        }
+    )
+    ws = _ws(
+        {
+            "employment.prior_jobs_history": (
+                "Xuan Vu garment private enterprise - quan ly - 01/01/2009 den 8/8/2018"
+            )
+        }
+    )
+    records = [app_form, ws]
+    mappings = flatten_ds260_mappings()
+
+    value, _, rec, extra = resolve_work_prior_jobs_field(records, mappings["work_prior_jobs_history"], {})
+
+    assert value == "Xuan Vu garment private enterprise - quan ly - 01/01/2009 den 8/8/2018"
+    assert rec.doc_type == "ds260_customer_form"
+    assert extra["derived"] == "ds260_worksheet_prior_jobs_priority"
+
+
+def test_prior_jobs_history_falls_back_to_application_form_when_worksheet_empty():
+    app_form = _app_form({"prior_jobs_history": "ABC Co - Staff - 2015-2018"})
+    ws = _ws({"employment.primary_occupation": "May (Tu quan)"})
+    records = [app_form, ws]
+    mappings = flatten_ds260_mappings()
+
+    value, _, rec, extra = resolve_work_prior_jobs_field(records, mappings["work_prior_jobs_history"], {})
+
+    assert value == "ABC Co - Staff - 2015-2018"
+    assert rec.doc_type == "application_form"
+    assert extra.get("derived") != "ds260_worksheet_prior_jobs_priority"

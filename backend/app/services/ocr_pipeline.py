@@ -1048,13 +1048,20 @@ use labeled blocks — map them exactly:
     "Mother's full name" → mother_name (also split mother_surname + mother_given_names if possible)
     "Year of birth" (often full date like 01 January 1954) → mother_date_of_birth as YYYY-MM-DD
     "Nationality" under mother → mother_country (e.g. Vietnamese)
-    "Residence" under mother → mother_address AND mother_place_of_birth (full address)
+    "Residence" under mother → mother_address ONLY (full address). Do NOT copy this into
+    mother_place_of_birth — residence is where she currently lives, NOT where she was born.
     City in residence (e.g. Da Nang City) → mother_city
   Father block (same pattern):
-    father_name, father_date_of_birth, father_country, father_address/father_place_of_birth, father_city
+    father_name, father_date_of_birth, father_country, father_address (from "Residence"), father_city.
+    Do NOT copy "Residence" into father_place_of_birth either.
 
 Vietnamese originals: mother_surname/mother_given_names, mother_date_of_birth, mother_birth_city,
-mother_place_of_birth, mother_country.
+mother_country.
+
+mother_place_of_birth / father_place_of_birth: ONLY fill these if the certificate has a field
+EXPLICITLY labeled "place of birth" / "nơi sinh" for the parent (rare — most Vietnamese birth
+certificates only record the parents' residence, not their birthplace). Otherwise leave empty —
+NEVER reuse the parent's residence/address value here.
 
 If the document has NO father or mother information, leave all corresponding parent fields empty.
 Use ISO dates YYYY-MM-DD when the FULL date (day+month+year) is printed. If only a YEAR is legible
