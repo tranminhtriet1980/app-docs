@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,10 @@ from app.database import async_session
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    if settings.s3_enabled:
+        from app.services import storage
+
+        await asyncio.to_thread(storage.ensure_bucket)
     async with async_session() as db:
         await ensure_default_templates(db)
         await db.commit()

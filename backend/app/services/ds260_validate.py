@@ -299,6 +299,26 @@ async def validate_ds260(
             )
         )
 
+    # Cảnh báo khi worksheet có địa chỉ nhưng chưa có application_form đối chiếu
+    has_ds260_worksheet = "ds260_customer_form" in present_docs
+    has_application_form = "application_form" in present_docs
+    worksheet_address_keys = {"current_address", "current_city", "current_state", "postal_code", "current_country"}
+    has_worksheet_address = any(
+        str(flat.get(k, "")).strip() for k in worksheet_address_keys
+    )
+
+    if has_ds260_worksheet and has_worksheet_address and not has_application_form:
+        warnings.append(
+            _issue(
+                code="missing_application_form_for_address_check",
+                message=(
+                    "Worksheet khách khai có địa chỉ nhưng chưa upload Application form để đối chiếu "
+                    "— vui lòng upload Job Application / Application form để kiểm tra địa chỉ khách khai"
+                ),
+                document_type="application_form",
+            )
+        )
+
     return {
         "valid": len(errors) == 0,
         "error_count": len(errors),

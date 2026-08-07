@@ -27,14 +27,26 @@ export default function UploadPage() {
   const [email, setEmail] = useState("");
   const [applicant, setApplicant] = useState<Applicant | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [showPendingDocsModal, setShowPendingDocsModal] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    onConfirm: () => {},
+  });
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [deletingId, setDeletingId] = useState<string>("");
   const [reprocessingId, setReprocessingId] = useState<string>("");
   const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [docTypes, setDocTypes] = useState<DocumentTypeGuide[]>([]);
   const [deletingApplicant, setDeletingApplicant] = useState(false);
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fullNamingRows = useMemo(() => buildFullNamingTableRows(), []);
   const extraNamingRows = useMemo(
@@ -82,10 +94,21 @@ export default function UploadPage() {
       router.replace("/login");
       return;
     }
-    load().catch(() => router.replace("/dashboard"));
+    load().catch((err) => {
+      const msg = err instanceof Error ? err.message : "Không thể tải hồ sơ";
+      console.error("Failed to load applicant:", err);
+      setLoadError(msg);
+      // Retry sau 2s thay vì redirect ngay
+      setTimeout(() => load().catch(() => {
+        router.replace("/dashboard");
+      }), 2000);
+    });
     api.listDocumentTypes().then(setDocTypes).catch(() => undefined);
     const timer = setInterval(() => {
-      load().catch(() => undefined);
+      load().catch((err) => {
+        console.error("Periodic load failed:", err);
+        setLoadError(err instanceof Error ? err.message : "Load failed");
+      });
     }, 4000);
     return () => clearInterval(timer);
   }, [load, router]);
@@ -118,15 +141,20 @@ export default function UploadPage() {
   };
 
   const deleteDocument = async (doc: Document) => {
-    const ok = window.confirm(`Xóa tài liệu "${doc.original_filename}"?`);
-    if (!ok) return;
-    setDeletingId(doc.id);
-    try {
-      await api.deleteDocument(id, doc.id);
-      await load();
-    } finally {
-      setDeletingId("");
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa tài liệu "${doc.original_filename}"?`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setDeletingId(doc.id);
+        try {
+          await api.deleteDocument(id, doc.id);
+          await load();
+        } finally {
+          setDeletingId("");
+        }
+      }
+    });
   };
 
   const reprocessOne = async (doc: Document) => {
@@ -143,35 +171,86 @@ export default function UploadPage() {
 
   const reprocessAll = async () => {
     if (!documents.length) return;
-    const ok = window.confirm(
-      "Chạy lại OCR cho toàn bộ tài liệu? Quá trình này có thể mất vài phút."
-    );
-    if (!ok) return;
-    setReprocessingAll(true);
-    try {
-      await api.reprocessAllDocuments(id);
-      await load();
-    } finally {
-      setReprocessingAll(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: "Chạy lại OCR cho toàn bộ tài liệu? Quá trình này có thể mất vài phút.",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setReprocessingAll(true);
+        try {
+          await api.reprocessAllDocuments(id);
+          await load();
+        } finally {
+          setReprocessingAll(false);
+        }
+      }
+    });
+  };
+
+  const deleteAllDocuments = async () => {
+    if (!documents.length) return;
+    setConfirmModal({
+      isOpen: true,
+      message: `Xoá toàn bộ ${documents.length} tài liệu đã upload?\n\nMọi xử lý AI đang chạy sẽ dừng lại, dữ liệu đã trích xuất sẽ mất hết. Bạn có thể upload lại tài liệu mới sau đó. Không thể hoàn tác.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setDeletingAll(true);
+        try {
+          await api.deleteAllDocuments(id);
+          await load();
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xoá tài liệu");
+        } finally {
+          setDeletingAll(false);
+        }
+      }
+    });
   };
 
   const deleteApplicant = async () => {
     if (!applicant) return;
-    const ok = window.confirm(
-      `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`
-    );
-    if (!ok) return;
-    setDeletingApplicant(true);
-    try {
-      await api.deleteApplicant(id, { permanent: true, force: true });
-      router.push("/dashboard");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
-    } finally {
-      setDeletingApplicant(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setDeletingApplicant(true);
+        try {
+          await api.deleteApplicant(id, { permanent: true, force: true });
+          router.push("/dashboard");
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
+        } finally {
+          setDeletingApplicant(false);
+        }
+      }
+    });
   };
+
+  if (loadError) {
+    return (
+      <div>
+        <main className="mx-auto max-w-6xl">
+          <div className="mb-6">
+            <Link href="/dashboard" className="text-sm text-accent hover:underline">
+              ← Quay lại
+            </Link>
+          </div>
+          <div className="card border-l-4 border-red-500 bg-red-50 p-4">
+            <h2 className="font-semibold text-red-900">⚠️ Lỗi tải hồ sơ</h2>
+            <p className="mt-1 text-sm text-red-800">{loadError}</p>
+            <p className="mt-2 text-xs text-red-700">
+              Đang thử kết nối lại... Nếu vẫn bị lỗi, vui lòng{" "}
+              <button onClick={() => window.location.reload()} className="font-medium underline">
+                tải lại trang
+              </button>
+              .
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -189,9 +268,22 @@ export default function UploadPage() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href={`/applicants/${id}/review`} className="btn-primary">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                const processing = documents.filter(
+                  (d) => d.status === "uploaded" || d.status === "processing"
+                );
+                if (processing.length > 0) {
+                  setShowPendingDocsModal(true);
+                } else {
+                  router.push(`/applicants/${id}/review`);
+                }
+              }}
+            >
               Review hồ sơ →
-            </Link>
+            </button>
             <button
               type="button"
               className="btn-secondary text-red-700 hover:border-red-200 hover:bg-red-50"
@@ -246,7 +338,131 @@ export default function UploadPage() {
             >
               {reprocessingAll ? "Đang reprocess..." : "Reprocess tất cả (gồm .docx)"}
             </button>
+            <button
+              type="button"
+              className="btn-secondary text-red-700 hover:border-red-200 hover:bg-red-50"
+              disabled={deletingAll || documents.length === 0}
+              onClick={deleteAllDocuments}
+            >
+              {deletingAll ? "Đang xoá..." : "Xoá tất cả tài liệu"}
+            </button>
           </div>
+        </div>
+
+        {documents.some((d) => d.error_message?.includes("quota")) && (
+          <div className="card mb-4 border-amber-200 bg-amber-50 text-sm text-amber-900">
+            <strong>OpenAI hết quota.</strong> File vẫn được xử lý ở chế độ demo (từ tên file).
+            Nạp credits tại{" "}
+            <a
+              href="https://platform.openai.com/account/billing"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              platform.openai.com/billing
+            </a>{" "}
+            rồi upload lại để OCR thật.
+          </div>
+        )}
+
+        <div className="card mb-6">
+          <h2 className="mb-4 font-semibold">Tài liệu đã upload ({documents.length})</h2>
+          {documents.length === 0 ? (
+            <p className="text-sm text-slate-500">Chưa có tài liệu.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b text-slate-500">
+                    <th className="py-2 pr-4">Mã file</th>
+                    <th className="py-2 pr-4">File</th>
+                    <th className="py-2 pr-4">Loại</th>
+                    <th className="py-2 pr-4">Trạng thái</th>
+                    <th className="py-2">Confidence</th>
+                    <th className="py-2 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedDocuments.map((doc) => {
+                    const colors = memberColorByNumber(doc.member_number);
+                    return (
+                    <tr
+                      key={doc.id}
+                      className={`border-b border-slate-100 border-l-4 ${doc.member_number ? colors.rowBorder : "border-l-transparent"}`}
+                    >
+                      <td className="py-3 pr-4 whitespace-nowrap">
+                        {doc.member_number ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm">
+                            <span
+                              className={`inline-flex h-6 min-w-[1.75rem] items-center justify-center rounded px-1.5 text-xs font-bold text-white ${colors.badge}`}
+                            >
+                              {doc.member_file_label || doc.member_number}
+                            </span>
+                            <span className="max-w-[8rem] truncate text-slate-600" title={doc.member_display_name || ""}>
+                              {doc.member_display_name}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 font-medium">
+                        {doc.original_filename}
+                        {doc.duplicate_warning && (
+                          <span className="ml-2 text-xs text-amber-700">⚠ Trùng file</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4">
+                        {doc.document_type || "—"}
+                        {doc.is_exception && (
+                          <span className="ml-2 text-xs text-amber-700">ngoại lệ</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <StatusBadge status={doc.status} />
+                        {doc.error_message && (
+                          <p
+                            className={`mt-1 text-xs ${
+                              doc.status === "extracted" ? "text-amber-700" : "text-red-500"
+                            }`}
+                          >
+                            {doc.error_message}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3">
+                        {doc.classification_confidence != null
+                          ? `${Math.round(doc.classification_confidence * 100)}%`
+                          : "—"}
+                      </td>
+                      <td className="py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs"
+                            disabled={reprocessingId === doc.id || reprocessingAll}
+                            onClick={() => reprocessOne(doc)}
+                            title="Chạy lại OCR riêng tài liệu này"
+                          >
+                            {reprocessingId === doc.id ? "Đang xử lý..." : "Reprocess"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary text-xs text-red-700"
+                            disabled={deletingId === doc.id}
+                            onClick={() => deleteDocument(doc)}
+                          >
+                            {deletingId === doc.id ? "Đang xóa..." : "Xóa"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {caseMembers.length > 0 && (
@@ -573,121 +789,128 @@ export default function UploadPage() {
           </>
         )}
 
-        {documents.some((d) => d.error_message?.includes("quota")) && (
-          <div className="card mb-4 border-amber-200 bg-amber-50 text-sm text-amber-900">
-            <strong>OpenAI hết quota.</strong> File vẫn được xử lý ở chế độ demo (từ tên file).
-            Nạp credits tại{" "}
-            <a
-              href="https://platform.openai.com/account/billing"
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
-            >
-              platform.openai.com/billing
-            </a>{" "}
-            rồi upload lại để OCR thật.
+        {showPendingDocsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setShowPendingDocsModal(false)}
+            />
+            <div className="relative z-10 w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100">
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-500 shadow-inner ring-4 ring-blue-100/50">
+                  <svg
+                    className="h-7 w-7 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2.5"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                    />
+                  </svg>
+                </div>
+
+                <h3 className="text-xl font-bold text-slate-900 mb-2">
+                  Tài liệu đang được xử lý...
+                </h3>
+                
+                <p className="text-sm text-slate-500 mb-4 leading-relaxed text-center">
+                  Hệ thống đang trích xuất dữ liệu (OCR) từ các tài liệu bạn vừa tải lên. Vui lòng đợi đến khi tất cả các file xử lý xong để đảm bảo kết quả chính xác nhất.
+                </p>
+
+                {(() => {
+                  const processingDocs = documents.filter(
+                    (d) => d.status === "uploaded" || d.status === "processing"
+                  );
+                  if (processingDocs.length === 0) return null;
+                  return (
+                    <div className="w-full mb-6 max-h-40 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-3 text-left">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">
+                        Tệp đang xử lý ({processingDocs.length}):
+                      </span>
+                      <ul className="space-y-1.5 text-xs text-slate-700">
+                        {processingDocs.map((doc) => (
+                          <li key={doc.id} className="flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                            <span className="truncate font-medium" title={doc.original_filename}>
+                              {doc.original_filename}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-sm font-semibold text-white hover:from-blue-600 hover:to-indigo-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none"
+                  onClick={() => setShowPendingDocsModal(false)}
+                >
+                  Đợi thêm
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="card">
-          <h2 className="mb-4 font-semibold">Tài liệu đã upload ({documents.length})</h2>
-          {documents.length === 0 ? (
-            <p className="text-sm text-slate-500">Chưa có tài liệu.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b text-slate-500">
-                    <th className="py-2 pr-4">Mã file</th>
-                    <th className="py-2 pr-4">File</th>
-                    <th className="py-2 pr-4">Loại</th>
-                    <th className="py-2 pr-4">Trạng thái</th>
-                    <th className="py-2">Confidence</th>
-                    <th className="py-2 text-right">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedDocuments.map((doc) => {
-                    const colors = memberColorByNumber(doc.member_number);
-                    return (
-                    <tr
-                      key={doc.id}
-                      className={`border-b border-slate-100 border-l-4 ${doc.member_number ? colors.rowBorder : "border-l-transparent"}`}
-                    >
-                      <td className="py-3 pr-4 whitespace-nowrap">
-                        {doc.member_number ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm">
-                            <span
-                              className={`inline-flex h-6 min-w-[1.75rem] items-center justify-center rounded px-1.5 text-xs font-bold text-white ${colors.badge}`}
-                            >
-                              {doc.member_file_label || doc.member_number}
-                            </span>
-                            <span className="max-w-[8rem] truncate text-slate-600" title={doc.member_display_name || ""}>
-                              {doc.member_display_name}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-3 pr-4 font-medium">
-                        {doc.original_filename}
-                        {doc.duplicate_warning && (
-                          <span className="ml-2 text-xs text-amber-700">⚠ Trùng file</span>
-                        )}
-                      </td>
-                      <td className="py-3 pr-4">
-                        {doc.document_type || "—"}
-                        {doc.is_exception && (
-                          <span className="ml-2 text-xs text-amber-700">ngoại lệ</span>
-                        )}
-                      </td>
-                      <td className="py-3 pr-4">
-                        <StatusBadge status={doc.status} />
-                        {doc.error_message && (
-                          <p
-                            className={`mt-1 text-xs ${
-                              doc.status === "extracted" ? "text-amber-700" : "text-red-500"
-                            }`}
-                          >
-                            {doc.error_message}
-                          </p>
-                        )}
-                      </td>
-                      <td className="py-3">
-                        {doc.classification_confidence != null
-                          ? `${Math.round(doc.classification_confidence * 100)}%`
-                          : "—"}
-                      </td>
-                      <td className="py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            className="btn-secondary text-xs"
-                            disabled={reprocessingId === doc.id || reprocessingAll}
-                            onClick={() => reprocessOne(doc)}
-                            title="Chạy lại OCR riêng tài liệu này"
-                          >
-                            {reprocessingId === doc.id ? "Đang xử lý..." : "Reprocess"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secondary text-xs text-red-700"
-                            disabled={deletingId === doc.id}
-                            onClick={() => deleteDocument(doc)}
-                          >
-                            {deletingId === doc.id ? "Đang xóa..." : "Xóa"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                  })}
-                </tbody>
-              </table>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+            />
+            <div className="relative z-10 w-full max-w-sm transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500 shadow-inner ring-4 ring-amber-100/50">
+                <svg
+                  className="h-7 w-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2.5"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
+                  />
+                </svg>
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900 mb-2">
+                Xác nhận yêu cầu
+              </h3>
+
+              <p className="text-sm text-slate-500 mb-6 leading-relaxed whitespace-pre-line text-center">
+                {confirmModal.message}
+              </p>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition duration-200"
+                  onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-semibold text-white hover:from-amber-600 hover:to-orange-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none"
+                  onClick={confirmModal.onConfirm}
+                >
+                  Xác nhận
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
       </main>
     </div>
   );

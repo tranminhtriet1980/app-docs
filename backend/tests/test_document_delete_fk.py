@@ -20,6 +20,8 @@ from app.database import Base
 from app.models.entities import (
     ApiUsageLog,
     Applicant,
+    Conflict,
+    ConflictStatus,
     Document,
     ProfileField,
     User,
@@ -73,14 +75,23 @@ async def _seed(session):
         field_value="NGUYEN VAN A",
         source_document_id=document.id,
     )
+    conflict = Conflict(
+        id=uuid.uuid4(),
+        applicant_id=applicant.id,
+        field_key="ds260.identity_outlier.identity.full_name.x",
+        value_a="NGUYEN VAN A",
+        document_a_id=document.id,
+        value_b="NGUYEN VAN B",
+        status=ConflictStatus.open,
+    )
     # Flush theo tầng: FK được ép nên hàng cha phải nằm trong DB trước hàng con.
     session.add_all([user, applicant])
     await session.flush()
     session.add(document)
     await session.flush()
-    session.add_all([usage, field])
+    session.add_all([usage, field, conflict])
     await session.commit()
-    return document, usage, field
+    return document, usage, field, conflict
 
 
 def test_delete_document_detaches_references(tmp_path):
@@ -89,7 +100,7 @@ def test_delete_document_detaches_references(tmp_path):
     async def scenario():
         engine, Session = await _setup(tmp_path, "detach")
         async with Session() as session:
-            document, usage, field = await _seed(session)
+            document, usage, field, conflict = await _seed(session)
 
             await _detach_document_references(session, document.id)
             await session.delete(document)
@@ -111,6 +122,12 @@ def test_delete_document_detaches_references(tmp_path):
             assert kept_field is not None
             assert kept_field.source_document_id is None
             assert kept_field.field_value == "NGUYEN VAN A"
+
+            # Conflict (vd. identity_outlier) vẫn còn, chỉ mất liên kết document nguồn.
+            kept_conflict = await session.get(Conflict, conflict.id)
+            assert kept_conflict is not None
+            assert kept_conflict.document_a_id is None
+            assert kept_conflict.value_a == "NGUYEN VAN A"
         await engine.dispose()
 
     _run(scenario())
@@ -125,7 +142,7 @@ def test_delete_without_detach_violates_fk(tmp_path):
     async def scenario():
         engine, Session = await _setup(tmp_path, "violate")
         async with Session() as session:
-            document, _usage, _field = await _seed(session)
+            document, _usage, _field, _conflict = await _seed(session)
 
             await session.delete(document)
             with pytest.raises(IntegrityError):

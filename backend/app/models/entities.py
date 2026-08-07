@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -136,6 +136,7 @@ class Document(Base):
     file_size: Mapped[int] = mapped_column()
     document_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    classification_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     status: Mapped[DocumentStatus] = mapped_column(Enum(DocumentStatus), default=DocumentStatus.uploaded)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -195,6 +196,8 @@ class Conflict(Base):
     status: Mapped[ConflictStatus] = mapped_column(Enum(ConflictStatus), default=ConflictStatus.open)
     resolved_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    majority_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     applicant: Mapped["Applicant"] = relationship(back_populates="conflicts")
 

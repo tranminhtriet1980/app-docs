@@ -190,3 +190,27 @@ def test_worksheet_fills_passport_and_father_gaps():
     assert sections[3]["fields"][0]["value"] == "123 LE LOI"
     mappings = flatten_ds260_mappings()
     assert sections[4]["fields"][0]["source"].get("derived") == "ds260_worksheet_fill"
+
+
+def test_coerce_forces_ssn_consent_yes_even_when_worksheet_says_no():
+    """Chính sách công ty: luôn YES cho 2 câu SSN, bất kể khách khai gì trên worksheet."""
+    extraction = {
+        "fields": {
+            "want_ssn_issued": {"value": "No", "confidence": 0.9},
+            "authorize_ssn_disclosure": {"value": "", "confidence": 0.0},
+            "applied_ssn_before": {"value": "No", "confidence": 0.9},
+        }
+    }
+    out = coerce_ds260_customer_extraction(extraction)
+    fields = out["fields"]
+    assert fields["want_ssn_issued"]["value"] == "Yes"
+    assert fields["authorize_ssn_disclosure"]["value"] == "Yes"
+    # Câu "đã từng xin SSN chưa" phản ánh sự thật — không bị ép.
+    assert fields["applied_ssn_before"]["value"] == "No"
+
+
+def test_coerce_forces_ssn_consent_yes_when_fields_absent():
+    extraction = {"fields": {"applicant_name": {"value": "NGUYEN VAN A", "confidence": 0.9}}}
+    out = coerce_ds260_customer_extraction(extraction)
+    assert out["fields"]["want_ssn_issued"]["value"] == "Yes"
+    assert out["fields"]["authorize_ssn_disclosure"]["value"] == "Yes"

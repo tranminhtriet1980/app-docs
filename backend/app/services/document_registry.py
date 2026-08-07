@@ -8,8 +8,10 @@ Khi Luồng 1 và đối chiếu khác nhau → user chọn giá trị (Conflict
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -232,6 +234,13 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         ),
         form_section="DS-260 D — Work / Education / Training",
         extract_keys=(
+            "current_address",
+            "address_city",
+            "address_state",
+            "postal_code",
+            "address_country",
+            "primary_phone_number",
+            "email_address",
             "primary_occupation",
             "occupation_other_specify",
             "present_employer",
@@ -314,13 +323,18 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
         return "ds260_customer_form", True
 
     # Application form (DS-260 D — công việc / học vấn) — Luồng 1 standard + _new
+    # Bắt: "application form", "job application", "immigrant application", "don nop", "don xin"
     if re.search(r"\bapplication\s+form\b", stem) or "immigrant application" in stem:
+        return "application_form", is_exception
+    if re.search(r"\bjob\s+application\b", stem):
         return "application_form", is_exception
     if re.search(r"\bdon\s+(nop|xin)\b", stem) and "ds" not in stem.replace(" ", ""):
         return "application_form", is_exception
 
     # Longer tokens first (birth certificate child before birth certificate)
-    ranked = sorted(DOCUMENT_REGISTRY, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)
+    # Quét cả SUPPLEMENTAL registry để bắt token "application" từ application_form
+    all_defs = list(DOCUMENT_REGISTRY) + list(SUPPLEMENTAL_DOCUMENT_REGISTRY)
+    ranked = sorted(all_defs, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)
     for defn in ranked:
         for token in defn.filename_tokens:
             if token in stem:
@@ -334,6 +348,36 @@ def canonical_upload_name(doc_type: str, *, exception: bool = False) -> str:
         return doc_type
     base = defn.display_name
     return f"{base}{EXCEPTION_SUFFIX}" if exception else base
+
+
+# Toàn bộ giá trị coi là "Yes"/"No" hợp lệ — cả không dấu lẫn có dấu (OCR có lúc mất dấu),
+# gồm cả kiểu Việt Nam theo thì ("Đã từng...chưa?" → Đã = Yes, Chưa = No).
+_YES_TOKENS = frozenset({"YES", "Y", "CO", "CÓ", "TRUE", "1", "DA", "ĐÃ"})
+_NO_TOKENS = frozenset({"NO", "N", "KHONG", "KHÔNG", "FALSE", "0", "CHUA", "CHƯA"})
+
+
+@lru_cache(maxsize=1)
+def _yes_no_field_keys() -> frozenset[str]:
+    """Field key/field/alias của MỌI câu hỏi Yes/No trong ds260_mapping.json — nhận diện qua
+    label có dấu "?" (quy ước nhất quán trong file mapping), thay vì đoán theo tên field
+    (nhiều field như been_in_us, issued_us_visa, father_is_living không khớp pattern
+    _used/is_ cũ nên trước đây không được chuẩn hoá — báo lỗi thực tế 2026-08-05)."""
+    path = Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "ds260_mapping.json"
+    if not path.is_file():
+        return frozenset()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for sec in data.get("sections", []):
+        for f in sec.get("fields", []):
+            label = f.get("label") or ""
+            if "?" not in label:
+                continue
+            keys.add((f.get("key") or "").lower())
+            keys.add((f.get("field") or "").lower())
+            for alias in f.get("aliases") or ():
+                keys.add(alias.lower())
+    keys.discard("")
+    return frozenset(keys)
 
 
 def format_field_value(key: str, value: str | None) -> str:
@@ -355,11 +399,11 @@ def format_field_value(key: str, value: str | None) -> str:
             val = "FEMALE"
     elif "name" in key_l or key_l.endswith("_name"):
         val = val.upper()
-    elif key_l.endswith("_used") or key_l.startswith("is_"):
+    elif key_l.endswith("_used") or key_l.startswith("is_") or key_l in _yes_no_field_keys():
         u = val.upper()
-        if u in {"YES", "Y", "CO", "CÓ", "TRUE", "1"}:
+        if u in _YES_TOKENS:
             val = "Yes"
-        elif u in {"NO", "N", "KHONG", "KHÔNG", "FALSE", "0"}:
+        elif u in _NO_TOKENS:
             val = "No"
     return re.sub(r"\s+", " ", val).strip()
 

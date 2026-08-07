@@ -94,3 +94,28 @@ def test_loose_profile_key_contact_phone():
     assert val == "456 TRAN PHU"
     assert rec is ref
     assert extra.get("derived") == "reference_fallback"
+
+
+def test_loose_match_does_not_bleed_child_address_into_applicant_address():
+    """Bug thực tế 2026-08-04: current_address của đương đơn bị hiển thị nhầm địa chỉ của
+    CON (child_1_current_address) — target "currentaddress" nằm TRỌN trong
+    "child1currentaddress" nên endswith/in từng khớp nhầm. Giờ chỉ so khớp CHÍNH XÁC."""
+    from app.services.ds260_mapping import _resolve_loose_from_record
+
+    ref = _rec(
+        {
+            "child_1_current_address": "Thon Lang Qui, Xa Minh Tien",
+            "child_2_current_address": "Somewhere Else",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    mapping = flatten_ds260_mappings()["current_address"]
+    val, sf = _resolve_loose_from_record(ref, mapping)
+    assert val == ""
+    assert sf == mapping.field
+
+    # Field thật (không bị tiền tố người khác che) vẫn khớp bình thường.
+    ref_real = _rec({"current_address": "KIMBANGO"}, "ds260_customer_form", variant="exception")
+    val2, sf2 = _resolve_loose_from_record(ref_real, mapping)
+    assert val2 == "KIMBANGO"

@@ -81,22 +81,29 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "mother_state": (_WS,),
     "mother_postal_code": (_WS,),
     "mother_country": (_WS,),
-    # --- Address (3): street có thể từ Passport_new; city/zip chỉ worksheet ---
-    "current_address": (_WS, _PASS, _ADDR),
-    "current_city": (_WS,),
-    "current_state": (_WS,),
-    "postal_code": (_WS,),
-    "current_country": (_WS,),
+    # --- Address (3): street có thể từ Passport_new/Application form; city/state/zip/country
+    # cũng cho phép Application form fill khi worksheet còn trống (báo lỗi thực tế 2026-08-04:
+    # OCR Application form/Job Application đọc đúng current_address + address_city nhưng field
+    # DS-260 3 Address vẫn trống vì whitelist trước đó không có _APP — enrich không bao giờ quét
+    # tới application_form cho các field này). ds260_customer_form (worksheet) vẫn luôn ưu tiên
+    # cao hơn (_record_fill_priority tier 0/1 vs application_form tier 2/3) — chỉ fill khi trống.
+    "current_address": (_WS, _APP, _PASS, _ADDR),
+    "current_city": (_WS, _APP),
+    "current_state": (_WS, _APP),
+    "postal_code": (_WS, _APP),
+    "current_country": (_WS, _APP),
     "address_from_date": (_WS,),
     "other_addresses_used": (_WS,),
     "other_addresses_history": (_WS,),
-    # --- Contact (4): chỉ worksheet ---
-    "primary_phone": (_WS,),
+    # --- Contact (4): primary_phone/email cũng cho phép Application form fill khi worksheet
+    # trống — cùng lớp lỗi với địa chỉ (2026-08-05): Job Application mục Applicant's Information
+    # thường có sẵn Phone/Email riêng của người khai, dùng đối chiếu + fallback fill.
+    "primary_phone": (_WS, _APP),
     "secondary_phone": (_WS,),
     "work_phone": (_WS,),
     "other_phones_used": (_WS,),
     "other_phones_history": (_WS,),
-    "email": (_WS,),
+    "email": (_WS, _APP),
     "other_emails_used": (_WS,),
     "other_emails_history": (_WS,),
     # --- Social (5): chỉ worksheet ---

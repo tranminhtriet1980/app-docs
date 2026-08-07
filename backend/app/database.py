@@ -58,9 +58,12 @@ def _migrate_sqlite_columns(connection) -> None:
     _add("documents", "duplicate_warning", "duplicate_warning BOOLEAN DEFAULT 0 NOT NULL")
     _add("documents", "registry_doc_type", "registry_doc_type VARCHAR(64)")
     _add("documents", "is_exception", "is_exception BOOLEAN DEFAULT 0 NOT NULL")
+    _add("documents", "classification_reason", "classification_reason VARCHAR(256)")
     _migrate_doc_records_per_file(connection)
     _add("form_templates", "is_active", "is_active BOOLEAN DEFAULT 1 NOT NULL")
     _add("form_templates", "created_at", "created_at DATETIME")
+    _add("conflicts", "majority_count", "majority_count INTEGER")
+    _add("conflicts", "total_count", "total_count INTEGER")
 
 
 def _migrate_postgres_columns(connection) -> None:
@@ -89,8 +92,11 @@ def _migrate_postgres_columns(connection) -> None:
     _add("documents", "duplicate_warning BOOLEAN DEFAULT FALSE NOT NULL")
     _add("documents", "registry_doc_type VARCHAR(64)")
     _add("documents", "is_exception BOOLEAN DEFAULT FALSE NOT NULL")
+    _add("documents", "classification_reason VARCHAR(256)")
     _add("form_templates", "is_active BOOLEAN DEFAULT TRUE NOT NULL")
     _add("form_templates", "created_at TIMESTAMPTZ")
+    _add("conflicts", "majority_count INTEGER")
+    _add("conflicts", "total_count INTEGER")
 
 
 def _migrate_doc_records_per_file(connection) -> None:

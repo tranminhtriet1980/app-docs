@@ -78,7 +78,6 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
   "section_divorce",
   "section_previous_spouse",
   "section_children",
-  "section_work_education",
 ]);
 
 function memberPanelClass(role: CaseMember["role"]) {
@@ -107,7 +106,7 @@ function Ds260ConflictPanel({
 
   if (conflicts.length === 0) return null;
   return (
-    <div className="card mb-6 border-amber-300 bg-amber-50/50">
+    <div id="ds260-conflicts-section" className="card mb-6 border-amber-300 bg-amber-50/50 scroll-mt-24">
       <h2 className="text-lg font-semibold text-slate-900">
         Xung đột dữ liệu DS-260 ({conflicts.length})
       </h2>
@@ -119,13 +118,25 @@ function Ds260ConflictPanel({
       <div className="mt-4 space-y-3">
         {conflicts.map((c) => {
           const isWorksheet = c.conflict_type === "document_vs_worksheet";
+          const isOutlier = c.conflict_type === "identity_outlier";
           const title = c.field_label || c.field_key.replace(/^ds260\./, "");
           const custom = customById[c.id] ?? "";
           return (
-            <div key={c.id} className="rounded-lg border border-amber-200 bg-white p-3">
+            <div
+              key={c.id}
+              className={`rounded-lg border bg-white p-3 ${
+                isOutlier ? "border-rose-300" : "border-amber-200"
+              }`}
+            >
               <p className="text-sm font-medium text-slate-800">{title}</p>
               {isWorksheet && (
                 <p className="mt-0.5 text-xs text-slate-500">Loại: Giấy tờ vs DS-260 worksheet</p>
+              )}
+              {isOutlier && (
+                <p className="mt-0.5 text-xs font-medium text-rose-600">
+                  {c.majority_count ?? "?"}/{c.total_count ?? "?"} tài liệu cùng ghi giá trị này — tài
+                  liệu còn lại có thể bị trích xuất sai
+                </p>
               )}
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <button
@@ -135,7 +146,11 @@ function Ds260ConflictPanel({
                   onClick={() => onResolve(c.id, c.value_a || "")}
                 >
                   <span className="block text-xs font-medium text-green-700">
-                    {isWorksheet ? "Nguồn A — Giấy tờ chính (Luồng 1)" : "Nguồn A — Luồng 1 (mẫu)"}
+                    {isOutlier
+                      ? `Đa số tài liệu (${c.majority_count ?? "?"}/${c.total_count ?? "?"})`
+                      : isWorksheet
+                        ? "Nguồn A — Giấy tờ chính (Luồng 1)"
+                        : "Nguồn A — Luồng 1 (mẫu)"}
                   </span>
                   <span className="font-mono">{c.value_a || "—"}</span>
                   {c.document_a_filename && (
@@ -145,11 +160,21 @@ function Ds260ConflictPanel({
                 <button
                   type="button"
                   disabled={busyId === c.id}
-                  className="flex-1 rounded border border-amber-200 bg-amber-50/50 px-3 py-2 text-left text-sm hover:bg-amber-50"
+                  className={`flex-1 rounded border px-3 py-2 text-left text-sm ${
+                    isOutlier
+                      ? "border-rose-200 bg-rose-50/50 hover:bg-rose-50"
+                      : "border-amber-200 bg-amber-50/50 hover:bg-amber-50"
+                  }`}
                   onClick={() => onResolve(c.id, c.value_b || "")}
                 >
-                  <span className="block text-xs font-medium text-amber-700">
-                    {isWorksheet ? "Nguồn B — DS-260 khách khai" : "Nguồn B — Đối chiếu (_new)"}
+                  <span
+                    className={`block text-xs font-medium ${isOutlier ? "text-rose-700" : "text-amber-700"}`}
+                  >
+                    {isOutlier
+                      ? `${c.document_b_filename || "Tài liệu này"} — khác biệt`
+                      : isWorksheet
+                        ? "Nguồn B — DS-260 khách khai"
+                        : "Nguồn B — Đối chiếu (_new)"}
                   </span>
                   <span className="font-mono">{c.value_b || "—"}</span>
                   {c.document_b_filename && (
@@ -206,15 +231,81 @@ function deriveSourceHint(derived: string | undefined, sourceField: string): str
   return "";
 }
 
+function isFieldConflicted(
+  f: Ds260Form["sections"][0]["fields"][0],
+  conflicts: Conflict[],
+  memberNumber: string | undefined,
+  isFamilyCase: boolean
+): boolean {
+  if (!conflicts || conflicts.length === 0) return false;
+
+  return conflicts.some((c) => {
+    let cleanKey = c.field_key;
+    let suffixMember: string | null = null;
+
+    // Check for member suffix .memberNN
+    const suffixMatch = cleanKey.match(/\.member(\d{2})$/);
+    if (suffixMatch) {
+      suffixMember = suffixMatch[1];
+      cleanKey = cleanKey.substring(0, cleanKey.length - suffixMatch[0].length);
+    }
+
+    // Check if suffix matches
+    if (isFamilyCase) {
+      const targetSuffix = memberNumber || "01";
+      const currentSuffix = suffixMember || "01";
+      if (currentSuffix !== targetSuffix) {
+        return false;
+      }
+    }
+
+    // 1. Worksheet conflict
+    if (cleanKey.startsWith("ds260.document_vs_worksheet.")) {
+      const mappingKey = cleanKey.substring("ds260.document_vs_worksheet.".length);
+      return mappingKey === f.key;
+    }
+
+    // 2. Standard document conflict
+    if (cleanKey.startsWith("ds260.")) {
+      const rest = cleanKey.substring("ds260.".length);
+      const firstDot = rest.indexOf(".");
+      if (firstDot !== -1) {
+        const docType = rest.substring(0, firstDot);
+        const sourceField = rest.substring(firstDot + 1);
+        return docType === f.source.document_type && sourceField === f.source.source_field;
+      }
+    }
+
+    return false;
+  });
+}
+
+function InputTooltip({ value }: { value: string }) {
+  if (!value || value.length <= 18) return null;
+  return (
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-72 bg-slate-900 text-white text-xs rounded-lg p-2.5 shadow-xl border border-slate-700/50 pointer-events-none break-all">
+      <div className="font-semibold text-slate-400 mb-1 border-b border-slate-800 pb-0.5">Dữ liệu chi tiết:</div>
+      <div className="font-mono text-[13px] text-white whitespace-pre-wrap leading-relaxed">{value}</div>
+      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+    </div>
+  );
+}
+
 function Ds260FieldGrid({
   applicantId,
   memberId,
+  memberNumber,
+  isFamilyCase,
+  ds260Conflicts,
   fields,
   canEdit,
   onFieldSaved,
 }: {
   applicantId: string;
   memberId?: string;
+  memberNumber?: string;
+  isFamilyCase: boolean;
+  ds260Conflicts: Conflict[];
   fields: Ds260Form["sections"][0]["fields"];
   canEdit: boolean;
   onFieldSaved: () => void;
@@ -277,16 +368,19 @@ function Ds260FieldGrid({
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {fields.filter((f) => !f.review_hidden).map((f) => {
         const isManual = f.source.derived === "manual_override";
+        const isConflicted = isFieldConflicted(f, ds260Conflicts, memberNumber, isFamilyCase);
         const busy = savingKey === f.key;
         return (
           <div
             key={f.key}
             className={`rounded-md border p-2 ${
-              isManual
-                ? "border-amber-300 bg-amber-50/40"
-                : canEdit
-                  ? "border-slate-200 bg-slate-50/80"
-                  : "border-transparent"
+              isConflicted
+                ? "border-red-400 bg-rose-50/30 ring-1 ring-red-100"
+                : isManual
+                  ? "border-amber-300 bg-amber-50/40"
+                  : canEdit
+                    ? "border-slate-200 bg-slate-50/80"
+                    : "border-transparent"
             }`}
           >
             <p className="text-xs font-medium text-slate-500">
@@ -297,17 +391,20 @@ function Ds260FieldGrid({
             </p>
             {canEdit ? (
               <div className="mt-1 flex gap-1">
-                <input
-                  className="input min-h-0 flex-1 border-brand-200 bg-white py-1.5 font-mono text-sm shadow-sm ring-1 ring-brand-100 focus:ring-brand-400"
-                  value={displayValue(f)}
-                  disabled={busy}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void saveField(f.key, e.currentTarget.value, f.value);
-                    }
-                  }}
-                />
+                <div className="relative flex-1 group">
+                  <input
+                    className="input min-h-0 w-full border-brand-200 bg-white py-1.5 font-mono text-sm shadow-sm ring-1 ring-brand-100 focus:ring-brand-400"
+                    value={displayValue(f)}
+                    disabled={busy}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        void saveField(f.key, e.currentTarget.value, f.value);
+                      }
+                    }}
+                  />
+                  <InputTooltip value={displayValue(f)} />
+                </div>
                 <button
                   type="button"
                   title={isDirty(f) ? "Lưu thay đổi" : "Sửa ô trước, rồi bấm Lưu"}
@@ -334,7 +431,15 @@ function Ds260FieldGrid({
                 )}
               </div>
             ) : (
-              <p className="mt-0.5 break-words font-mono text-sm text-slate-900">{f.value || "—"}</p>
+              <div className="relative group inline-block max-w-full">
+                <p className="mt-0.5 break-words font-mono text-sm text-slate-900">{f.value || "—"}</p>
+                <InputTooltip value={f.value || ""} />
+              </div>
+            )}
+            {isConflicted && (
+              <p className="mt-1 text-xs font-semibold text-red-600 flex items-center gap-1">
+                <span>⚠️ Cần chọn trong xung đột</span>
+              </p>
             )}
             {isManual && (
               <p className="mt-1 text-xs font-medium text-amber-800">Đã chỉnh tay trước export</p>
@@ -377,6 +482,8 @@ function Ds260MemberMappingBlock({
   onFieldSaved,
   onExport,
   exportBusy,
+  ds260Conflicts,
+  isFamilyCase,
 }: {
   applicantId: string;
   member: CaseMember;
@@ -385,8 +492,11 @@ function Ds260MemberMappingBlock({
   onFieldSaved: () => void;
   onExport: (member: CaseMember) => void;
   exportBusy: boolean;
+  ds260Conflicts: Conflict[];
+  isFamilyCase: boolean;
 }) {
   const sections = visibleDs260Sections(form.sections, member.role);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
     <section
@@ -417,64 +527,95 @@ function Ds260MemberMappingBlock({
             )}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary shrink-0"
-          disabled={exportBusy}
-          onClick={() => onExport(member)}
-        >
-          {exportBusy ? "Đang xuất…" : `Xuất DS-260 — ${member.display_name}`}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary flex items-center gap-1.5 shrink-0"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            title={isCollapsed ? "Mở rộng" : "Thu nhỏ"}
+          >
+            {isCollapsed ? (
+              <>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+                <span>Mở rộng</span>
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+                <span>Thu nhỏ</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary shrink-0"
+            disabled={exportBusy}
+            onClick={() => onExport(member)}
+          >
+            {exportBusy ? "Đang xuất…" : `Xuất DS-260 — ${member.display_name}`}
+          </button>
+        </div>
       </div>
 
-      {canEdit ? (
-        <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
-          <strong>Chỉnh sửa DS-260:</strong> mỗi ô có viền xanh và nút <strong>Lưu</strong> bên
-          phải (sáng khi đã sửa). Bấm Lưu hoặc Enter để ghi — không có nút lưu chung cho cả bộ.
-        </div>
-      ) : (
-        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-          Chế độ <strong>chỉ xem</strong> — chỉ admin, chủ hồ sơ, hoặc staff được phân công mới
-          sửa được.
-        </div>
-      )}
+      {!isCollapsed && (
+        <>
+          {canEdit ? (
+            <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
+              <strong>Chỉnh sửa DS-260:</strong> mỗi ô có viền xanh và nút <strong>Lưu</strong> bên
+              phải (sáng khi đã sửa). Bấm Lưu hoặc Enter để ghi — không có nút lưu chung cho cả bộ.
+            </div>
+          ) : (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Chế độ <strong>chỉ xem</strong> — chỉ admin, chủ hồ sơ, hoặc staff được phân công mới
+              sửa được.
+            </div>
+          )}
 
-      <div className="space-y-4">
-        {sections.map((sec) => (
-          <div key={`${member.id}-${sec.id}`} className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h4 className="font-semibold text-slate-900">{sec.title}</h4>
-              <span className="text-xs text-slate-500">
-                {sec.filled_count ?? sec.fields.filter((f) => f.value?.trim()).length} /{" "}
-                {sec.total_count ?? sec.fields.length}
-                {sec.document_missing && (
-                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">
-                    chưa có tài liệu
+          <div className="space-y-4">
+            {sections.map((sec) => (
+              <div key={`${member.id}-${sec.id}`} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h4 className="font-semibold text-slate-900">{sec.title}</h4>
+                  <span className="text-xs text-slate-500">
+                    {sec.filled_count ?? sec.fields.filter((f) => f.value?.trim()).length} /{" "}
+                    {sec.total_count ?? sec.fields.length}
+                    {sec.document_missing && (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">
+                        chưa có tài liệu
+                      </span>
+                    )}
+                    {!sec.document_missing &&
+                      sec.applicable_count != null &&
+                      sec.applicable_filled_count != null &&
+                      sec.applicable_count < (sec.total_count ?? sec.fields.length) && (
+                        <span className="ml-2 text-slate-400">
+                          ({sec.applicable_filled_count}/{sec.applicable_count} áp dụng)
+                        </span>
+                      )}
                   </span>
-                )}
-                {!sec.document_missing &&
-                  sec.applicable_count != null &&
-                  sec.applicable_filled_count != null &&
-                  sec.applicable_count < (sec.total_count ?? sec.fields.length) && (
-                    <span className="ml-2 text-slate-400">
-                      ({sec.applicable_filled_count}/{sec.applicable_count} áp dụng)
-                    </span>
-                  )}
-              </span>
-            </div>
-            {sec.subtitle && <p className="mt-0.5 text-xs text-slate-500">{sec.subtitle}</p>}
-            <div className="mt-3">
-              <Ds260FieldGrid
-                applicantId={applicantId}
-                memberId={member.id === PRINCIPAL_ONLY_ID ? undefined : member.id}
-                fields={sec.fields}
-                canEdit={canEdit}
-                onFieldSaved={onFieldSaved}
-              />
-            </div>
+                </div>
+                {sec.subtitle && <p className="mt-0.5 text-xs text-slate-500">{sec.subtitle}</p>}
+                <div className="mt-3">
+                  <Ds260FieldGrid
+                    applicantId={applicantId}
+                    memberId={member.id === PRINCIPAL_ONLY_ID ? undefined : member.id}
+                    memberNumber={member.member_number || undefined}
+                    isFamilyCase={isFamilyCase}
+                    ds260Conflicts={ds260Conflicts}
+                    fields={sec.fields}
+                    canEdit={canEdit}
+                    onFieldSaved={onFieldSaved}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </section>
   );
 }
@@ -666,6 +807,17 @@ export default function ReviewPage() {
   const [templateCode, setTemplateCode] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [ds260Conflicts, setDs260Conflicts] = useState<Conflict[]>([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [hasShownConflictModal, setHasShownConflictModal] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    onConfirm: () => {},
+  });
   const [conflictBusy, setConflictBusy] = useState("");
   const [busy, setBusy] = useState("");
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -753,6 +905,13 @@ export default function ReviewPage() {
     setTemplates(tpls);
     setDs260Validation(validation);
     setDs260Conflicts(conflicts);
+    setHasShownConflictModal((prev) => {
+      if (!prev && conflicts.length > 0) {
+        setShowConflictModal(true);
+        return true;
+      }
+      return prev;
+    });
     setDocTables(tables);
     setReferenceTables(refTables);
 
@@ -860,32 +1019,7 @@ export default function ReviewPage() {
     return `ds260_${safe}.docx`;
   };
 
-  const confirmSkipValidation = () => {
-    if (!ds260Validation || ds260Validation.valid) return true;
-    return window.confirm(
-      `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
-        ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n")
-    );
-  };
 
-  const exportDs260ForMember = async (member: CaseMember) => {
-    if (!confirmSkipValidation()) return;
-
-    setBusy(`export-ds260-${member.id}`);
-    try {
-      const result = await api.exportDs260(id, Boolean(ds260Validation && !ds260Validation.valid), ds260TemplateCode, member.id);
-      await api.downloadExportFile(
-        result.id,
-        result.download_url,
-        exportFilenameForMember(member.display_name)
-      );
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
-    } finally {
-      setBusy("");
-    }
-  };
 
   const saveFamilyMembers = async () => {
     const principal = setupPrincipalName.trim() || applicant?.display_name?.trim() || "";
@@ -999,67 +1133,135 @@ export default function ReviewPage() {
 
   const deleteMember = async (member: CaseMember) => {
     if (member.role === "principal") return;
-    const ok = window.confirm(
-      `Xóa ${memberRoleLabel(member.role)} "${member.display_name}" khỏi hồ sơ?\n\nChỉ xóa khi nhầm người / hồ sơ test.`
-    );
-    if (!ok) return;
-
-    setBusy(`delete-member-${member.id}`);
-    try {
-      const res = await api.deleteCaseMember(id, member.id);
-      await reloadMembers();
-      await load();
-      alert(res.message || "Đã xóa");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa thành viên");
-    } finally {
-      setBusy("");
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa ${memberRoleLabel(member.role)} "${member.display_name}" khỏi hồ sơ?\n\nChỉ xóa khi nhầm người / hồ sơ test.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy(`delete-member-${member.id}`);
+        try {
+          const res = await api.deleteCaseMember(id, member.id);
+          await reloadMembers();
+          await load();
+          alert(res.message || "Đã xóa");
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa thành viên");
+        } finally {
+          setBusy("");
+        }
+      }
+    });
   };
 
   const exportDs260 = async () => {
-    if (!confirmSkipValidation()) return;
+    const runExport = async () => {
+      setBusy("export-ds260");
+      try {
+        const memberId = selectedMemberId || undefined;
+        const member = caseMembers.find((m) => m.id === memberId);
+        const result = await api.exportDs260(
+          id,
+          Boolean(ds260Validation && !ds260Validation.valid),
+          ds260TemplateCode,
+          memberId
+        );
+        const label = member?.display_name || applicant?.display_name || id;
+        await api.downloadExportFile(result.id, result.download_url, exportFilenameForMember(label));
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
 
-    setBusy("export-ds260");
-    try {
-      const memberId = selectedMemberId || undefined;
-      const member = caseMembers.find((m) => m.id === memberId);
-      const result = await api.exportDs260(id, Boolean(ds260Validation && !ds260Validation.valid), ds260TemplateCode, memberId);
-      const label = member?.display_name || applicant?.display_name || id;
-      await api.downloadExportFile(result.id, result.download_url, exportFilenameForMember(label));
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
-    } finally {
-      setBusy("");
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
+          ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n"),
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport();
+        }
+      });
+    } else {
+      void runExport();
+    }
+  };
+
+  const exportDs260ForMember = async (member: CaseMember) => {
+    const runExport = async () => {
+      setBusy(`export-ds260-${member.id}`);
+      try {
+        const result = await api.exportDs260(
+          id,
+          Boolean(ds260Validation && !ds260Validation.valid),
+          ds260TemplateCode,
+          member.id
+        );
+        await api.downloadExportFile(
+          result.id,
+          result.download_url,
+          exportFilenameForMember(member.display_name)
+        );
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất DS260 thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
+
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: `DS260 có ${ds260Validation.error_count} lỗi. Vẫn xuất file nháp?\n\n` +
+          ds260Validation.errors.map((e) => `• ${e.message}`).slice(0, 5).join("\n"),
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport();
+        }
+      });
+    } else {
+      void runExport();
     }
   };
 
   const exportDs260Batch = async () => {
-    const skipValidation =
-      ds260Validation &&
-      !ds260Validation.valid &&
-      window.confirm(`Một số trường chưa hợp lệ. Vẫn xuất tất cả thành viên?`);
-    if (ds260Validation && !ds260Validation.valid && !skipValidation) return;
+    const runExport = async (skipValidation: boolean) => {
+      setBusy("export-ds260-batch");
+      try {
+        const result = await api.exportDs260Batch(id, skipValidation, ds260TemplateCode);
+        for (const exp of result.exports) {
+          const name = exp.member_name || caseMembers.find((m) => m.id === exp.member_id)?.display_name || exp.id;
+          await api.downloadExportFile(exp.id, exp.download_url, exportFilenameForMember(name));
+        }
+        if (result.failed.length) {
+          alert(
+            `Đã xuất ${result.exports.length} file. Lỗi:\n` +
+              result.failed.map((f) => `• ${f.member}: ${f.error}`).join("\n")
+          );
+        }
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Xuất hàng loạt thất bại");
+      } finally {
+        setBusy("");
+      }
+    };
 
-    setBusy("export-ds260-batch");
-    try {
-      const result = await api.exportDs260Batch(id, Boolean(skipValidation), ds260TemplateCode);
-      for (const exp of result.exports) {
-        const name = exp.member_name || caseMembers.find((m) => m.id === exp.member_id)?.display_name || exp.id;
-        await api.downloadExportFile(exp.id, exp.download_url, exportFilenameForMember(name));
-      }
-      if (result.failed.length) {
-        alert(
-          `Đã xuất ${result.exports.length} file. Lỗi:\n` +
-            result.failed.map((f) => `• ${f.member}: ${f.error}`).join("\n")
-        );
-      }
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Xuất hàng loạt thất bại");
-    } finally {
-      setBusy("");
+    if (ds260Validation && !ds260Validation.valid) {
+      setConfirmModal({
+        isOpen: true,
+        message: "Một số trường chưa hợp lệ. Vẫn xuất tất cả thành viên?",
+        onConfirm: () => {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+          void runExport(true);
+        }
+      });
+    } else {
+      void runExport(false);
     }
   };
 
@@ -1068,22 +1270,28 @@ export default function ReviewPage() {
       alert("Không thể xóa template hệ thống mặc định.");
       return;
     }
-    if (!confirm(`Xóa mẫu form "${tpl.name}" (${tpl.code})?\n\nFile .docx trên server cũng sẽ bị xóa.`)) return;
-    setBusy(`del-tpl-${tpl.id}`);
-    try {
-      const res = await api.deleteFormTemplate(tpl.id);
-      alert(res.message || "Đã xóa");
-      const tpls = await api.listTemplates();
-      setTemplates(tpls);
-      if (ds260TemplateCode === tpl.code) {
-        const next = tpls.find(isDs260FormTemplate)?.code || DS260_DEFAULT_TEMPLATE_CODE;
-        setDs260TemplateCode(next);
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa mẫu form "${tpl.name}" (${tpl.code})?\n\nFile .docx trên server cũng sẽ bị xóa.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy(`del-tpl-${tpl.id}`);
+        try {
+          const res = await api.deleteFormTemplate(tpl.id);
+          alert(res.message || "Đã xóa");
+          const tpls = await api.listTemplates();
+          setTemplates(tpls);
+          if (ds260TemplateCode === tpl.code) {
+            const next = tpls.find(isDs260FormTemplate)?.code || DS260_DEFAULT_TEMPLATE_CODE;
+            setDs260TemplateCode(next);
+          }
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa mẫu form");
+        } finally {
+          setBusy("");
+        }
       }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa mẫu form");
-    } finally {
-      setBusy("");
-    }
+    });
   };
 
   const uploadTemplate = async (file: File) => {
@@ -1124,19 +1332,22 @@ export default function ReviewPage() {
 
   const deleteApplicant = async () => {
     if (!applicant) return;
-    const ok = window.confirm(
-      `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`
-    );
-    if (!ok) return;
-    setBusy("delete");
-    try {
-      await api.deleteApplicant(id, { permanent: true, force: true });
-      router.push("/dashboard");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
-    } finally {
-      setBusy("");
-    }
+    setConfirmModal({
+      isOpen: true,
+      message: `Xóa vĩnh viễn hồ sơ "${applicant.display_name}"?\n\nToàn bộ dữ liệu trong database (giấy tờ, OCR, DS-260, thành viên gia đình) và file upload sẽ bị xóa. Không thể hoàn tác.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setBusy("delete");
+        try {
+          await api.deleteApplicant(id, { permanent: true, force: true });
+          router.push("/dashboard");
+        } catch (err) {
+          alert(err instanceof Error ? err.message : "Không thể xóa hồ sơ");
+        } finally {
+          setBusy("");
+        }
+      }
+    });
   };
 
   const canEditDs260 =
@@ -1507,6 +1718,8 @@ export default function ReviewPage() {
                             ? busy === "export-ds260"
                             : busy === `export-ds260-${m.id}`
                         }
+                        ds260Conflicts={ds260Conflicts}
+                        isFamilyCase={caseMembers.length > 1}
                       />
                     );
                   })}
@@ -1797,6 +2010,117 @@ export default function ReviewPage() {
         </div>
 
         <AiChatPanel applicantId={id} />
+
+        {showConflictModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setShowConflictModal(false)}
+            />
+            <div className="relative z-10 w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100">
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500 shadow-inner ring-4 ring-amber-100/50">
+                  <svg
+                    className="h-7 w-7"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                </div>
+
+                <h3 className="text-xl font-bold text-slate-900 mb-2">
+                  Phát hiện xung đột dữ liệu!
+                </h3>
+                
+                <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                  Hệ thống phát hiện có sự bất nhất hoặc xung đột dữ liệu giữa các giấy tờ đã upload. Vui lòng nhờ nhân viên đối chiếu và chọn giá trị chính xác nhất.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition duration-200"
+                  onClick={() => setShowConflictModal(false)}
+                >
+                  Đã biết
+                </button>
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-semibold text-white hover:from-amber-600 hover:to-orange-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+                  onClick={() => {
+                    setShowConflictModal(false);
+                    const element = document.getElementById("ds260-conflicts-section");
+                    if (element) {
+                      element.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}
+                >
+                  Xử lý ngay
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity duration-300 ease-out"
+              onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+            />
+            <div className="relative z-10 w-full max-w-sm transform overflow-hidden rounded-2xl bg-white p-6 shadow-2xl transition-all duration-300 ease-out scale-100 border border-slate-100 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500 shadow-inner ring-4 ring-amber-100/50">
+                <svg
+                  className="h-7 w-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2.5"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
+                  />
+                </svg>
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900 mb-2">
+                Xác nhận yêu cầu
+              </h3>
+
+              <p className="text-sm text-slate-500 mb-6 leading-relaxed whitespace-pre-line text-center">
+                {confirmModal.message}
+              </p>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition duration-200"
+                  onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-sm font-semibold text-white hover:from-amber-600 hover:to-orange-600 transition duration-200 shadow-md hover:shadow-lg focus:outline-none"
+                  onClick={confirmModal.onConfirm}
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

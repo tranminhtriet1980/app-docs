@@ -33,6 +33,24 @@ def test_birth_city_and_state_equal_from_passport():
     assert by_key["birth_city"] == "Da Nang City"
 
 
+def test_worksheet_city_and_state_both_present_are_not_collapsed():
+    """Ca thật (2026-08-04): City = địa chỉ đầy đủ, State = tên tỉnh riêng, KHÁC nhau.
+
+    Trước đây hàm ép State = City (giá trị dài hơn thắng theo _canonical_applicant_birth_place),
+    làm mất tên tỉnh thật; nếu City ngắn (vd. chỉ "Vinh Lac") thì bước normalize_ds260_place_fields
+    chạy sau còn match nhầm sang tỉnh khác ("Vinh" → Nghệ An thay vì Yên Bái).
+    """
+    fields = [
+        {"key": "birth_city", "value": "Xa Vinh Lac, Huyen Luc Yen, Tinh Yen Bai", "source": {}},
+        {"key": "birth_state", "value": "Yen Bai", "source": {}},
+    ]
+    enrich_applicant_birth_city_state_equal(fields, None)
+    by_key = {f["key"]: f["value"] for f in fields}
+    # Không đè — giữ nguyên để normalize_ds260_place_fields (chạy cuối pipeline) tự tách đúng.
+    assert by_key["birth_city"] == "Xa Vinh Lac, Huyen Luc Yen, Tinh Yen Bai"
+    assert by_key["birth_state"] == "Yen Bai"
+
+
 def test_export_birth_city_state_not_forced_equal():
     """Export không còn ép birth_state = birth_city (đã chuẩn hóa ở resolve)."""
     from app.services.export_ds260 import _prepare_display_values

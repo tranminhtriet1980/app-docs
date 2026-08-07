@@ -238,6 +238,7 @@ class DocumentOut(BaseModel):
     registry_doc_type: str | None = None
     is_exception: bool = False
     classification_confidence: float | None
+    classification_reason: str | None = None
     status: DocumentStatus
     error_message: str | None
     tags: list[str] = []
@@ -488,6 +489,8 @@ class ConflictOut(BaseModel):
     resolved_value: str | None
     conflict_type: str | None = None
     field_label: str | None = None
+    majority_count: int | None = None
+    total_count: int | None = None
 
     model_config = {"from_attributes": True}
 

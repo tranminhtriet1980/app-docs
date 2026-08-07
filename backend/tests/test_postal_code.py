@@ -46,3 +46,35 @@ def test_export_postal_only_with_current_address():
         }
     )
     assert with_addr.get("postal_code") == "550000"
+
+
+def test_parent_postal_code_never_derived_from_birthplace():
+    """Postal code cha/mẹ phải theo ĐỊA CHỈ HIỆN TẠI, không phải nơi sinh — nơi sinh và nơi ở
+    hiện tại là 2 khái niệm khác nhau, mỗi nơi có mã bưu điện riêng. Bug thật (2026-08-05):
+    mother_postal_code bị suy từ mother_birth_state ('Nghe An' → 460000) trong khi DS-260 gốc của
+    khách ghi rõ mẹ đang ở postal code khác (78607) — vì bleed-detection xóa nhầm dữ liệu hiện tại
+    thật, rồi export lại tự đoán bù bằng nơi sinh (nguồn kém tin cậy hơn cho postal code)."""
+    from app.services.export_ds260 import _prepare_display_values
+
+    out = _prepare_display_values(
+        {
+            "mother_birth_state": "Nghe An",
+            "mother_birth_city": "Vinh",
+            "mother_birth_country": "Vietnam",
+            # Không có mother_state/mother_city/mother_address (địa chỉ hiện tại) → phải để TRỐNG.
+        }
+    )
+    assert out.get("mother_postal_code", "") == "", (
+        f"Không được suy postal code cha/mẹ từ nơi sinh, ra: {out.get('mother_postal_code')!r}"
+    )
+
+    # Có địa chỉ HIỆN TẠI thật thì vẫn phải tính đúng, không bị fallback nơi sinh che mất.
+    out2 = _prepare_display_values(
+        {
+            "mother_birth_state": "Nghe An",
+            "mother_state": "Da Nang",
+            "mother_city": "Da Nang",
+            "mother_country": "Vietnam",
+        }
+    )
+    assert out2.get("mother_postal_code") == "550000"

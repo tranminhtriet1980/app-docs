@@ -77,6 +77,86 @@ DS260_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"mother.*country.*birth|quốc gia.*sinh.*mẹ|country.*birth.*mother", re.I), "mother_birth_country"),
 ]
 
+# DS-260 C — Previous U.S Travel (mục "Đã từng đến Mỹ") — trước đây KHÔNG có pattern nào nên
+# export không bao giờ điền được, dù web hiển thị đúng (báo lỗi thực tế 2026-08-05: web fill
+# oke, xuất file Word bị trống — export_ds260.py dò text theo regex trong template, field
+# không có pattern thì bị bỏ qua âm thầm, không lỗi/không cảnh báo).
+TRAVEL_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"ever been in the u\.?s|đã từng đến mỹ", re.I), "been_in_us"),
+    (re.compile(r"travel details.*i-?94|chi tiết.*ngày đến.*ở bao lâu", re.I), "us_travel_history"),
+    (re.compile(r"ever been issued a u\.?s visa|đã từng được cấp visa", re.I), "issued_us_visa"),
+    (re.compile(r"visa details.*type/date/number|chi tiết visa.*loại.*ngày cấp", re.I), "us_visa_history"),
+    (re.compile(r"refused u\.?s visa|admission.*withdrawn|bị từ chối visa", re.I), "refused_us_visa"),
+    (re.compile(r"refusal details.*visa type|chi tiết.*loại visa.*ngày.*lý do", re.I), "us_visa_refusal_history"),
+]
+
+# DS-260 F — Security and Background Information (44 câu Yes/No) + G — Social Security Number
+# (3 câu) — CÙNG LỖI với TRAVEL_LABEL_PATTERNS ở trên: chưa từng có pattern nào, export bỏ
+# trống toàn bộ mục An ninh & SSN dù web hiển thị đúng (báo lỗi thực tế 2026-08-05).
+SECURITY_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"communicable disease|tuberculosis|bệnh lây nhiễm", re.I), "communicable_disease"),
+    (re.compile(r"vaccinations? in accordance|giấy chích ngừa", re.I), "has_vaccination_docs"),
+    (re.compile(r"mental or physical disorder|rối loạn tâm thần", re.I), "mental_physical_disorder"),
+    # "abuser or addict" (không ràng buộc "drug") — template thật gặp lỗi chính tả "druc abuser"
+    # thay vì "drug abuser" (báo lỗi thực tế 2026-08-05); "abuser or addict" đủ đặc trưng để
+    # không trùng field nào khác trong danh sách.
+    (re.compile(r"abuser or addict|nghiện ma túy", re.I), "drug_abuser"),
+    # "ever been arrested" (template thật) — "been" bắt buộc trong câu gốc, để optional cho an toàn.
+    (re.compile(r"ever (been )?arrested or convicted|bị bắt giữ", re.I), "arrested_convicted"),
+    # family_*/aided phải kiểm tra TRƯỚC bản gốc — câu "người thân" bắt đầu bằng "Are you the
+    # spouse, son, or daughter..." NHƯNG thân câu vẫn chứa nguyên cụm của câu gốc ("violated any
+    # controlled substance", "committed a human trafficking", "financial assistance to
+    # terrorists", "abuse of position...confiscated") nên nếu bản gốc đứng trước sẽ nuốt luôn câu
+    # người thân (báo lỗi thực tế 2026-08-05: family_* bị bản gốc cướp → mất field). Word-boundary
+    # \b để "son" KHÔNG khớp bên trong "per\bson\bal gain" của chính câu gốc.
+    (re.compile(r"\b(spouse|son|daughter|minor child|family member)\b.*controlled substance.*benefited|hưởng lợi buôn ma túy", re.I), "family_drug_trafficking_benefited"),
+    (re.compile(r"violat(ed|ion).*controlled substance|vi phạm luật chất cấm", re.I), "violated_controlled_substance"),
+    (re.compile(r"prostitution|mại dâm", re.I), "prostitution"),
+    (re.compile(r"money laundering|rửa tiền", re.I), "money_laundering"),
+    (re.compile(r"aided, abetted|aided.*severe form of trafficking|giúp đỡ.*buôn người", re.I), "human_trafficking_aided"),
+    (re.compile(r"\b(spouse|son|daughter|minor child|family member)\b.*human trafficking.*benefited|hưởng lợi buôn người", re.I), "family_human_trafficking_benefited"),
+    (re.compile(r"committed.*human trafficking|thực hiện.*buôn người", re.I), "human_trafficking_committed"),
+    (re.compile(r"espionage|sabotage|export.*violat|gián điệp", re.I), "espionage_sabotage"),
+    # Thứ tự bắt buộc: family_terrorist (thân câu có "financial assistance...terrorist") → financial
+    # → activities. financial phải TRƯỚC activities vì câu financial "provide financial assistance
+    # or other support to terrorists" từng bị activities cướp (báo lỗi thực tế 2026-08-05).
+    (re.compile(r"\b(spouse|son|daughter|minor child|family member)\b.*terrorist activity|người thân hoạt động khủng bố", re.I), "family_terrorist_activity"),
+    (re.compile(r"financial (assistance|support).*terrorist|hỗ trợ tài chính khủng bố", re.I), "terrorist_financial_support"),
+    (re.compile(r"engage.*terrorist activit|seek to engage.*terrorist|tham gia vào các hoạt động khủng bố", re.I), "terrorist_activities"),
+    (re.compile(r"member (of|or representative of) (a )?terrorist organization|thành viên.*tổ chức khủng bố", re.I), "terrorist_org_member"),
+    (re.compile(r"participated in genocide|tham gia diệt chủng", re.I), "genocide"),
+    (re.compile(r"participated in torture|tham gia tra tấn", re.I), "torture"),
+    (re.compile(r"extrajudicial killings|giết người phi pháp", re.I), "extrajudicial_killings"),
+    (re.compile(r"recruitment.*use of child soldiers|tuyển dụng binh lính trẻ em", re.I), "child_soldiers"),
+    (re.compile(r"religious freedom|vi phạm tự do tôn giáo", re.I), "religious_freedom_violations"),
+    (re.compile(r"communist.*totalitarian party|thành viên đảng cộng sản", re.I), "communist_party_member"),
+    (re.compile(r"farc|eln|auc|hỗ trợ farc", re.I), "colombia_groups_support"),
+    (re.compile(r"\b(spouse|son|daughter|minor child|family member)\b.*confiscat|người thân lạm quyền", re.I), "family_abuse_position_property"),
+    (re.compile(r"abuse.*position.*confiscat|lạm quyền chiếm đoạt tài sản", re.I), "abuse_position_confiscate_property"),
+    (re.compile(r"population controls?.*abortion|coercive population control|forced abortion|ép phá thai", re.I), "population_control_abortion"),
+    (re.compile(r"\b(spouse|son|daughter|minor child|family member)\b.*chemical weapons|người thân tiết lộ bí mật cwc", re.I), "family_chemical_weapons_disclosure"),
+    (re.compile(r"disclosed.*confidential.*chemical weapons|tiết lộ bí mật.*vũ khí hóa học", re.I), "chemical_weapons_disclosure"),
+    (re.compile(r"willful misrepresentation|visa fraud|gian lận visa", re.I), "visa_fraud"),
+    (re.compile(r"removed or deported|bị trục xuất", re.I), "removed_deported"),
+    (re.compile(r"withheld.*custody.*u\.?s\.? citizen child|giữ trái phép con là công dân", re.I), "withheld_custody_us_child"),
+    (re.compile(r"assist(ed)?.*withhold(ing)?.*custody|giúp giữ trái phép con", re.I), "assisted_withhold_custody"),
+    (re.compile(r"voted in.*u\.?s\.? in violation|bỏ phiếu ở mỹ trái luật", re.I), "voted_illegally"),
+    (re.compile(r"renounced.*u\.?s\.? citizenship.*tax|từ bỏ quốc tịch mỹ", re.I), "renounced_citizenship_tax"),
+    (re.compile(r"attended a public (elementary )?school|attended.*u\.?s\.? public (elementary )?school.*f.*status|học trường công.*visa f", re.I), "attended_public_school_f_status"),
+    (re.compile(r"skilled or unskilled labor|lao động chưa được bộ lao động", re.I), "skilled_labor_no_certification"),
+    (re.compile(r"graduate of a foreign medical school|tốt nghiệp y khoa nước ngoài", re.I), "foreign_medical_grad_no_exam"),
+    (re.compile(r"health.?care worker.*certif|nhân viên y tế chưa có chứng nhận", re.I), "health_care_worker_no_cert"),
+    (re.compile(r"permanently ineligible.*citizenship|vĩnh viễn không đủ điều kiện quốc tịch", re.I), "permanently_ineligible_citizenship"),
+    (re.compile(r"depart.*u\.?s.*(evade|avoid).*military|rời khỏi mỹ.*(tránh|né).*(quân sự|nghĩa vụ)", re.I), "departed_us_evade_military"),
+    (re.compile(r"practic(e|ing) polygamy|đến mỹ để đa thê", re.I), "polygamy"),
+    (re.compile(r"former exchange visitor|exchange visitor.*\(j\)|exchange visitor.*(j-?1|two.?year)|visa j", re.I), "exchange_visitor_j_unfulfilled"),
+    (re.compile(r"frivolous application for asylum|tị nạn gian dối", re.I), "frivolous_asylum"),
+    (re.compile(r"likely to become a public charge|xin trợ cấp chính phủ mỹ", re.I), "public_charge"),
+    (re.compile(r"applied for a (u\.?s\.? )?social security number|đã từng xin ssn", re.I), "applied_ssn_before"),
+    (re.compile(r"want the (ssa|social security administration).*issue|muốn cấp ssn", re.I), "want_ssn_issued"),
+    (re.compile(r"authorize.*disclosure.*(dhs|social security)|cho phép chia sẻ ssn", re.I), "authorize_ssn_disclosure"),
+]
+
 # Nhãn nơi sinh / ngày sinh không ghi "father/mother" — map theo section (cha/mẹ/cá nhân).
 GENERIC_BIRTH_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"date of birth|ngày tháng năm sinh", re.I), "date_of_birth"),
@@ -136,7 +216,7 @@ _SECTION_CONTEXT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"college\s*/?\s*univer|cao đẳng|đại học", re.I), "edu_college"),
     (re.compile(r"work\s*/?\s*education|primary occupation|nghề nghiệp chính", re.I), "work"),
     # Reset context khi sang phần khác để không kẹt ở work/edu.
-    (re.compile(r"additional information|security and background", re.I), "applicant"),
+    (re.compile(r"additional information|security and background|previous u\.?s.*travel", re.I), "applicant"),
     (re.compile(r"military service|nghĩa vụ quân sự", re.I), "military"),
     # THÔNG TIN KHÁC (E.2) — thoát context military để ngôn ngữ/du lịch khớp ở context applicant.
     (re.compile(r"thông tin khác", re.I), "applicant"),
@@ -329,7 +409,16 @@ def _has_meaningful_current_address(out: dict[str, str]) -> bool:
 
 
 def _enrich_postal_codes(out: dict[str, str]) -> None:
-    """Tự map mã bưu điện VN từ tỉnh/thành — chỉ khi đã có địa chỉ hiện tại."""
+    """Tự map mã bưu điện VN từ tỉnh/thành — chỉ khi đã có ĐỊA CHỈ HIỆN TẠI (nơi ở/nhận thư).
+
+    CHỈ dùng field địa chỉ HIỆN TẠI của từng người (father_state/city/address,
+    mother_state/city/address, ...) — KHÔNG fallback sang *_birth_state/*_birth_city. Nơi sinh và
+    nơi ở hiện tại là hai khái niệm khác nhau, mỗi nơi có postal code riêng; suy luận postal code
+    (vốn thuộc về ĐỊA CHỈ HIỆN TẠI) từ tỉnh SINH ra một mã sai lệch không phản ánh nơi cha/mẹ thực
+    sự đang ở (báo lỗi thực tế 2026-08-05: mother_postal_code bị suy từ mother_birth_state "Nghe
+    An" → 460000, trong khi DS-260 gốc của NGUYEN HOANG YEN ghi mẹ ở postal 78607). Không có địa
+    chỉ hiện tại → để TRỐNG, không đoán bừa.
+    """
 
     def _set_postal(key: str, *, state: str, city: str, country: str, address: str) -> None:
         if out.get(key):
@@ -357,16 +446,16 @@ def _enrich_postal_codes(out: dict[str, str]) -> None:
     )
     _set_postal(
         "mother_postal_code",
-        state=out.get("mother_state") or out.get("mother_birth_state", ""),
-        city=out.get("mother_city") or out.get("mother_birth_city", ""),
-        country=out.get("mother_country") or out.get("mother_birth_country", ""),
+        state=out.get("mother_state", ""),
+        city=out.get("mother_city", ""),
+        country=out.get("mother_country", ""),
         address=out.get("mother_address") or out.get("mother_address_line1", ""),
     )
     _set_postal(
         "spouse_postal_code",
-        state=out.get("spouse_state") or out.get("spouse_birth_state", ""),
-        city=out.get("spouse_city") or out.get("spouse_birth_city", ""),
-        country=out.get("spouse_country") or out.get("spouse_birth_country", ""),
+        state=out.get("spouse_state", ""),
+        city=out.get("spouse_city", ""),
+        country=out.get("spouse_country", ""),
         address=out.get("spouse_address") or "",
     )
     _set_postal(
@@ -426,6 +515,13 @@ def _cross_check_birth_country(out: dict[str, str]) -> None:
 
 def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     out = {k: (v or "").strip() for k, v in values.items()}
+    # children_count là ô SỐ ("Number of Children:") — khi không có con, ds260_mapping cố ý gán
+    # "No" cho nó để hiển thị nhất quán trên web (Case C-2: không để trống trong khi anh chị em
+    # ghi "No"). Đáp án "No" đó thuộc về câu hỏi children_used ("Do you have any children?"), KHÔNG
+    # phải số lượng con — nếu giữ nguyên, dòng "Number of Children (...):" trong Word sẽ hiện chữ
+    # "No" thay vì để trống (báo lỗi thực tế 2026-08-05).
+    if out.get("children_count", "").strip().lower() in {"no", "không", "khong"}:
+        out["children_count"] = ""
     _normalize_birth_city_state(out)
     _cross_check_birth_country(out)
     for _pk in ("primary_phone", "secondary_phone", "work_phone"):
@@ -604,6 +700,12 @@ def _update_section_context(text: str, context: str) -> str:
     if child_match:
         n = child_match.group(1) or child_match.group(2)
         return f"child_{n}"
+    # Chỉ tiêu đề section (dòng ngắn, KHÔNG phải câu hỏi) mới được đổi context. Câu hỏi Yes/No dài
+    # của Section F đôi khi chứa từ khóa section ("public secondary school", "evade military
+    # service") làm trôi context sang edu/military rồi nuốt các câu sau (báo lỗi thực tế
+    # 2026-08-05). Dòng câu hỏi luôn có "?"; tiêu đề section thì không.
+    if "?" in text:
+        return context
     for pattern, section in _SECTION_CONTEXT_PATTERNS:
         if pattern.search(text):
             return section
@@ -611,6 +713,19 @@ def _update_section_context(text: str, context: str) -> str:
 
 
 def _match_ds260_key(text: str, context: str = "applicant") -> str:
+    # Section C (Previous U.S Travel) + F (Security) + G (SSN) — dò TRƯỚC mọi cổng context.
+    # Đây là các câu hỏi nguyên văn rất đặc trưng (một dòng = một câu), không trùng nhãn ngắn của
+    # Work/Edu/Military/Children. Trước đây khi context bị "kẹt" ở child_/edu_/military (do thân câu
+    # hỏi vô tình khớp _SECTION_CONTEXT_PATTERNS) thì các cổng đó return sớm và nuốt mất câu — khiến
+    # export bỏ trống toàn bộ mục Travel/Security/SSN dù web hiển thị đúng (báo lỗi thực tế
+    # 2026-08-05). Đặt ở đây khiến các mục này miễn nhiễm vĩnh viễn với lỗi trôi context.
+    for pattern, key in TRAVEL_LABEL_PATTERNS:
+        if pattern.search(text):
+            return key
+    for pattern, key in SECURITY_LABEL_PATTERNS:
+        if pattern.search(text):
+            return key
+
     # Work / Education (Section D) — gate theo context để nhãn dùng chung
     # ("Address", "City", "nghề nghiệp"…) không lọt sang field phối ngẫu/cá nhân.
     if context == "work":
@@ -726,7 +841,39 @@ _QUESTION_FILL_KEY_RE = re.compile(r"^child_\d+_(immigrating|immigrating_future|
 
 # Field có nhãn KHÔNG kết thúc bằng ':' trên mẫu (vd. Social Media Identifier kết thúc bằng "(LINK NGẮN))")
 # — vẫn phải điền giá trị, gắn ở cuối dòng.
-_APPEND_NO_COLON_KEYS = frozenset({"social_media_identifier", "military_served"})
+#
+# _match_ds260_key() nhận diện ĐÚNG field_key không có nghĩa là _smart_fill_ds260_line() sẽ
+# CHÈN giá trị — dòng không có dấu ':' (đa số câu Yes/No mẫu DS-260) chỉ được điền khi key nằm
+# trong 1 trong 3 danh sách trắng này (_is_question_fill_key / _APPEND_NO_COLON_KEYS /
+# _OTHER_USED_HISTORY); thiếu thì _smart_fill_ds260_line trả nguyên text, không báo lỗi (báo
+# lỗi thực tế 2026-08-05: TRAVEL_LABEL_PATTERNS/SECURITY_LABEL_PATTERNS thêm rồi nhưng field
+# xuất Word vẫn trống — do đây là lớp gate THỨ HAI, tách biệt với việc nhận diện field).
+#
+# 44 câu Section F (Security) + 3 câu Section G (SSN) là Yes/No đơn giản, không có field chi
+# tiết đi kèm — đăng ký thẳng vào đây để được gắn giá trị cuối dòng câu hỏi.
+_SECURITY_AND_SSN_SIMPLE_YES_NO_KEYS = frozenset({
+    "communicable_disease", "has_vaccination_docs", "mental_physical_disorder", "drug_abuser",
+    "arrested_convicted", "violated_controlled_substance", "family_drug_trafficking_benefited",
+    "prostitution", "money_laundering", "human_trafficking_committed", "human_trafficking_aided",
+    "family_human_trafficking_benefited", "espionage_sabotage", "terrorist_activities",
+    "terrorist_financial_support", "terrorist_org_member", "family_terrorist_activity",
+    "genocide", "torture", "extrajudicial_killings", "child_soldiers",
+    "religious_freedom_violations", "communist_party_member", "colombia_groups_support",
+    "abuse_position_confiscate_property", "family_abuse_position_property",
+    "population_control_abortion", "chemical_weapons_disclosure",
+    "family_chemical_weapons_disclosure", "visa_fraud", "removed_deported",
+    "withheld_custody_us_child", "assisted_withhold_custody", "voted_illegally",
+    "renounced_citizenship_tax", "attended_public_school_f_status",
+    "skilled_labor_no_certification", "foreign_medical_grad_no_exam",
+    "health_care_worker_no_cert", "permanently_ineligible_citizenship",
+    "departed_us_evade_military", "polygamy", "exchange_visitor_j_unfulfilled",
+    "frivolous_asylum", "public_charge",
+    "applied_ssn_before", "want_ssn_issued", "authorize_ssn_disclosure",
+})
+
+_APPEND_NO_COLON_KEYS = frozenset({"social_media_identifier", "military_served", "children_used"}) | (
+    _SECURITY_AND_SSN_SIMPLE_YES_NO_KEYS
+)
 
 # Câu hỏi Yes/No có phần khai chi tiết. Quy tắc: có chi tiết (history) → "Yes - <chi tiết>";
 # không có → "No". Map cờ used → field chi tiết tương ứng.
@@ -742,6 +889,12 @@ _OTHER_USED_HISTORY: dict[str, str] = {
     "traveled_countries_5yr_used": "traveled_countries_history",
     # A.3 Địa chỉ — "đã từng ở chỗ khác kể từ 16 tuổi?" → Yes + lịch sử địa chỉ / No.
     "other_addresses_used": "other_addresses_history",
+    # Section C — Previous U.S Travel: mẫu ghi "(Yes or No, if 'Yes' write details below)" +
+    # nhiều dòng trống bên dưới để viết chi tiết — cùng khuôn "Yes - <chi tiết>" / "No" như các
+    # field _used khác, KHÔNG phải field đơn giản (báo lỗi thực tế 2026-08-05).
+    "been_in_us": "us_travel_history",
+    "issued_us_visa": "us_visa_history",
+    "refused_us_visa": "us_visa_refusal_history",
 }
 
 _AFFIRMATIVE_TOKENS = frozenset({"yes", "y", "có", "co", "true", "1"})
@@ -762,8 +915,14 @@ def _is_question_fill_key(key: str) -> bool:
 
 
 def _fill_question_line(text: str, value: str) -> str:
-    """Dòng câu hỏi Yes/No không có dấu ':' (vd. 'Does this child live with you? (...?)') — gắn đáp án ở cuối."""
-    if value and value in text:
+    """Dòng câu hỏi Yes/No không có dấu ':' (vd. 'Does this child live with you? (...?)') — gắn đáp án ở cuối.
+
+    Chống điền trùng bằng cách kiểm tra dòng đã KẾT THÚC bằng đáp án hay chưa — KHÔNG dùng
+    "value in text" vì đáp án ngắn ("No"/"Yes") hay lọt vào giữa câu ("No" nằm trong "November",
+    "November 30, 1996") khiến câu bị bỏ trống oan (báo lỗi thực tế 2026-08-05:
+    attended_public_school_f_status).
+    """
+    if value and text.rstrip().endswith(value):
         return text
     return f"{text.rstrip()}   {value}"
 
@@ -790,9 +949,13 @@ def _smart_fill_ds260_line(
     value = (values.get(key) or "").strip()
     if not value:
         return text
+    # Câu hỏi Yes/No đơn giản → LUÔN gắn đáp án ở cuối dòng, kiểm tra TRƯỚC nhánh xử lý dấu ':'.
+    # Một số câu Section F có dấu ':' lạc trong phần dịch tiếng Việt (vd. "...bởi Tổng thống MỸ):
+    # cá nhân...") — nếu để nhánh ':' chạy trước, code tưởng là dòng "nhãn: giá trị" rồi bỏ qua,
+    # khiến câu bị trống dù đã nhận diện đúng field (báo lỗi thực tế 2026-08-05: human_trafficking_aided).
+    if _is_question_fill_key(key) or key in _APPEND_NO_COLON_KEYS:
+        return _fill_question_line(text, value)
     if ":" not in text:
-        if _is_question_fill_key(key) or key in _APPEND_NO_COLON_KEYS:
-            return _fill_question_line(text, value)
         return text
     if key.endswith("_period"):
         split = _fill_period_from_to(text, value)
@@ -959,6 +1122,52 @@ def _generate_ds260_table_export(applicant: Applicant, form: dict, out_path: Pat
     doc.save(str(out_path))
 
 
+# Field cần soi khi báo lỗi "web fill oke, export vẫn trống" — dump ra JSON để xem CHÍNH XÁC
+# giá trị export nhận được, thay vì đoán mò giữa "code sai" và "data thật sự trống" (báo lỗi
+# thực tế 2026-08-05).
+_EXPORT_DEBUG_WATCH_KEYS: tuple[str, ...] = (
+    "been_in_us", "us_travel_history", "issued_us_visa", "us_visa_history",
+    "refused_us_visa", "us_visa_refusal_history",
+    "communicable_disease", "has_vaccination_docs", "mental_physical_disorder", "drug_abuser",
+    "arrested_convicted", "violated_controlled_substance", "prostitution", "money_laundering",
+    "human_trafficking_committed", "human_trafficking_aided", "espionage_sabotage",
+    "terrorist_activities", "terrorist_financial_support", "terrorist_org_member", "genocide",
+    "torture", "extrajudicial_killings", "child_soldiers", "religious_freedom_violations",
+    "communist_party_member", "colombia_groups_support", "abuse_position_confiscate_property",
+    "population_control_abortion", "chemical_weapons_disclosure", "visa_fraud",
+    "removed_deported", "withheld_custody_us_child", "assisted_withhold_custody",
+    "voted_illegally", "renounced_citizenship_tax", "attended_public_school_f_status",
+    "skilled_labor_no_certification", "foreign_medical_grad_no_exam",
+    "health_care_worker_no_cert", "permanently_ineligible_citizenship",
+    "departed_us_evade_military", "polygamy", "exchange_visitor_j_unfulfilled",
+    "frivolous_asylum", "public_charge",
+    "applied_ssn_before", "want_ssn_issued", "authorize_ssn_disclosure",
+)
+
+
+def _dump_export_debug(applicant: Applicant, values: dict[str, str]) -> None:
+    """Lưu giá trị THẬT của các field Section C/F/G tại thời điểm export — để phân biệt
+    "code không điền được dù có data" (bug) với "data thật sự trống" (không phải bug, do
+    worksheet/OCR của người này thiếu thông tin) mà không cần truy DB trực tiếp."""
+    try:
+        import json as _json
+        from datetime import datetime as _dt, timezone as _tz
+
+        debug_dir = settings.base_dir / "ocr_debug" / "export_ds260_values"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        ts = _dt.now(_tz.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", applicant.display_name or "unknown")[:60]
+        out_path = debug_dir / f"{ts}_{applicant.id}_{safe_name}.json"
+        payload = {
+            "applicant_id": str(applicant.id),
+            "display_name": applicant.display_name,
+            "watched_fields": {k: values.get(k, "<MISSING KEY>") for k in _EXPORT_DEBUG_WATCH_KEYS},
+        }
+        out_path.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def generate_ds260_export_file(
     applicant: Applicant,
     template: FormTemplate,
@@ -977,6 +1186,7 @@ def generate_ds260_export_file(
             suffix = f"_{safe}"
     out_path = export_dir / f"{code}{suffix}_{timestamp}.docx"
     values = _build_ds260_values(form)
+    _dump_export_debug(applicant, values)
     mapping = json.loads(template.mapping_config) if template.mapping_config else _build_label_mapping()
 
     if template.template_path:
@@ -1013,10 +1223,14 @@ async def create_ds260_export(
     template = await resolve_ds260_template(db, template_code or DS260_DEFAULT_TEMPLATE_CODE)
     out_path = generate_ds260_export_file(applicant, template, form, member_label=form.get("member"))
 
+    from app.services.export import _finalize_export_file
+
+    stored_path = await _finalize_export_file(out_path, applicant.id)
+
     export = Export(
         applicant_id=applicant.id,
         template_id=template.id,
-        file_path=str(out_path),
+        file_path=stored_path,
     )
     db.add(export)
     applicant.status = ApplicantStatus.exported

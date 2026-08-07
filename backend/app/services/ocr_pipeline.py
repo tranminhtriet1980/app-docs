@@ -1,7 +1,11 @@
+import asyncio
 import base64
 import json
+import logging
 import re
+from collections import Counter
 from pathlib import Path
+from typing import Callable
 
 from openai import APIStatusError, RateLimitError
 from sqlalchemy import delete
@@ -18,6 +22,8 @@ from app.services.ds260_mapping import get_extract_keys_for_doc_type
 from app.services.field_mapping import DOCUMENT_TYPES
 from app.services.llm_client import get_ocr_client, get_openai_client, is_openai_configured
 from app.services.llm_usage import UsageContext, chat_completion
+
+logger = logging.getLogger(__name__)
 
 QUOTA_WARNING = (
     "OpenAI hết quota/credits (lỗi 429). Đã dùng chế độ demo từ tên file — "
@@ -38,7 +44,9 @@ Bước 1: Xác định loại tài liệu từ nội dung (ảnh/PDF). Các lo�
 - birth_certificate_child
 - military_discharge
 
-Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, address_document, ds260_customer_form, photo, other
+Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, application_form, address_document, ds260_customer_form, photo, other
+
+application_form = đơn xin việc / Job Application — có mục "Applicant's Information" (địa chỉ cá nhân, số điện thoại, email, chức danh, lịch sử việc làm, học vấn). KHÁC employment_letter (chỉ xác nhận việc làm hiện tại). Đây là giấy tờ chính thức để đối chiếu địa chỉ trong DS-260 worksheet.
 
 ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền tay/đánh máy). Gồm cả:
 (a) bản CŨ ImmiPath nhiều mục (cá nhân, hộ chiếu, ĐỊA CHỈ, LIÊN LẠC, MXH, cha/mẹ/phối ngẫu/con,
@@ -46,6 +54,12 @@ ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền ta
 (b) bản MỚI trùng mẫu DS-260 export.
 Chọn loại này cho MỌI worksheet khách tự khai, kể cả khi có nhiều mục — KHÔNG hạ xuống "other" hay
 "address_document". address_document chỉ dành cho hoá đơn/hợp đồng thuê/giấy xác nhận cư trú riêng lẻ.
+
+QUY TẮC CHỐNG BỊA:
+- KHÔNG ĐƯỢC đoán/suy luận loại tài liệu khi không rõ ràng từ nội dung.
+- Nếu ảnh không đủ sáng, mờ, bị cắt, hoặc nội dung không đọc được → đừng cố đoán.
+- Nếu không chắc chắn → ghi "other" với confidence thấp (< 0.5) và giải thích lý do trong "reason".
+- LUÔN ưu tiên chính xác hơn tìm kiếm sự hoàn hảo — nếu không rõ thì nói không rõ, không bịa loại.
 
 Trả về ONLY valid JSON:
 {"document_type": "<code>", "confidence": 0.0-1.0, "reason": "brief"}"""
@@ -60,15 +74,26 @@ Ví dụ passport có full_name; birth_certificate cũng có full_name — chỉ
 Trả về ONLY valid JSON:
 {{
   "document_type": "{doc_type}",
+  "image_quality": {{"readable": true/false, "issue": "<'' nếu ổn, hoặc 'blurry'/'glare'/'too_dark'/'cut_off'/'handwriting_illegible'>"}},
   "fields": {{
     "<field_key>": {{"value": "<string or null>", "confidence": 0.0-1.0, "source_page": "page_1"}}
-  }}
+  }},
+  "warnings": ["<danh sách các vấn đề/không rõ ràng>"]
 }}
 
-Quy tắc:
+QUY TẮC CHỐNG BỊA DỮ LIỆU:
+- CHỈ extract những gì thực sự thấy RÕ RÀNG trên tài liệu. KHÔNG được đoán/suy luận/fill gaps.
+- KHÔNG infer giá trị dựa trên ngữ cảnh hay logic. Ví dụ: không cố "guess" ngày sinh từ tuổi, không điền địa chỉ từ giả định.
+- Nếu field bị mờ/loá/thiếu sáng/bị cắt/chữ viết tay khó đọc → để null trong value và LUÔN thêm warning chi tiết.
+- Nếu có phần nào không đọc được → set image_quality.readable = false, dù phần khác vẫn trích được. Không "hy vọng" phần còn lại sẽ bù được.
+- KHÔNG bao giờ bịa dữ liệu để field "có vẻ đầy đủ hay hợp lý". Thà để null còn hơn bịa.
+- Nếu phát hiện lỗi (ảnh xoay, định dạng kỳ lạ, dữ liệu mâu thuẫn...) → thêm warning rõ ràng, KHÔNG bỏ qua.
+
+QUY TẮC ĐỊNH DẠNG:
 - ISO dates YYYY-MM-DD khi có thể
 - UPPERCASE cho tên như in trên giấy
 - null chỉ khi thật sự không đọc được
+- image_quality.readable = false khi ảnh mờ/loá/thiếu sáng/bị cắt khiến BẤT KỲ phần nội dung nào không đọc được rõ ràng.
 - CHỈ dùng các key sau (không thêm key ngoài schema):
 {expected_keys}"""
 
@@ -101,6 +126,54 @@ def _encode_image(path: Path) -> tuple[str, str]:
 # nén JPEG để payload chỉ còn vài MB/trang mà vẫn đủ nét cho OCR.
 _MAX_RENDER_PX = 2600
 _RENDER_JPEG_QUALITY = 85
+
+
+# Cạnh dài chuẩn hoá trước khi đo độ nét: phương sai Laplacian tăng theo độ phân giải
+# (ảnh gốc càng to càng nhiều chi tiết cạnh) nên phải resize về cùng kích thước mới so
+# sánh được với MỘT ngưỡng cố định — nếu không, ảnh chụp 12MP tự nhiên "nét" hơn ảnh
+# chụp cùng cảnh ở độ phân giải thấp dù độ mờ thật giống nhau.
+_BLUR_MEASURE_PX = 1000
+
+# Kernel Laplacian 3x3 chuẩn — làm nổi cạnh; ảnh mờ có ít cạnh sắc → phương sai thấp.
+_LAPLACIAN_KERNEL = (0, 1, 0, 1, -4, 1, 0, 1, 0)
+
+
+def _measure_blur_variance(path: Path) -> float | None:
+    """Phương sai Laplacian trên ảnh grayscale — thấp = mờ/out nét. None nếu đọc lỗi."""
+    try:
+        from PIL import Image, ImageFilter, ImageStat
+
+        with Image.open(path) as img:
+            gray = img.convert("L")
+            if max(gray.size) > _BLUR_MEASURE_PX:
+                scale = _BLUR_MEASURE_PX / max(gray.size)
+                gray = gray.resize(
+                    (max(1, round(gray.width * scale)), max(1, round(gray.height * scale)))
+                )
+            edges = gray.filter(ImageFilter.Kernel((3, 3), _LAPLACIAN_KERNEL, scale=1))
+            return ImageStat.Stat(edges).var[0]
+    except Exception:
+        return None
+
+
+def _pdf_page_count(path: Path) -> int:
+    """Đếm số trang PDF thật — chỉ đọc metadata (rẻ, không render) để quyết định max_pages
+    động thay vì đoán cố định (xem settings.ocr_ds260_worksheet_max_pages)."""
+    try:
+        import fitz
+
+        doc = fitz.open(str(path))
+        count = len(doc)
+        doc.close()
+        return count
+    except Exception:
+        pass
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(str(path)).pages)
+    except Exception:
+        return 0
 
 
 def _pdf_pages_to_images(path: Path, max_pages: int = 3, dpi: int = 180) -> list[Path]:
@@ -249,12 +322,119 @@ def _merge_batch_results(results: list[dict]) -> dict:
         return results[0]
 
     merged: dict = {}
+    # image_quality không theo luật "khác rỗng đầu tiên thắng": một lô bất kỳ báo ảnh khó
+    # đọc thì cả tài liệu coi như có vấn đề, dù lô đầu tiên báo "readable": true.
+    issues = []
+    unreadable = False
+    all_warnings: list[str] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        q = result.get("image_quality")
+        if isinstance(q, dict):
+            if q.get("readable") is False:
+                unreadable = True
+            issue = str(q.get("issue") or "").strip()
+            if issue and issue not in issues:
+                issues.append(issue)
+        warnings = result.get("warnings")
+        if isinstance(warnings, list):
+            for w in warnings:
+                w_str = str(w).strip()
+                if w_str and w_str not in all_warnings:
+                    all_warnings.append(w_str)
+    if unreadable or issues:
+        merged["image_quality"] = {"readable": not unreadable, "issue": ", ".join(issues)}
+    if all_warnings:
+        merged["warnings"] = all_warnings
+
     for result in results:
         if not isinstance(result, dict):
             continue
         for key, value in result.items():
+            if key in ("image_quality", "warnings"):
+                continue  # đã gộp riêng ở trên bằng luật OR, không phải "khác rỗng đầu tiên thắng"
             if key not in merged or _is_blank_for_merge(merged[key]):
                 merged[key] = value
+    return merged
+
+
+def _merge_consensus_runs(results: list[dict]) -> dict:
+    """Gộp N lần OCR ĐỘC LẬP trên CÙNG toàn bộ tài liệu (khác _merge_batch_results ở trên — hàm
+    đó gộp các LÔ nhìn thấy PHẦN KHÁC nhau của tài liệu). Ở đây mọi run nhìn thấy y hệt nhau, nên
+    field bất đồng giữa các run là tín hiệu model không chắc (đã quan sát thực tế dù temperature=0:
+    số nhà/tên đường đổi giữa các lần gọi, xem scripts/test_handwriting_ocr.py --repeat) — không
+    phải do run nào "biết nhiều hơn" như trường hợp gộp lô. Dùng ĐA SỐ PHIẾU mỗi field.value; field
+    không đồng thuận bị hạ confidence + thêm warning thay vì âm thầm lấy giá trị của 1 run bất kỳ.
+    """
+    if not results:
+        return {}
+    if len(results) == 1:
+        return results[0]
+
+    def _norm(value: object) -> str:
+        """Luôn trả str — Counter(values) bên dưới cần hashable, và toàn bộ code đọc field
+        sau này (raw_data/form_data) giả định value là string (.strip()). Model đôi khi trả
+        list/dict cho field (vd. nhiều công việc cũ trong prior_jobs_history) thay vì string
+        phẳng như prompt yêu cầu — báo lỗi thực tế 2026-08-06: "unhashable type: 'list'" khi
+        Counter() nhận value kiểu list."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (list, tuple)):
+            return "; ".join(_norm(v) for v in value if v not in (None, ""))
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return str(value)
+
+    merged: dict = dict(results[0])
+
+    all_warnings: list[str] = []
+    for r in results:
+        w = r.get("warnings")
+        if isinstance(w, list):
+            for item in w:
+                s = str(item).strip()
+                if s and s not in all_warnings:
+                    all_warnings.append(s)
+
+    all_keys: list[str] = []
+    for r in results:
+        f = r.get("fields")
+        if isinstance(f, dict):
+            for k in f:
+                if k not in all_keys:
+                    all_keys.append(k)
+
+    merged_fields: dict = {}
+    for key in all_keys:
+        metas = [r["fields"][key] for r in results if isinstance(r.get("fields", {}).get(key), dict)]
+        if not metas:
+            continue
+        values = [_norm(m.get("value")) for m in metas]
+        top_value, top_count = Counter(values).most_common(1)[0]
+        winner = next(m for m, v in zip(metas, values) if v == top_value)
+        confidences = [
+            float(m["confidence"]) for m in metas if isinstance(m.get("confidence"), (int, float))
+        ]
+        avg_conf = sum(confidences) / len(confidences) if confidences else winner.get("confidence")
+        agree = top_count == len(metas)
+        merged_fields[key] = {
+            "value": top_value,
+            "confidence": avg_conf if agree else min(0.4, avg_conf if avg_conf is not None else 0.4),
+            "source_page": winner.get("source_page"),
+        }
+        if not agree:
+            distinct = sorted({str(v) for v in values})
+            all_warnings.append(
+                f"Field '{key}' không khớp giữa {len(results)} lần OCR độc lập "
+                f"({top_count}/{len(metas)} đồng thuận): {distinct}. Cần review thủ công."
+            )
+
+    merged["fields"] = merged_fields
+    if all_warnings:
+        merged["warnings"] = all_warnings
     return merged
 
 
@@ -301,8 +481,50 @@ def _pdf_text_excerpt(path: Path, max_chars: int = 12000) -> str:
 _DOCX_MAX_CHARS = 80000
 
 
+def _extract_docx_textbox_content(doc_obj) -> list[str]:
+    """Extract text từ VML text boxes (thường dùng trong Word forms cũ).
+
+    Word có 2 kiểu shape: VML (w:txbxContent) và DrawingML (a:t trong inline shape).
+    Function này đọc VML text box content từ XML trực tiếp.
+    """
+    textbox_texts: list[str] = []
+    try:
+        from docx.oxml import parse_xml
+        from lxml import etree
+    except ImportError:
+        return []
+
+    try:
+        # Duyệt qua tất cả paragraph để tìm VML shape
+        for para in doc_obj.paragraphs:
+            for run in para.runs:
+                # Check xem run có chứa drawing/shape element không
+                run_elem = run._element
+                if run_elem is not None:
+                    # Tìm w:pict (VML picture = text box)
+                    for pict in run_elem.findall('.//w:pict', namespaces=run_elem.nsmap or {}):
+                        # Tìm v:shapetype -> v:shape -> w:txbxContent
+                        for shape in pict.findall('.//v:shape', namespaces=pict.nsmap or {}):
+                            for txbx in shape.findall('.//w:txbxContent', namespaces=shape.nsmap or {}):
+                                # Lấy text từ txbxContent
+                                text_parts = []
+                                for elem in txbx.iter():
+                                    if elem.text:
+                                        text_parts.append(elem.text.strip())
+                                full_text = " ".join(t for t in text_parts if t)
+                                if full_text:
+                                    textbox_texts.append(full_text)
+    except Exception:
+        pass
+    return textbox_texts
+
+
 def _docx_text_excerpt(path: Path, max_chars: int = _DOCX_MAX_CHARS) -> str:
-    """Extract text from a Word worksheet — paragraphs + table cells (DS-260 form is a label/value table)."""
+    """Extract text from a Word worksheet — paragraphs + tables + text boxes.
+
+    Job Application forms thường dùng text box để input địa chỉ, điện thoại, email.
+    Phiên bản mới hơn chuyển sang table-based, nhưng form cũ/custom vẫn dùng text box.
+    """
     try:
         from docx import Document as _DocxDocument
     except ImportError:
@@ -312,16 +534,25 @@ def _docx_text_excerpt(path: Path, max_chars: int = _DOCX_MAX_CHARS) -> str:
     except Exception:
         return ""
     parts: list[str] = []
+
+    # Đọc paragraphs — style thường có nhãn trường (ví dụ "Current Address:")
     for para in doc.paragraphs:
         t = (para.text or "").strip()
         if t:
             parts.append(t)
+
+    # Đọc tables
     for table in doc.tables:
         for row in table.rows:
             cells = [(c.text or "").strip() for c in row.cells]
             line = " | ".join(c for c in cells if c)
             if line:
                 parts.append(line)
+
+    # Đọc text box từ VML shape (Word form cũ)
+    textbox_contents = _extract_docx_textbox_content(doc)
+    parts.extend(textbox_contents)
+
     merged = "\n".join(parts).strip()
     return merged[:max_chars]
 
@@ -395,6 +626,8 @@ def _mock_classification(filename: str) -> dict:
         ("military", "military_discharge"),
         ("transcript", "diploma_transcript"),
         ("diploma", "diploma_transcript"),
+        ("job application", "application_form"),
+        ("application form", "application_form"),
         ("employment", "employment_letter"),
         ("financial", "financial"),
         ("address", "address_document"),
@@ -828,12 +1061,30 @@ Use ISO dates YYYY-MM-DD when the FULL date (day+month+year) is printed. If only
 (vd. 1945), output just the year "1945" — do NOT invent day/month ("01 January 1945"). Same for
 month+year only → "MM/YYYY". Do not use applicant nationality for parent country fields.
 Do NOT skip parent date/address/nationality when they are printed on the certificate.
+
+CẢNH BÁO QUAN TRỌNG — giấy khai sinh Việt Nam có nhiều số/ngày dễ nhầm với ngày sinh: góc trên
+phải "Số: .../20xx" và "Quyển số: .../20xx" là SỐ ĐĂNG KÝ/SỐ QUYỂN, KHÔNG PHẢI ngày sinh dù trông
+giống định dạng ngày. "Ngày, tháng, năm sinh" (thường có phần viết bằng chữ đi kèm để xác nhận)
+mới là date_of_birth thật. "Ngày, tháng, năm đăng ký" gần cuối form là ngày làm giấy tờ, KHÔNG
+được lấy làm date_of_birth. Ưu tiên số có phần chữ viết kèm xác nhận đúng ngày sinh.
 """
 
 DIVORCE_EXTRACT_HINT = """
-For DIVORCE DECREE, extract BOTH parties:
+For DIVORCE DECREE / COURT JUDGMENT (Bản án / Quyết định ly hôn), extract BOTH parties:
 husband_full_name, wife_full_name, husband_date_of_birth, wife_date_of_birth,
 marriage_date, divorce_date, document_number, document_type.
+
+Vietnamese court judgment/decision header — read the TOP of page 1 carefully, it usually reads:
+  "Bản án số: <number>/<year>/<code>-ST" (hoặc "Quyết định số: ...")
+  "Ngày <dd-mm-yyyy>" hoặc "Ngày <dd> tháng <mm> năm <yyyy>" — ngay dưới/cạnh dòng số bản án
+  "V/v <loại việc>" (vd. Ly hôn / Không công nhận quan hệ vợ chồng / Thuận tình ly hôn)
+document_number = giá trị "Bản án số"/"Quyết định số" đúng như in (vd. "62/2023/HNGĐ-ST").
+divorce_date = ngày "Ngày ..." in ngay TRÊN CÙNG trang 1, cạnh "Bản án số"/"Quyết định số" —
+đây là ngày tuyên án/ra quyết định, dùng làm ngày ly hôn cho DS-260. KHÔNG lấy nhầm ngày khác
+xuất hiện trong nội dung bản án (vd. ngày kết hôn cũ, ngày sinh).
+Ngày tháng tiếng Việt luôn viết THEO THỨ TỰ ngày-tháng-năm (dd-mm-yyyy), KHÔNG BAO GIỜ là
+tháng-ngày-năm. Trích xuất đúng NGUYÊN VĂN như in (vd. "13-6-2023") — không tự quy đổi định dạng,
+hệ thống sẽ tự chuẩn hóa.
 If date of birth is printed for either party, use ISO YYYY-MM-DD.
 Names UPPERCASE as printed (strip titles like MR./MRS. only in values, not keys).
 """
@@ -866,6 +1117,18 @@ child_birth_city, child_birth_state, child_birth_country, child_gender,
 father_name, mother_name, registration_number.
 Use ISO dates YYYY-MM-DD. Names UPPERCASE as printed.
 If place of birth is one line, also split into city/state/country when possible.
+
+CẢNH BÁO QUAN TRỌNG — giấy khai sinh Việt Nam ("Giấy khai sinh") có NHIỀU số/ngày dễ nhầm với
+ngày sinh, PHẢI phân biệt rõ:
+- Góc trên phải "Số: .../20xx" và "Quyển số: .../20xx" — đây là SỐ ĐĂNG KÝ/SỐ QUYỂN, KHÔNG PHẢI
+  ngày sinh, dù trông giống định dạng ngày (vd. "208/2015").
+- "Ngày, tháng, năm sinh" (thường có phần viết bằng chữ đi kèm, vd. "Ngày hai mươi chín, tháng
+  một, năm hai nghìn không trăm linh bảy") — ĐÂY MỚI LÀ child_date_of_birth. Luôn ưu tiên đọc
+  phần chữ viết ra để xác nhận đúng số.
+- "Ngày, tháng, năm đăng ký" (gần cuối form, có thể là "Đăng ký lại") — đây là NGÀY LÀM GIẤY TỜ,
+  thường trễ hơn ngày sinh thật nhiều năm, KHÔNG được lấy làm child_date_of_birth.
+Nếu không chắc số nào là ngày sinh thật, ưu tiên số có phần chữ viết kèm theo xác nhận; nếu vẫn
+không rõ ràng, để trống và thêm warning — TUYỆT ĐỐI không lấy số đăng ký/số quyển làm ngày sinh.
 """
 
 MILITARY_EXTRACT_HINT = """
@@ -989,8 +1252,51 @@ Use mapping keys above (English snake_case). Yes/No for yes-no questions.
 Dates as printed (dd/mm/yyyy or month/year). Vietnamese section headers: THÔNG TIN CÁ NHÂN, HỘ CHIẾU, ĐỊA CHỈ, CÔNG VIỆC/HỌC VẤN, THÔNG TIN LIÊN LẠC, MẠNG XÃ HỘI, THÔNG TIN CỦA CHA/MẸ/PHỐI NGẪU/CON, AN NINH, SỐ AN SINH XÃ HỘI.
 """
 
+# Đúc kết từ scripts/test_handwriting_ocr.py (thử nghiệm trực tiếp trên worksheet viết tay
+# thật) — 3 lỗi đọc chữ tay lặp lại nhiều lần: (1) không nhận ra "..." nghĩa là "giống địa chỉ
+# đã ghi ở dòng khác trước đó", (2) nhầm dấu "/" với số "1" trong ngày/tháng, (3) khi có chữ số
+# viết đè sửa lại thì không biết ưu tiên nét nào. Bật qua settings.handwriting_correction_rules_
+# enabled(doc_type) — cờ RIÊNG TỪNG LOẠI TÀI LIỆU (xem config.py), mặc định TẮT hết. Chỉ nối thêm
+# cho loại nào khách thực sự viết tay điền — tránh tốn token cho giấy tờ in sẵn.
+DS260_HANDWRITING_CORRECTION_HINT = """
+
+HƯỚNG DẪN ĐỌC CHỮ VIẾT TAY BỊ SỬA/VIẾT TẮT (áp dụng cho mọi field, đặc biệt lịch sử địa chỉ,
+ngày tháng, số nhà):
+
+1. QUY ƯỚC "..." = GIỐNG DÒNG TRƯỚC: nếu 1 địa chỉ chỉ ghi phần đầu rồi kết thúc bằng "..." hoặc
+   chấm lửng (vd "196 Kiệt 7, Đường Ưng Bình,..."), nghĩa là phần còn lại GIỐNG HỆT một địa chỉ
+   ĐẦY ĐỦ đã xuất hiện ở dòng khác TRƯỚC ĐÓ trên form (không nhất thiết là dòng ngay phía trên —
+   địa chỉ có thể xen kẽ giữa 2-3 nơi ở qua các mốc thời gian khác nhau). Tìm địa chỉ đầy đủ có
+   PHẦN ĐẦU trùng (cùng số nhà/kiệt, cùng tên đường) trong các dòng đã đọc trước đó và dùng bản đầy
+   đủ đó làm value. Nếu không tìm được địa chỉ khớp → giữ nguyên như viết (kể cả "..."), không bịa.
+
+2. NHẦM LẪN "/" VỚI SỐ "1": dấu gạch chéo phân cách tháng/năm (vd "8/2018") rất dễ bị đọc nhầm
+   thành số "1" và ngược lại vì nét gần giống hệt nhau. Khi đọc mốc "tháng/năm", đối chiếu bằng
+   LOGIC ĐỊNH DẠNG (tháng 1-12, năm 4 chữ số) — nếu cách đọc hiện tại vi phạm định dạng này
+   (vd "111996" hoặc tháng > 12), thử đọc lại xem "/" có bị nhầm "1" hay ngược lại không. Đây là
+   kiểm tra CÁCH PHÂN ĐOẠN ký tự, KHÔNG phải đoán số bên trong tháng/năm. Số nhà/số lô dạng
+   "số/số+chữ" (vd "66/3T") có cùng rủi ro nhầm lẫn nhưng KHÔNG có logic định dạng cố định để đối
+   chiếu — với các field này chỉ hạ confidence và ghi warning khi nét mờ/không chắc, không tự sửa.
+
+3. CHỮ SỐ VIẾT ĐÈ/SỬA LẠI: khi 2 nét chồng lên nhau tại cùng vị trí (vd "12" bị viết đè thành
+   "13"), NÉT ĐẬM HƠN/DÀY HƠN/MỰC RÕ HƠN là nét viết SAU (bản sửa cuối cùng) — ưu tiên lấy giá trị
+   theo nét đậm hơn làm value chính thức, dù giá trị đó có vẻ "vô lý" theo logic (vd tháng 13) —
+   ĐỪNG tự thay bằng giá trị "hợp lý hơn" lấy từ chỗ khác trên form, đó là suy luận/bịa chứ không
+   phải đọc trực tiếp. Ghi rõ trong warnings: "gốc là X, đã sửa đè thành Y (nét Y đậm hơn)". Nếu độ
+   đậm 2 nét gần như nhau (không phân biệt được nét nào sau) → hạ confidence field đó xuống < 0.5
+   và ghi cả 2 khả năng vào warnings, không đoán.
+"""
+
 APPLICATION_FORM_EXTRACT_HINT = """
 IMMIGRATION APPLICATION FORM — DS-260 Part D (Work / Education / Training).
+
+PERSONAL ADDRESS (nếu form có mục địa chỉ RIÊNG của người khai, KHÁC employer_address —
+đây là nơi người khai đang ở, dùng để đối chiếu với worksheet DS-260, KHÔNG phải địa chỉ
+công ty): current_address (street), address_city, address_state, postal_code, address_country.
+
+CONTACT (nếu form có số điện thoại/email RIÊNG của người khai trong mục Applicant's
+Information — dùng để đối chiếu với worksheet DS-260, KHÔNG phải số điện thoại/email công ty):
+primary_phone_number (Phone/Tel/Contact number), email_address (Email).
 
 WORK: primary_occupation, occupation_other_specify, present_employer, employer_name,
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
@@ -1047,6 +1353,10 @@ async def _openai_extract(
         expected_keys = list(
             dict.fromkeys([*expected_keys, *CONTACT_AND_SOCIAL_MAP.keys()])
         )
+    # Cờ RIÊNG TỪNG LOẠI TÀI LIỆU (ocr_handwriting_correction_rules_<doc_type> trong config.py) —
+    # thêm field mới ở đó là tự động áp dụng được cho loại tài liệu khác, không cần sửa gì ở đây.
+    if settings.handwriting_correction_rules_enabled(doc_type):
+        extra = (extra or "") + DS260_HANDWRITING_CORRECTION_HINT
     if doc_type == "ds260_customer_form":
         # Worksheet có ~500 key nếu đổ phẳng (gồm cả alias và tên field của LOẠI GIẤY KHÁC)
         # → prompt loãng, model điền chéo. Chỉ nêu key thuộc worksheet, nhóm theo mục.
@@ -1061,7 +1371,16 @@ async def _openai_extract(
     ) + extra
     # DS-260 worksheet khách khai thường là bản SCAN/VIẾT TAY nhiều trang (≈18 trang) →
     # đọc hết trang + render DPI cao hơn cho rõ nét chữ tay.
+    # Trần cố định 20 trang trước đây cắt cụt các bản scan dài hơn (146 trang gặp thực tế
+    # 2026-08-05) khiến mục Work/Education Part D, An ninh, SSN — nằm sau trang 20 — không bao
+    # giờ được AI đọc, form trống âm thầm không cảnh báo. Đo SỐ TRANG THẬT của file, lấy
+    # min(số trang thật, ocr_ds260_worksheet_max_pages) — không cắt cụt file dài trong phạm vi
+    # trần mới, không render thừa cho file ngắn.
     is_ds260_ws = doc_type == "ds260_customer_form"
+    ds260_ws_max_pages = min(
+        _pdf_page_count(file_path) or settings.ocr_ds260_worksheet_max_pages,
+        settings.ocr_ds260_worksheet_max_pages,
+    ) if is_ds260_ws else 0
     image_paths, hint = _resolve_document_images(
         file_path,
         max_pages=3
@@ -1069,7 +1388,7 @@ async def _openai_extract(
         else (
             4
             if doc_type in {"birth_certificate", "marriage_certificate"}
-            else (20 if is_ds260_ws else 2)
+            else (ds260_ws_max_pages if is_ds260_ws else 2)
         ),
         dpi=300 if is_ds260_ws else 180,
     )
@@ -1107,33 +1426,53 @@ async def _openai_extract(
         image_paths, image_labels, settings.ocr_max_images_per_request
     )
 
-    results: list[dict] = []
-    for batch_no, (batch_paths, batch_labels) in enumerate(batches, start=1):
-        content = _build_llm_user_content(
-            filename=filename,
-            image_paths=batch_paths,
-            hint=hint,
-            file_path=file_path,
-            task="Extract all fields from this document.",
-            image_labels=batch_labels,
-            batch_position=(batch_no, len(batches)) if len(batches) > 1 else None,
-        )
-        response = await chat_completion(
-            db,
-            operation="document.extract",
-            context=usage_ctx,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": content},
-            ],
-            client=client,
-            model=settings.ocr_model,
-            response_format={"type": "json_object"},
-            temperature=0,
-        )
-        results.append(_parse_json_response(response.choices[0].message.content or "{}"))
+    async def _run_batches_once() -> dict:
+        results: list[dict] = []
+        for batch_no, (batch_paths, batch_labels) in enumerate(batches, start=1):
+            content = _build_llm_user_content(
+                filename=filename,
+                image_paths=batch_paths,
+                hint=hint,
+                file_path=file_path,
+                task="Extract all fields from this document.",
+                image_labels=batch_labels,
+                batch_position=(batch_no, len(batches)) if len(batches) > 1 else None,
+            )
+            response = await chat_completion(
+                db,
+                operation="document.extract",
+                context=usage_ctx,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": content},
+                ],
+                client=client,
+                model=settings.ocr_model,
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            results.append(_parse_json_response(response.choices[0].message.content or "{}"))
+        return _merge_batch_results(results)
 
-    return _merge_batch_results(results)
+    # ocr_consensus_runs > 1 (mặc định TẮT, xem config.py): gọi lại TOÀN BỘ document N lần độc
+    # lập rồi gộp theo đa số phiếu mỗi field — bắt được field mà model đọc khác nhau giữa các
+    # lần dù temperature=0 (đã quan sát: model vẫn không deterministic 100% với ảnh chữ viết tay
+    # khó, xem scripts/test_handwriting_ocr.py --repeat). Tốn N lần chi phí/thời gian.
+    consensus_runs = max(1, settings.ocr_consensus_runs)
+    run_results = [await _run_batches_once() for _ in range(consensus_runs)]
+    merged = _merge_consensus_runs(run_results) if consensus_runs > 1 else run_results[0]
+
+    if is_ds260_ws:
+        actual_pages = _pdf_page_count(file_path)
+        if actual_pages and actual_pages > ds260_ws_max_pages:
+            warnings_list = merged.setdefault("warnings", [])
+            if isinstance(warnings_list, list):
+                warnings_list.append(
+                    f"Worksheet có {actual_pages} trang, hệ thống chỉ đọc {ds260_ws_max_pages} "
+                    "trang đầu — một số mục ở cuối form có thể chưa được trích xuất. "
+                    "Vui lòng kiểm tra thủ công các mục cuối (An ninh, SSN…)."
+                )
+    return merged
 
 
 async def classify_document(
@@ -1149,12 +1488,101 @@ async def classify_document(
         raise
 
 
+_IMAGE_QUALITY_ISSUE_VI: dict[str, str] = {
+    "blurry": "ảnh mờ/out nét",
+    "glare": "ảnh bị loá sáng",
+    "too_dark": "ảnh thiếu sáng",
+    "cut_off": "ảnh bị cắt thiếu nội dung",
+    "handwriting_illegible": "chữ viết tay không đọc được",
+}
+
+
+def _image_quality_warning(extraction: dict) -> str | None:
+    """Model tự báo ảnh khó đọc dù không dưới ngưỡng blur cứng (vd. loá sáng, thiếu sáng)."""
+    quality = extraction.get("image_quality")
+    if not isinstance(quality, dict) or quality.get("readable") is not False:
+        return None
+    issue = str(quality.get("issue") or "").strip()
+    reason = _IMAGE_QUALITY_ISSUE_VI.get(issue, issue or "ảnh khó đọc")
+    return (
+        f"AI báo {reason} — một số trường có thể thiếu hoặc sai. "
+        "Vui lòng kiểm tra kỹ, hoặc chụp/scan lại ảnh rõ hơn rồi xử lý lại."
+    )
+
+
+def _low_confidence_field_warning(extraction: dict) -> str | None:
+    """Field CÓ giá trị nhưng model không chắc → chữ mực nhạt/thiếu sáng cục bộ mà
+    _measure_blur_variance (đo trên toàn ảnh) không bắt được. Field null (không đọc được)
+    không tính — đó là trường hợp model đã trung thực báo trống, không phải đoán mò.
+    """
+    threshold = settings.ocr_low_confidence_threshold
+    min_ratio = settings.ocr_low_confidence_field_ratio
+    if threshold <= 0:
+        return None
+    fields = extraction.get("fields")
+    if not isinstance(fields, dict):
+        return None
+
+    filled_count = 0
+    low_keys: list[str] = []
+    for key, meta in fields.items():
+        if not isinstance(meta, dict) or _is_empty_value(meta.get("value")):
+            continue
+        filled_count += 1
+        try:
+            confidence = float(meta.get("confidence"))
+        except (TypeError, ValueError):
+            continue
+        if confidence < threshold:
+            low_keys.append(key)
+
+    if not low_keys or filled_count == 0 or len(low_keys) / filled_count < min_ratio:
+        return None
+
+    shown = ", ".join(low_keys[:8])
+    if len(low_keys) > 8:
+        shown += f" và {len(low_keys) - 8} trường khác"
+    return (
+        f"{len(low_keys)}/{filled_count} trường có độ tin cậy thấp (có thể do chữ mờ/nhạt màu, "
+        f"không phải do ảnh out nét): {shown}. Vui lòng đối chiếu kỹ các trường này với bản gốc."
+    )
+
+
+def _extraction_warnings(extraction: dict) -> str | None:
+    """Collect warnings reported by the AI model during extraction."""
+    warnings = extraction.get("warnings")
+    if not isinstance(warnings, list) or not warnings:
+        return None
+    formatted = [str(w).strip() for w in warnings if str(w).strip()]
+    return " | ".join(formatted) if formatted else None
+
+
+def _combine_warnings(*warnings: str | None) -> str | None:
+    parts = [w for w in warnings if w]
+    return " | ".join(parts) if parts else None
+
+
 async def extract_document(
-    file_path: Path, doc_type: str, filename: str, db: AsyncSession, ctx: UsageContext
-) -> tuple[dict, str | None]:
+    file_path: Path,
+    doc_type: str,
+    filename: str,
+    db: AsyncSession,
+    ctx: UsageContext,
+    *,
+    capture_debug: bool = False,
+) -> tuple[dict, str | None, dict | None]:
+    """`capture_debug=True` trả thêm dict {extraction_raw, extraction_enriched,
+    extraction_filtered} — dùng để dump debug JSON (vd. application_form), không ảnh hưởng
+    luồng chính khi False (None)."""
     if not is_openai_configured():
         raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
-        return _filter_extraction_to_schema(doc_type, raw), None
+        filtered = _filter_extraction_to_schema(doc_type, raw)
+        debug = (
+            {"extraction_raw": raw, "extraction_enriched": raw, "extraction_filtered": filtered}
+            if capture_debug
+            else None
+        )
+        return filtered, None, debug
     try:
         extracted = await _openai_extract(file_path, doc_type, filename, db, ctx)
         enriched = _fallback_enrich_extraction(doc_type, filename, extracted)
@@ -1164,12 +1592,103 @@ async def extract_document(
             from app.services.ds260_customer_keys import coerce_ds260_customer_extraction
 
             enriched = coerce_ds260_customer_extraction(enriched)
-        return _filter_extraction_to_schema(doc_type, enriched), None
+        filtered = _filter_extraction_to_schema(doc_type, enriched)
+        warning = _combine_warnings(
+            _extraction_warnings(extracted),
+            _image_quality_warning(enriched),
+            _low_confidence_field_warning(filtered),
+        )
+        debug = (
+            {"extraction_raw": extracted, "extraction_enriched": enriched, "extraction_filtered": filtered}
+            if capture_debug
+            else None
+        )
+        return filtered, warning, debug
     except Exception as exc:
         if _is_quota_error(exc):
             raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
-            return _filter_extraction_to_schema(doc_type, raw), QUOTA_WARNING
+            filtered = _filter_extraction_to_schema(doc_type, raw)
+            debug = (
+                {"extraction_raw": raw, "extraction_enriched": raw, "extraction_filtered": filtered}
+                if capture_debug
+                else None
+            )
+            return filtered, QUOTA_WARNING, debug
         raise
+
+
+# Loại tài liệu được dump debug JSON toàn bộ response OCR — bật thêm ở đây khi cần soi field
+# bị thiếu/nhầm cho loại giấy tờ khác, không cần sửa gì khác trong process_document().
+OCR_DEBUG_DUMP_DOC_TYPES: frozenset[str] = frozenset(
+    {"application_form", "birth_certificate", "ds260_customer_form"}
+)
+
+
+def _dump_ocr_debug(
+    *,
+    doc_type: str,
+    document_id,
+    applicant_id,
+    filename: str,
+    classification: dict,
+    extraction_raw: dict | None,
+    extraction_enriched: dict | None,
+    extraction_filtered: dict | None,
+    warning: str | None,
+) -> None:
+    """Lưu TOÀN BỘ response OCR (classify + extract) ra file JSON riêng theo từng loại giấy tờ
+    (`ocr_debug/{doc_type}/...`) để đối chiếu thủ công khi field bị thiếu/nhầm — chỉ phục vụ
+    debug, không được đọc lại bởi bất kỳ luồng nào khác. Lỗi ghi file không được làm hỏng
+    pipeline OCR chính."""
+    try:
+        from datetime import datetime, timezone
+
+        debug_dir = settings.base_dir / "ocr_debug" / doc_type
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", filename or "unknown")[:80]
+        out_path = debug_dir / f"{ts}_{document_id}_{safe_name}.json"
+        payload = {
+            "document_id": str(document_id),
+            "applicant_id": str(applicant_id) if applicant_id else None,
+            "filename": filename,
+            "classification": classification,
+            "extraction_raw": extraction_raw,
+            "extraction_enriched": extraction_enriched,
+            "extraction_filtered": extraction_filtered,
+            "warning": warning,
+        }
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("%s OCR debug dump written: %s", doc_type, out_path)
+    except Exception:
+        logger.exception("Failed to write %s OCR debug dump for doc=%s", doc_type, document_id)
+
+
+def _coerce_confidence_to_float(value: object) -> float | None:
+    """Cùng lớp lỗi với _coerce_field_value_to_str: cột FLOAT insert thẳng string ("high"…) cũng
+    ném DataError. Model thi thoảng trả confidence dạng chuỗi thay vì số dù prompt yêu cầu số."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_field_value_to_str(value: object) -> str | None:
+    """`ExtractedField.field_value` là cột VARCHAR/TEXT — asyncpg insert thẳng list/dict vào đó
+    ném DataError và ROLLBACK CẢ TRANSACTION (mất luôn mọi field khác đã đọc đúng của tài liệu).
+
+    Prompt đã yêu cầu "value" luôn là string, nhưng model vẫn có lúc trả về object/array lồng
+    nhau cho một field (sự cố thực tế 2026-08-04, OCR "01_7 JOB APPLICATION...docx" — model trả
+    value kiểu [{"surname": "NGUYEN", "given_names": "..."}] thay vì chuỗi). Không thể chỉ tin
+    prompt — phải chặn ở biên DB.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 async def save_extracted_fields(db: AsyncSession, document_id, extraction: dict) -> list[ExtractedField]:
@@ -1182,9 +1701,9 @@ async def save_extracted_fields(db: AsyncSession, document_id, extraction: dict)
         ef = ExtractedField(
             document_id=document_id,
             field_key=key,
-            field_value=meta.get("value"),
-            confidence=meta.get("confidence"),
-            source_page=meta.get("source_page"),
+            field_value=_coerce_field_value_to_str(meta.get("value")),
+            confidence=_coerce_confidence_to_float(meta.get("confidence")),
+            source_page=_coerce_field_value_to_str(meta.get("source_page")),
         )
         db.add(ef)
         saved.append(ef)
@@ -1192,68 +1711,134 @@ async def save_extracted_fields(db: AsyncSession, document_id, extraction: dict)
     return saved
 
 
+async def _resolve_local_file_path(stored_path: str) -> tuple[Path, Callable[[], None] | None]:
+    """document.file_path có thể là "s3://..." (MinIO, file mới) hoặc đường dẫn đĩa cục bộ
+    (file cũ, hoặc S3 đang tắt). Toàn bộ pipeline OCR bên dưới (Pillow/PyMuPDF/openpyxl/đọc
+    text thô) cần một Path THẬT trên đĩa, không nhận bytes/stream — với S3 URI, tải về file
+    tạm rồi trả cleanup callback để xoá sau khi xử lý xong (caller PHẢI gọi trong finally)."""
+    from app.services import storage
+
+    if not storage.is_s3_uri(stored_path):
+        return Path(stored_path), None
+
+    tmp_path = await asyncio.to_thread(storage.download_to_temp, stored_path)
+
+    def _cleanup() -> None:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return tmp_path, _cleanup
+
+
 async def process_document(db: AsyncSession, document: Document) -> Document:
-    file_path = Path(document.file_path)
-    document.status = DocumentStatus.processing
-    await db.flush()
-
-    applicant = await db.get(Applicant, document.applicant_id)
-    usage_ctx = UsageContext(
-        user_id=applicant.user_id if applicant else None,
-        applicant_id=document.applicant_id,
-        document_id=document.id,
-        filename=document.original_filename,
-    )
-
-    warnings: list[str] = []
-
+    file_path, _cleanup_tmp = await _resolve_local_file_path(document.file_path)
     try:
-        classification, w1 = await classify_document(file_path, document.original_filename, db, usage_ctx)
-        if w1:
-            warnings.append(w1)
+        document.status = DocumentStatus.processing
+        await db.flush()
 
-        ai_type = classification.get("document_type", "other")
-        doc_type, is_exception = _resolve_document_type(ai_type, document.original_filename or "")
-        document.document_type = doc_type
-        document.registry_doc_type = doc_type if doc_type in RECORDABLE_DOC_TYPES else None
-        document.is_exception = is_exception
-        document.classification_confidence = float(classification.get("confidence", 0))
+        # Chỉ kiểm ảnh CHỤP trực tiếp (jpg/png/...) — PDF thường là bản scan/xuất từ máy,
+        # hiếm khi out nét kiểu chụp tay run, và _pdf_pages_to_images đã render riêng.
+        if (
+            settings.ocr_blur_variance_threshold > 0
+            and file_path.suffix.lower() in IMAGE_SUFFIXES
+            and file_path.exists()
+        ):
+            variance = _measure_blur_variance(file_path)
+            if variance is not None and variance < settings.ocr_blur_variance_threshold:
+                document.status = DocumentStatus.failed
+                document.error_message = (
+                    f"Ảnh bị mờ/out nét (độ nét đo được {variance:.0f}, cần ≥ "
+                    f"{settings.ocr_blur_variance_threshold:.0f}) — hệ thống chưa trích xuất để tránh "
+                    "đọc sai dữ liệu. Vui lòng chụp lại ảnh rõ nét, đủ sáng, giữ máy ổn định rồi tải lên lại."
+                )
+                await db.flush()
+                return document
 
-        extraction, w2 = await extract_document(file_path, doc_type, document.original_filename, db, usage_ctx)
-        if w2 and w2 not in warnings:
-            warnings.append(w2)
+        applicant = await db.get(Applicant, document.applicant_id)
+        usage_ctx = UsageContext(
+            user_id=applicant.user_id if applicant else None,
+            applicant_id=document.applicant_id,
+            document_id=document.id,
+            filename=document.original_filename,
+        )
 
-        await save_extracted_fields(db, document.id, extraction)
+        warnings: list[str] = []
 
-        document.status = DocumentStatus.extracted
-        from datetime import datetime, timezone
+        try:
+            classification, w1 = await classify_document(file_path, document.original_filename, db, usage_ctx)
+            if w1:
+                warnings.append(w1)
 
-        document.processed_at = datetime.now(timezone.utc)
-        document.error_message = warnings[0] if warnings else None
-    except Exception as exc:
-        if _is_quota_error(exc):
-            classification = _mock_classification(document.original_filename)
             ai_type = classification.get("document_type", "other")
             doc_type, is_exception = _resolve_document_type(ai_type, document.original_filename or "")
             document.document_type = doc_type
             document.registry_doc_type = doc_type if doc_type in RECORDABLE_DOC_TYPES else None
             document.is_exception = is_exception
             document.classification_confidence = float(classification.get("confidence", 0))
-            extraction = _filter_extraction_to_schema(
+            document.classification_reason = (classification.get("reason") or "")[:256]
+
+            needs_debug_dump = doc_type in OCR_DEBUG_DUMP_DOC_TYPES
+            extraction, w2, extract_debug = await extract_document(
+                file_path,
                 doc_type,
-                _fallback_enrich_extraction(
-                    doc_type, document.original_filename, _mock_extraction(doc_type, document.original_filename)
-                ),
+                document.original_filename,
+                db,
+                usage_ctx,
+                capture_debug=needs_debug_dump,
             )
+            if w2 and w2 not in warnings:
+                warnings.append(w2)
+
+            if needs_debug_dump and extract_debug is not None:
+                _dump_ocr_debug(
+                    doc_type=doc_type,
+                    document_id=document.id,
+                    applicant_id=document.applicant_id,
+                    filename=document.original_filename or "",
+                    classification=classification,
+                    extraction_raw=extract_debug.get("extraction_raw"),
+                    extraction_enriched=extract_debug.get("extraction_enriched"),
+                    extraction_filtered=extract_debug.get("extraction_filtered"),
+                    warning=w2,
+                )
+
             await save_extracted_fields(db, document.id, extraction)
+
             document.status = DocumentStatus.extracted
             from datetime import datetime, timezone
 
             document.processed_at = datetime.now(timezone.utc)
-            document.error_message = QUOTA_WARNING
-        else:
-            document.status = DocumentStatus.failed
-            document.error_message = str(exc)[:2000]
+            document.error_message = warnings[0] if warnings else None
+        except Exception as exc:
+            if _is_quota_error(exc):
+                classification = _mock_classification(document.original_filename)
+                ai_type = classification.get("document_type", "other")
+                doc_type, is_exception = _resolve_document_type(ai_type, document.original_filename or "")
+                document.document_type = doc_type
+                document.registry_doc_type = doc_type if doc_type in RECORDABLE_DOC_TYPES else None
+                document.is_exception = is_exception
+                document.classification_confidence = float(classification.get("confidence", 0))
+                document.classification_reason = (classification.get("reason") or "")[:256]
+                extraction = _filter_extraction_to_schema(
+                    doc_type,
+                    _fallback_enrich_extraction(
+                        doc_type, document.original_filename, _mock_extraction(doc_type, document.original_filename)
+                    ),
+                )
+                await save_extracted_fields(db, document.id, extraction)
+                document.status = DocumentStatus.extracted
+                from datetime import datetime, timezone
 
-    await db.flush()
-    return document
+                document.processed_at = datetime.now(timezone.utc)
+                document.error_message = QUOTA_WARNING
+            else:
+                document.status = DocumentStatus.failed
+                document.error_message = str(exc)[:2000]
+
+        await db.flush()
+        return document
+    finally:
+        if _cleanup_tmp:
+            _cleanup_tmp()

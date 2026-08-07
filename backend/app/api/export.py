@@ -1,3 +1,4 @@
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -282,11 +283,19 @@ async def download_export(
             export = None
     if not export:
         raise HTTPException(status_code=404, detail="Export not found")
+
+    from app.services import storage
+
+    docx_media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if storage.is_s3_uri(export.file_path):
+        data = await asyncio.to_thread(storage.get_bytes_from_uri, export.file_path)
+        filename = storage.parse_s3_uri(export.file_path)[1].rsplit("/", 1)[-1]
+        return Response(
+            content=data,
+            media_type=docx_media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     path = Path(export.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Export file missing")
-    return FileResponse(
-        path,
-        filename=path.name,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    return FileResponse(path, filename=path.name, media_type=docx_media_type)

@@ -284,13 +284,16 @@ def _resolve_loose_from_record(
         nk = _norm_field_key(raw_key)
         if nk in norms:
             return val, raw_key
+    # CHỈ so khớp CHÍNH XÁC (không endswith/in) — "current_address" từng khớp NHẦM
+    # "child_1_current_address" vì target nằm trọn trong nk như một hậu tố, dẫn tới địa chỉ
+    # của CON bị hiển thị làm current_address của chính đương đơn (sự cố thực tế 2026-08-04).
+    # _norm_field_key chỉ bỏ ký tự không phải chữ/số, không có ranh giới từ, nên endswith/in
+    # không phân biệt được "field của người khác có tiền tố" với "đúng field cần tìm".
     target = _norm_field_key(mapping.key)
     field_n = _norm_field_key(mapping.field)
     for raw_key, val in merged.items():
         nk = _norm_field_key(raw_key)
-        if target and (nk == target or nk.endswith(target) or target in nk):
-            return val, raw_key
-        if field_n and field_n != target and (nk == field_n or nk.endswith(field_n)):
+        if (target and nk == target) or (field_n and nk == field_n):
             return val, raw_key
     return "", mapping.field
 
@@ -636,9 +639,14 @@ def _spouse_is_deceased(
 
 
 def _normalize_person_name_key(name: str) -> str:
-    from app.services.birth_location import normalize_location
+    """Điểm chốt DUY NHẤT mà _names_match/_names_same_person dùng để so khớp tên người —
+    sửa ở đây sửa cho MỌI nơi gọi (dedupe con, khớp vợ/chồng, khớp thành viên hồ sơ theo tên
+    OCR, khớp cha/mẹ trên lý lịch tư pháp...). Dùng normalize_person_name (chỉ bỏ dấu), KHÔNG
+    dùng normalize_location (dành cho địa danh, lọc mất từ hành chính trùng tên người — xem
+    docstring normalize_person_name)."""
+    from app.services.birth_location import normalize_person_name
 
-    return normalize_location(name)
+    return normalize_person_name(name)
 
 
 def _names_match(a: str, b: str) -> bool:
@@ -744,13 +752,20 @@ def _reset_divorce_section_fields(fields_out: list[dict[str, Any]]) -> None:
 
 @lru_cache(maxsize=1)
 def _child_excluded_section_ids() -> frozenset[str]:
-    """Các mục DS-260 không áp dụng cho hồ sơ con (chỉ người lớn)."""
+    """Các mục DS-260 không áp dụng cho hồ sơ con (chỉ người lớn — vợ/chồng, ly hôn, danh sách
+    con của chính người đó, tình trạng hôn nhân).
+
+    section_work_education KHÔNG thuộc nhóm này — DS-260 yêu cầu mục Work/Education/Training
+    cho MỌI đương đơn, kể cả con (thường đang đi học — có "primary_occupation: Student" +
+    lịch sử trường lớp). Trước đây xóa trắng mục này cho mọi hồ sơ con khiến dữ liệu đã điền
+    đúng từ worksheet của chính người con (enrich_work_education_from_worksheet) bị xoá sạch
+    ngay sau đó (báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG — form của chính cô ấy, mục D
+    trống hoàn toàn dù worksheet của chính cô ấy ghi rõ "STUDENT" + tên trường)."""
     return frozenset({
         "section_spouse",
         "section_divorce",
         "section_previous_spouse",
         "section_children",
-        "section_work_education",
     })
 
 
@@ -1465,7 +1480,27 @@ def enrich_applicant_birth_city_state_equal(
     *,
     passport_ref: ApplicantDocRecord | None = None,
 ) -> None:
-    """City of Birth và State/Province of Birth — cùng một giá trị (THÔNG TIN CÁ NHÂN)."""
+    """Chỉ điền City/State nơi sinh từ passport khi worksheet CHƯA có cả hai — không được đè
+    lên dữ liệu thật đã đọc từ worksheet.
+
+    Trước đây hàm này ép City = State cho MỌI hồ sơ (kể cả khi cả hai đã có giá trị THẬT và
+    KHÁC nhau từ worksheet, vd. City="Xã Vĩnh Lạc, Huyện Lục Yên, Tỉnh Yên Bái", State="Yên
+    Bái"): nếu City ngắn hơn (chỉ "Vĩnh Lạc") thì việc ép State = City làm MẤT tên tỉnh thật,
+    sau đó normalize_ds260_place_fields (chạy cuối pipeline, tự tách City/State đúng quy ước
+    DS-260: TP trực thuộc TW → State=N/A, TP/thị xã thuộc tỉnh → State=tỉnh đó) không còn đủ
+    dữ liệu để tách đúng và có thể match nhầm sang tỉnh khác (vd. "Vinh Lac" → "Vinh" của Nghệ
+    An thay vì Yên Bái — xác nhận bằng test thực tế 2026-08-04). Việc tách City/State đúng quy
+    ước đã có sẵn ở normalize_ds260_place_fields; hàm này chỉ còn nhiệm vụ fallback từ passport
+    khi worksheet hoàn toàn không có dữ liệu.
+    """
+    by_key = {f.get("key", ""): f for f in fields_out}
+    city_has_value = bool((by_key.get("birth_city", {}).get("value") or "").strip())
+    state_has_value = bool((by_key.get("birth_state", {}).get("value") or "").strip())
+    if city_has_value and state_has_value:
+        # Cả hai đã có dữ liệu thật (worksheet/OCR) — có thể khác nhau và đều đúng (vd. City
+        # là địa chỉ đầy đủ, State là tên tỉnh riêng). Không đè, để normalize_ds260_place_fields
+        # tách đúng theo quy ước DS-260 từ chính hai giá trị thật này.
+        return
     canonical = _canonical_applicant_birth_place(fields_out)
     if not canonical and (passport_rec or passport_ref):
         city = _resolve_from_record_luong1_fallback(
@@ -1496,11 +1531,13 @@ def enrich_marital_status_from_documents(
     death_rec: ApplicantDocRecord | None = None,
 ) -> None:
     """
-    Ly hôn → Divorced; kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ → Married;
-    không có giấy tờ → để trống.
+    Ly hôn → Single (quy ước của công ty: khách đã ly hôn khai "Single", KHÔNG dùng
+    "Divorced" dù đó cũng là lựa chọn hợp lệ trên DS-260 gốc — xác nhận trực tiếp với
+    consultant 2026-08-04); kết hôn + phối ngẫu đã mất → Widowed; kết hôn hợp lệ →
+    Married; không có giấy tờ → để trống.
     """
     if divorce_rec:
-        status = "Divorced"
+        status = "Single"
         derived = "marital_status_from_divorce"
         doc_type = "divorce"
     elif has_applicable_marriage_certificate(
@@ -1733,7 +1770,16 @@ def _child_data_from_record(rec: ApplicantDocRecord) -> dict[str, str]:
 
 
 def _child_dedupe_key(data: dict[str, str]) -> tuple[str, str]:
-    name = re.sub(r"\s+", " ", (data.get("full_name") or "").strip().upper())
+    """`.strip().upper()` KHÔNG bỏ dấu — giấy khai sinh ghi có dấu ("Nguyễn Minh Phương") còn
+    worksheet khách khai thường gõ không dấu ("NGUYEN MINH PHUONG"), hai chuỗi khác nhau nên
+    không dedupe được → cùng một con bị tính 2 lần, children_count dư ra dù hiển thị "trùng
+    tên" trên form (form hiển thị đã qua bước bỏ dấu cuối pipeline nên nhìn giống hệt nhau —
+    báo lỗi thực tế 2026-08-04). Dùng format_person_name_ascii (chỉ bỏ dấu, KHÔNG lọc từ hành
+    chính như normalize_location — normalize_location từng cắt mất "Phương" vì trùng "phường").
+    """
+    from app.services.birth_location import format_person_name_ascii
+
+    name = format_person_name_ascii(data.get("full_name") or "")
     dob = (data.get("date_of_birth") or "").strip()
     parsed = parse_full_date(dob)
     if parsed:
@@ -1828,28 +1874,236 @@ def _apply_children_review_visibility(fields_out: list[dict[str, Any]]) -> None:
 _CHILD_WORKSHEET_ONLY_FIELDS = ("lives_with", "current_address", "immigrating", "immigrating_future")
 
 
+def _same_child(a: dict[str, str], b: dict[str, str]) -> bool:
+    """Cùng một đứa trẻ khi TÊN khớp (dùng _names_same_person — chịu được có/không dấu, thứ tự
+    chữ) — KHÔNG còn đòi hỏi ngày sinh khớp. Ngày sinh khác nhau giữa 2 nguồn (worksheet vs
+    giấy khai sinh) là MÂU THUẪN DỮ LIỆU cần cảnh báo (xem build_child_identity_conflict_rows),
+    không phải bằng chứng đây là 2 người khác nhau — trước đây so khớp cứng theo cả tên lẫn
+    ngày sinh khiến 1 người bị tách thành 2 slot con khi một nguồn OCR đọc sai ngày (báo lỗi
+    thực tế 2026-08-05: giấy khai sinh NGUYEN MINH PHUONG bị OCR đọc nhầm số quyển "208/2015"
+    thành ngày sinh, trong khi hộ chiếu + worksheet đều ghi đúng 29/01/2007 — cùng 1 người bị
+    hiện thành cả child_2 và child_3)."""
+    name_a = (a.get("full_name") or "").strip()
+    name_b = (b.get("full_name") or "").strip()
+    return bool(name_a) and bool(name_b) and _names_same_person(name_a, name_b)
+
+
 def _dedupe_children(
     items: list[tuple[dict[str, str], str, ApplicantDocRecord | None]],
 ) -> list[tuple[dict[str, str], str, ApplicantDocRecord | None]]:
     """Union birth certs + worksheet; prefer birth_certificate_child on duplicate,
-    nhưng GỘP các field chỉ có trên worksheet (lives_with, immigrating, …) vào bản đã giữ."""
+    nhưng GỘP các field chỉ có trên worksheet (lives_with, immigrating, …) vào bản đã giữ.
+    So khớp theo _same_child (chỉ tên — xem docstring _same_child), KHÔNG dùng tuple (tên,
+    ngày sinh) làm key từ điển như trước — cách đó tách 1 người thành 2 slot khi ngày sinh
+    giữa 2 nguồn khác nhau (do OCR đọc sai ở một bên). Mâu thuẫn ngày sinh/nơi sinh giữa các
+    nguồn được báo riêng qua build_child_identity_conflict_rows(), không xử lý ở đây."""
     priority = {"birth_certificate_child": 0, "ds260_customer_form": 1}
     ranked = sorted(items, key=lambda x: (priority.get(x[1], 9), _child_dedupe_key(x[0])))
-    seen: dict[tuple[str, str], int] = {}
     out: list[tuple[dict[str, str], str, ApplicantDocRecord | None]] = []
     for data, source, rec in ranked:
         key = _child_dedupe_key(data)
         if not key[0] and not key[1]:
             continue
-        if key in seen:
-            kept_data = out[seen[key]][0]
+        matched_idx = next(
+            (i for i, (kept_data, _, _) in enumerate(out) if _same_child(data, kept_data)),
+            None,
+        )
+        if matched_idx is not None:
+            kept_data = out[matched_idx][0]
             for f in _CHILD_WORKSHEET_ONLY_FIELDS:
                 if not (kept_data.get(f) or "").strip() and (data.get(f) or "").strip():
                     kept_data[f] = data[f]
             continue
-        seen[key] = len(out)
         out.append((data, source, rec))
     return out
+
+
+_CHILD_IDENTITY_COMPARE_FIELDS: tuple[str, ...] = (
+    "date_of_birth",
+    "birth_city",
+    "birth_state",
+    "birth_country",
+)
+
+
+def _child_identity_values_equal(field: str, a: str, b: str) -> bool:
+    if field == "date_of_birth":
+        parsed_a, parsed_b = parse_full_date(a), parse_full_date(b)
+        if parsed_a and parsed_b:
+            return parsed_a == parsed_b
+        return format_partial_ds260_date(a) == format_partial_ds260_date(b) or a.upper() == b.upper()
+    return re.sub(r"\s+", " ", a.strip().upper()) == re.sub(r"\s+", " ", b.strip().upper())
+
+
+def build_child_identity_conflict_rows(
+    records: list[ApplicantDocRecord],
+    resolutions: dict[str, str],
+) -> list[dict[str, Any]]:
+    """So sánh ngày sinh/nơi sinh của TỪNG CON (tên khớp qua _names_same_person) giữa các
+    nguồn — giấy khai sinh con (birth_certificate_child) và worksheet DS-260 khách khai. Khi
+    khác nhau → tạo Conflict để nhân viên chọn giá trị đúng, KHÔNG tách thành 2 slot con khác
+    nhau (dedupe_children đã gộp theo tên — xem _same_child). Field_key khoá theo TÊN con
+    (không theo vị trí slot child_1/child_2 — vị trí này đổi mỗi lần dữ liệu thay đổi nên
+    không dùng làm khoá ổn định được).
+
+    Báo lỗi thực tế 2026-08-05: giấy khai sinh NGUYEN MINH PHUONG bị OCR đọc nhầm số quyển
+    "208/2015" thành ngày sinh; hộ chiếu + worksheet đều ghi đúng 29/01/2007. Trước đây không
+    có cơ chế nào cảnh báo — 2 giá trị khác nhau chỉ âm thầm tách thành 2 "con" riêng biệt.
+    """
+    from app.services.ds260_conflicts import child_identity_conflict_field_key, pick_latest_by_variant
+
+    items: list[tuple[dict[str, str], ApplicantDocRecord | None]] = []
+    for std, ref in group_child_birth_luong1_pairs(records, None):
+        data = _child_data_from_luong1_pair(std, ref)
+        if (data.get("full_name") or "").strip():
+            items.append((data, std or ref))
+
+    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
+        records, "ds260_customer_form"
+    )
+    if ws_rec:
+        for data in _child_data_from_worksheet(ws_rec):
+            if (data.get("full_name") or "").strip():
+                items.append((data, ws_rec))
+
+    rows: list[dict[str, Any]] = []
+    emitted: set[str] = set()
+    for i in range(len(items)):
+        data_a, rec_a = items[i]
+        name_a = (data_a.get("full_name") or "").strip()
+        for j in range(i + 1, len(items)):
+            data_b, rec_b = items[j]
+            name_b = (data_b.get("full_name") or "").strip()
+            if not name_b or not _names_same_person(name_a, name_b):
+                continue
+            for field in _CHILD_IDENTITY_COMPARE_FIELDS:
+                val_a = (data_a.get(field) or "").strip()
+                val_b = (data_b.get(field) or "").strip()
+                if not val_a or not val_b:
+                    continue
+                if _child_identity_values_equal(field, val_a, val_b):
+                    continue
+                fk = child_identity_conflict_field_key(name_a, field)
+                if fk in resolutions or fk in emitted:
+                    continue
+                emitted.add(fk)
+                rows.append(
+                    {
+                        "field_key": fk,
+                        "value_a": val_a,
+                        "document_a_id": rec_a.source_document_id if rec_a else None,
+                        "value_b": val_b,
+                        "document_b_id": rec_b.source_document_id if rec_b else None,
+                    }
+                )
+    return rows
+
+
+def _child_worksheet_record_for_member(
+    records: list[ApplicantDocRecord],
+    member_display_name: str,
+) -> ApplicantDocRecord | None:
+    candidates = [r for r in records if r.doc_type == "ds260_customer_form"]
+    for r in candidates:
+        if _names_same_person(_worksheet_person_name(r), member_display_name):
+            return r
+    return None
+
+
+async def build_child_parent_identity_conflict_rows(
+    db: AsyncSession, applicant_id, resolutions: dict[str, str]
+) -> list[dict[str, Any]]:
+    """So sánh ngày sinh/quốc gia sinh của cha/mẹ — khai trên WORKSHEET CỦA CHÍNH NGƯỜI CON —
+    với hồ sơ THẬT của người đó, CHỈ KHI cha/mẹ này CŨNG là một case member trong cùng bộ hồ sơ
+    (vd. mẹ chính là đương đơn chính). Chỉ so khi CẢ HAI bên đều có dữ liệu — thiếu bên nào thì
+    bỏ qua, không đoán mò (đúng yêu cầu thực tế 2026-08-05: "thông tin nào không có thì thôi
+    chớ có là phải đối chiếu liền").
+
+    Phạm vi so sánh: date_of_birth + birth_country (city/state từ hộ chiếu phải suy ra từ chuỗi
+    place_of_birth tự do — độ tin cậy thấp hơn, dễ báo sai — nên KHÔNG đưa vào so sánh tự động
+    ở đây, chỉ so 2 field đọc trực tiếp/đáng tin cậy nhất).
+    """
+    from app.services.birth_location import derive_country_from_place
+    from app.services.family_case import load_case_members
+    from app.services.ds260_conflicts import child_parent_identity_conflict_field_key
+
+    records = await list_doc_records(db, applicant_id)
+    members = await load_case_members(db, applicant_id)
+    if len(members) < 2:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for member in members:
+        if str(member.role) not in ("child", "grandchild"):
+            continue
+        ws_rec = _child_worksheet_record_for_member(records, member.display_name)
+        if not ws_rec:
+            continue
+
+        for parent in ("father", "mother"):
+            surname = _resolve_from_record(ws_rec, f"{parent}_surname", ())
+            given = _resolve_from_record(ws_rec, f"{parent}_given_names", ())
+            parent_name = f"{surname} {given}".strip()
+            if not parent_name:
+                parent_name = _resolve_from_record(ws_rec, f"{parent}_full_name", ())
+            if not parent_name:
+                continue
+
+            other = next(
+                (
+                    m
+                    for m in members
+                    if m.id != member.id and _names_same_person(parent_name, m.display_name)
+                ),
+                None,
+            )
+            if not other:
+                continue
+
+            passport_std, passport_ref = pick_luong1_pair_for_person(
+                records, "passport", other.display_name
+            )
+            official_rec = passport_std or passport_ref
+            if not official_rec:
+                continue
+
+            official_dob = _resolve_from_record(official_rec, "date_of_birth", ("dob",))
+            official_pob = _resolve_from_record(official_rec, "place_of_birth", ("birth_place",))
+            official_country = derive_country_from_place(official_pob) if official_pob else ""
+
+            ws_dob = _resolve_from_record(ws_rec, f"{parent}_date_of_birth", ())
+            ws_country = _resolve_from_record(ws_rec, f"{parent}_birth_country", ())
+
+            for field, ws_val, official_val in (
+                ("date_of_birth", ws_dob, official_dob),
+                ("birth_country", ws_country, official_country),
+            ):
+                if not ws_val or not official_val:
+                    continue
+                if field == "date_of_birth":
+                    parsed_ws, parsed_official = parse_full_date(ws_val), parse_full_date(official_val)
+                    if parsed_ws and parsed_official:
+                        equal = parsed_ws == parsed_official
+                    else:
+                        equal = ws_val.strip().upper() == official_val.strip().upper()
+                else:
+                    equal = ws_val.strip().upper() == official_val.strip().upper()
+                if equal:
+                    continue
+
+                fk = child_parent_identity_conflict_field_key(member.display_name, parent, field)
+                if fk in resolutions:
+                    continue
+                rows.append(
+                    {
+                        "field_key": fk,
+                        "value_a": official_val,
+                        "document_a_id": official_rec.source_document_id,
+                        "value_b": ws_val,
+                        "document_b_id": ws_rec.source_document_id,
+                    }
+                )
+    return rows
 
 
 def enrich_children_section_from_birth_certs(
@@ -2277,6 +2531,114 @@ def _eligible_records_for_field_fill(
             continue
         out.append(rec)
     return out
+
+
+# Bộ field "công việc HIỆN TẠI" (Primary Occupation/Present Employer + địa chỉ/job title/ngày
+# bắt đầu đi kèm) — DS-260 khách khai (ds260_customer_form) LUÔN được ưu tiên hơn Application
+# form cho nhóm này, vì khách có thể nộp Job Application cũ (mô tả công việc đã nghỉ) trong khi
+# DS-260 tự khai mới hơn phản ánh đúng công việc hiện tại (vd. khách chuyển sang tự làm/nghề khác
+# sau khi đã điền Application form). Việc làm cũ mà Application form liệt kê là "hiện tại" (do
+# form không có trường ngày kết thúc) vẫn được giữ lại — nhưng chỉ qua work_other_occupation_detail
+# (nguồn ds260_customer_form, xem ds260_mapping.json), không được ghi đè lên nghề nghiệp chính.
+_WORK_CURRENT_JOB_KEYS: frozenset[str] = frozenset(
+    {
+        "work_primary_occupation",
+        "work_occupation_other_specify",
+        "work_present_employer",
+        "work_employer_address",
+        "work_employer_city",
+        "work_employer_state",
+        "work_employer_postal_code",
+        "work_employer_country",
+        "work_job_title",
+        "work_start_date",
+    }
+)
+
+
+def _job_identity_tokens(occupation: str, employer: str) -> set[str]:
+    """Token hoá nghề nghiệp + tên công ty để so khớp mờ (khác cách viết, cùng ý nghĩa)."""
+    import unicodedata
+
+    text = f"{occupation or ''} {employer or ''}"
+    text = text.replace("Đ", "D").replace("đ", "d")
+    text = "".join(ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn")
+    cleaned = re.sub(r"[^A-Za-z0-9\s]", " ", text.upper())
+    stopwords = {"THE", "AND", "OF", "CO", "LTD", "INC", "TU", "VA", "CUA"}
+    return {t for t in cleaned.split() if len(t) >= 2 and t not in stopwords}
+
+
+def _worksheet_declared_current_job(
+    records: list[ApplicantDocRecord],
+) -> tuple[str, str] | None:
+    """(primary_occupation, present_employer) khách tự khai HIỆN TẠI trên DS-260 worksheet."""
+    from app.services.ds260_conflicts import pick_latest_by_variant
+
+    rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_by_variant(
+        records, "ds260_customer_form", "standard"
+    )
+    if not rec:
+        return None
+    mappings = flatten_ds260_mappings()
+    occ, _ = _resolve_ds260_field_value(mappings["work_primary_occupation"], rec)
+    emp, _ = _resolve_ds260_field_value(mappings["work_present_employer"], rec)
+    if not occ.strip() and not emp.strip():
+        return None
+    return occ, emp
+
+
+def _application_form_matches_worksheet_current_job(
+    app_rec: ApplicantDocRecord,
+    ws_current_job: tuple[str, str] | None,
+) -> bool:
+    """So sánh (mờ, không phân biệt cách viết) công việc trên Application form với công việc
+    HIỆN TẠI mà khách khai trên DS-260 — quyết định Application form có được dùng bổ sung
+    (địa chỉ, job title, ngày bắt đầu, ...) cho công việc hiện tại hay không.
+
+    Không có gì để so sánh (worksheet chưa khai nghề hiện tại) → coi như khớp, giữ hành vi cũ
+    (tin Application form) thay vì chặn nhầm dữ liệu hợp lệ.
+    """
+    if ws_current_job is None:
+        return True
+    ws_occ, ws_emp = ws_current_job
+    mappings = flatten_ds260_mappings()
+    app_occ, _ = _resolve_ds260_field_value(mappings["work_primary_occupation"], app_rec)
+    app_emp, _ = _resolve_ds260_field_value(mappings["work_present_employer"], app_rec)
+    ws_tokens = _job_identity_tokens(ws_occ, ws_emp)
+    app_tokens = _job_identity_tokens(app_occ, app_emp)
+    if not ws_tokens or not app_tokens:
+        return True
+    overlap = len(ws_tokens & app_tokens) / len(ws_tokens | app_tokens)
+    return overlap >= 0.34
+
+
+def resolve_work_current_job_field(
+    records: list[ApplicantDocRecord],
+    mapping: Ds260FieldMapping,
+    resolutions: dict[str, str],
+    *,
+    person_name: str | None = None,
+) -> tuple[str, str, ApplicantDocRecord | None, dict[str, Any]]:
+    """DS-260 khách khai trước (mới hơn) → thiếu mới rơi về Application form (Luồng 1), NHƯNG
+    chỉ khi Application form mô tả cùng một công việc với công việc hiện tại đã khai trên
+    DS-260 (so khớp mờ nghề nghiệp + tên công ty) — nếu Application form thực chất đang liệt
+    kê một công việc CŨ/khác, không cho nó bổ sung địa chỉ/chi tiết vào công việc hiện tại."""
+    ws_value, ws_source_field, ws_rec, ws_extra = resolve_customer_form_field(
+        records, "ds260_customer_form", mapping
+    )
+    if not _is_empty_for_fallback(ws_value):
+        return ws_value, ws_source_field, ws_rec, {**ws_extra, "derived": "ds260_worksheet_current_job_priority"}
+
+    app_value, app_source_field, app_rec, app_extra = resolve_luong1_ds260_field(
+        records, mapping.document, mapping, resolutions, person_name=person_name
+    )
+    if not app_value or app_rec is None:
+        return app_value, app_source_field, app_rec, app_extra
+
+    ws_current_job = _worksheet_declared_current_job(records)
+    if _application_form_matches_worksheet_current_job(app_rec, ws_current_job):
+        return app_value, app_source_field, app_rec, app_extra
+    return "", mapping.field, None, {"derived": "application_form_stale_job_skipped"}
 
 
 def resolve_luong1_ds260_field(
@@ -2912,6 +3274,14 @@ def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> Non
     - Cha/mẹ đã mất → để trống khối địa chỉ hiện tại.
     - Địa chỉ cha/mẹ trùng địa chỉ đương đơn → là rò rỉ (bleed) → xóa.
     - Ô State (tỉnh hiện tại) chứa địa chỉ phố → xóa.
+
+    "Bleed" chỉ áp dụng cho dữ liệu OCR từ giấy tờ scan (worksheet/birth certificate...) — nơi
+    máy đọc nhầm địa chỉ đương đơn vào ô cha/mẹ là lỗi thật sự có thể xảy ra. KHÔNG áp dụng khi
+    địa chỉ cha/mẹ đến từ chính form DS-260 khách TỰ KHAI TAY (ds260_customer_form) — ở đó khách
+    chủ động trả lời, "trùng địa chỉ đương đơn" nhiều khả năng là SỰ THẬT (cha mẹ con sống chung),
+    không phải lỗi copy. Xóa nhầm khiến postal code/địa chỉ thật của cha mẹ bị mất, và export phải
+    tự đoán bù bằng dữ liệu kém tin cậy hơn (báo lỗi thực tế 2026-08-05: postal code cha/mẹ
+    NGUYEN HOANG YEN bị xóa dù DS-260 gốc ghi rõ).
     """
     from app.services.birth_location import normalize_location
 
@@ -2927,8 +3297,12 @@ def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> Non
             f"{parent}_country",
         ]
         not_living = _field_value(idx, f"{parent}_is_living").lower() == "no"
+        addr_field = idx.get(f"{parent}_address")
         parent_addr = normalize_location(_field_value(idx, f"{parent}_address"))
-        bleed = bool(applicant_addr) and parent_addr == applicant_addr
+        from_customer_form = bool(
+            addr_field and (addr_field.get("source") or {}).get("document_type") == "ds260_customer_form"
+        )
+        bleed = bool(applicant_addr) and parent_addr == applicant_addr and not from_customer_form
         if not_living or bleed:
             for key in addr_keys:
                 field = idx.get(key)
@@ -3255,8 +3629,24 @@ async def resolve_ds260_form(
         member_ctx = await resolve_member_context(db, applicant, mid)
 
     person_name = member_ctx.display_name if member_ctx else (applicant.display_name if applicant else "")
+    member_number = (
+        member_number_map(case_members_all).get(member_ctx.id) if member_ctx else None
+    )
     # Hồ sơ gia đình: chỉ dùng worksheet DS-260 đúng người (tránh lấy nhầm của thành viên khác).
     records = scope_worksheets_to_person(records, person_name)
+    # application_form (Job Application) không có field tên để so khớp như worksheet — dùng
+    # tên file/OCR qua resolve_doc_records_member_numbers (cùng cơ chế identity_outlier) để
+    # loại application_form của THÀNH VIÊN KHÁC ra khỏi enrich-fill/so sánh của người đang xem
+    # (báo lỗi thực tế 2026-08-05: địa chỉ/SĐT của người A bị điền/so nhầm sang form người B).
+    if member_ctx and len(case_members_all) > 1 and member_number:
+        from app.services.family_case import resolve_doc_records_member_numbers
+
+        numbers_by_record = await resolve_doc_records_member_numbers(db, applicant_id, records)
+        records = [
+            r
+            for r in records
+            if r.doc_type != "application_form" or numbers_by_record.get(id(r)) == member_number
+        ]
     # Con và cháu (nội/ngoại) dùng chung luồng "thành viên phụ thuộc": thông tin cá nhân
     # lấy từ GKS/hộ chiếu của chính họ, ẩn các section vợ/chồng/ly hôn/con.
     is_child_member = member_ctx is not None and member_ctx.role in ("child", "grandchild")
@@ -3308,7 +3698,14 @@ async def resolve_ds260_form(
                 src_extra = {}
             else:
                 src_extra: dict[str, Any] = {}
-                if mapping.document in LUONG1_DOC_TYPES:
+                if mapping.key in _WORK_CURRENT_JOB_KEYS:
+                    value, source_field, rec, src_extra = resolve_work_current_job_field(
+                        records,
+                        mapping,
+                        resolutions,
+                        person_name=person_name if member_ctx else None,
+                    )
+                elif mapping.document in LUONG1_DOC_TYPES:
                     value, source_field, rec, src_extra = resolve_luong1_ds260_field(
                         records,
                         mapping.document,
@@ -3501,10 +3898,9 @@ async def resolve_ds260_form(
         sections_out, records, filename_map, person_name=person_name if member_ctx else None
     )
 
-    if not is_child_member:
-        for sec in sections_out:
-            if sec["id"] == "section_work_education":
-                enrich_work_education_from_worksheet(sec["fields"], records, filename_map)
+    for sec in sections_out:
+        if sec["id"] == "section_work_education":
+            enrich_work_education_from_worksheet(sec["fields"], records, filename_map)
 
     if is_child_member and person_name:
         clear_child_member_unscoped_sections(sections_out, records, person_name)
@@ -3541,6 +3937,7 @@ async def resolve_ds260_form(
         resolutions,
         person_name=person_name,
         member_role=member_ctx.role if member_ctx else None,
+        member_number=member_number,
     )
     manual_overrides = await load_ds260_manual_overrides(
         db, applicant_id, member_id=member_ctx.id if member_ctx else None

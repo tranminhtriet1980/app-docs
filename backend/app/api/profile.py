@@ -413,20 +413,61 @@ async def get_ds260_conflicts(
         c.document_b_id for c in conflicts if c.document_b_id
     }
     names: dict[uuid.UUID, str] = {}
+    docs_by_id: dict[uuid.UUID, Document] = {}
     if doc_ids:
         doc_result = await db.execute(select(Document).where(Document.id.in_(doc_ids)))
-        names = {doc.id: doc.original_filename or "" for doc in doc_result.scalars().all()}
+        docs_by_id = {doc.id: doc for doc in doc_result.scalars().all()}
+        names = {doc_id: doc.original_filename or "" for doc_id, doc in docs_by_id.items()}
+
+    # identity_outlier có thể phát ra NHIỀU thẻ cùng nhãn field ("Họ và tên đầy đủ") cho
+    # NHIỀU người khác nhau trong hồ sơ gia đình — chỉ ghi rõ tên người khi thật sự cần
+    # (tránh query case_members thừa cho hồ sơ đơn, đa số trường hợp thực tế).
+    member_name_by_doc: dict[uuid.UUID, str] = {}
+    if doc_ids and any(conflict_type_from_field_key(c.field_key) == "identity_outlier" for c in conflicts):
+        from app.services.family_case import (
+            DocumentLabelInput,
+            load_case_members,
+            members_for_document_labeling,
+            resolve_document_member_labels_batch,
+        )
+
+        members = await load_case_members(db, applicant.id)
+        label_members = members_for_document_labeling(applicant, members)
+        labels = resolve_document_member_labels_batch(
+            items=[
+                DocumentLabelInput(
+                    document_id=doc.id,
+                    filename=doc.original_filename or "",
+                    registry_doc_type=doc.registry_doc_type or doc.document_type,
+                    doc_record=None,
+                    uploaded_at=doc.uploaded_at,
+                )
+                for doc in docs_by_id.values()
+            ],
+            members=label_members,
+        )
+        for doc_id, (_num, member_name, _label) in labels.items():
+            if member_name:
+                member_name_by_doc[doc_id] = member_name
 
     out: list[ConflictOut] = []
     for c in conflicts:
+        conflict_type = conflict_type_from_field_key(c.field_key)
+        person_hint = None
+        if conflict_type == "identity_outlier":
+            # Ưu tiên tên người của tài liệu LỆCH (document_b) — đó mới là thứ người dùng cần
+            # xác định "cái này của ai" khi có nhiều thẻ trùng nhãn field.
+            person_hint = member_name_by_doc.get(c.document_b_id) or member_name_by_doc.get(
+                c.document_a_id
+            )
         base = ConflictOut.model_validate(c)
         out.append(
             base.model_copy(
                 update={
                     "document_a_filename": names.get(c.document_a_id) if c.document_a_id else None,
                     "document_b_filename": names.get(c.document_b_id) if c.document_b_id else None,
-                    "conflict_type": conflict_type_from_field_key(c.field_key),
-                    "field_label": conflict_label_vi(c.field_key),
+                    "conflict_type": conflict_type,
+                    "field_label": conflict_label_vi(c.field_key, person_hint=person_hint),
                 }
             )
         )

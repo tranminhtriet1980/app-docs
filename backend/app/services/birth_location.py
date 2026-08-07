@@ -31,6 +31,22 @@ def format_person_name_ascii(text: str) -> str:
     return cleaned.upper()
 
 
+def normalize_person_name(text: str) -> str:
+    """Chuẩn hoá HỌ TÊN để so khớp (khác chuỗi = khác người) — chỉ bỏ dấu + hạ chữ thường +
+    gọn khoảng trắng/dấu câu.
+
+    KHÔNG dùng normalize_location() cho việc này: hàm đó lọc bỏ từ ĐỊA DANH hành chính
+    (phường/quận/huyện/xã/tỉnh/tp...) vì được thiết kế cho địa chỉ, và vô tình cắt mất tên
+    người trùng các từ này — vd. "Nguyễn Minh Phương" từng bị normalize_location cắt còn
+    "nguyen minh" (mất "Phương" vì trùng "phường"), khiến so khớp tên trong toàn hệ thống
+    (dedupe con, khớp vợ/chồng, khớp thành viên hồ sơ theo tên OCR...) sai lệch cho bất kỳ
+    ai có tên trùng từ hành chính (Phương/Phường, Quân/Quan, Xa...). Sự cố thực tế 2026-08-04.
+    """
+    text = _strip_accents((text or "").strip().lower())
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def format_place_name_title(text: str) -> str:
     """Địa danh cho DS-260: không dấu, chữ cái đầu mỗi từ viết hoa (ĐÀ NẴNG → Da Nang)."""
     if not (text or "").strip():
