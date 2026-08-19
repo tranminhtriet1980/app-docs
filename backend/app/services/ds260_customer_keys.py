@@ -204,8 +204,6 @@ _PASSPORT_CONTEXT_KEYS: frozenset[str] = frozenset(
         "passport_no",
         "passport_id",
         "passport_document_number",
-        "passport_type",
-        "country_code",
         "passport_issue_date",
         "date_of_issue",
         "passport_expiration_date",
@@ -529,8 +527,6 @@ def build_ds260_customer_extract_keys() -> frozenset[str]:
             "edu_college_name",
             "id_card_number",
             "national_id",
-            "passport_type",
-            "country_code",
             "notes",
         }
     )

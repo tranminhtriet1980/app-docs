@@ -466,7 +466,7 @@ def test_child_identity_conflict_created_for_mismatched_date_of_birth():
     assert "child_identity" in row["field_key"]
     assert "NGUYEN_MINH_PHUONG" in row["field_key"]
     values = {row["value_a"], row["value_b"]}
-    assert values == {"2015-01-01", "2007-01-29"}
+    assert values == {"01/01/2015", "29/01/2007"}
     assert row["document_a_id"] == "bc-doc" or row["document_b_id"] == "bc-doc"
     assert row["document_a_id"] == "ws-doc" or row["document_b_id"] == "ws-doc"
 
@@ -526,3 +526,52 @@ def test_child_identity_different_children_not_compared():
     )
     rows = build_child_identity_conflict_rows([child_a, child_b], {})
     assert rows == []
+
+
+def test_child_birth_city_from_worksheet_preserved():
+    """Khách khai city nơi sinh con trên worksheet (vd. Binh Duong) -> phải được lấy và giữ nguyên."""
+    ws = _rec(
+        {
+            "children_count": "1",
+            "child_1_full_name": "NGUYEN VAN CON",
+            "child_1_date_of_birth": "2015-01-10",
+            "child_1_birth_city": "Binh Duong",
+            "child_1_birth_country": "Vietnam",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_1_date_of_birth", "value": "", "source": {}},
+        {"key": "child_1_birth_city", "value": "", "source": {}},
+        {"key": "child_1_birth_country", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(fields, [], all_records=[ws])
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["child_1_full_name"] == "NGUYEN VAN CON"
+    assert by_key["child_1_birth_city"] == "Binh Duong"
+
+
+def test_child_birth_city_fallback_from_place_of_birth():
+    """Khách khai place_of_birth cho con -> tự động lấy làm birth_city nếu chưa có birth_city."""
+    ws = _rec(
+        {
+            "children_count": "1",
+            "child_1_full_name": "NGUYEN VAN CON",
+            "child_1_date_of_birth": "2015-01-10",
+            "child_1_place_of_birth": "Da Nang, Vietnam",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fields = [
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_1_birth_city", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(fields, [], all_records=[ws])
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["child_1_birth_city"] == "Da Nang"
+

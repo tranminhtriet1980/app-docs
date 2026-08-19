@@ -7,7 +7,7 @@ hashable, list làm nó crash "unhashable type: 'list'", khiến cả document r
 lỗi (xem 01_6 DS260 - HO CONG BAO LONG.pdf).
 """
 
-from app.services.ocr_pipeline import _merge_consensus_runs
+from app.services.ocr_pipeline import _merge_consensus_runs, normalize_extracted_fields
 
 
 def _meta(value, confidence=0.9, source_page=1):
@@ -91,3 +91,25 @@ def test_all_three_runs_return_lists_still_produces_string_value():
     value = merged["fields"]["prior_jobs_history"]["value"]
     assert isinstance(value, str)
     assert value == "Job A; Job B"
+
+
+def test_normalize_extracted_fields_stringifies_dict_value_from_single_run():
+    """Báo lỗi thực tế 2026-08-13: OCR_CONSENSUS_RUNS mặc định = 1 (nhánh phổ biến nhất) không hề
+    đi qua _merge_consensus_runs (return thẳng run_results[0], xem _openai_extract trong
+    ocr_pipeline.py) — nên list/dict thô từ model lọt thẳng vào raw_data, hiển thị nguyên văn
+    JSON kiểu '[{"employer_name": ..., "end_date": ...}]' trên UI Review/Conflict thay vì câu
+    văn thường. normalize_extracted_fields() phải chạy ở MỌI nhánh (không riêng consensus) để
+    chặn việc này."""
+    result = {
+        "fields": {
+            "prior_jobs_history": _meta(
+                [{"employer_name": "Greentech Headgear Co. Ltd", "end_date": "2020-09-11"}]
+            ),
+            "primary_occupation": _meta("Staff"),
+        }
+    }
+    normalized = normalize_extracted_fields(result)
+    value = normalized["fields"]["prior_jobs_history"]["value"]
+    assert isinstance(value, str)
+    assert "Greentech" in value
+    assert normalized["fields"]["primary_occupation"]["value"] == "Staff"

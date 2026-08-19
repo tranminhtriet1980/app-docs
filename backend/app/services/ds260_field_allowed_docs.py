@@ -35,9 +35,7 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "id_card_number": (_PASS, _WS),
     "current_marital_status": (_WS, _DIV, _MARR, _PASS),
     # --- A.2 Passport (strict — không cross-fill từ giấy tờ khác) ---
-    "passport_type": (_PASS, _WS),
-    "country_code": (_PASS, _WS),
-    "passport_number": (_PASS,),
+    "passport_number": (_PASS, _WS),
     "passport_issue_date": (_PASS, _WS),
     "passport_expiration_date": (_PASS, _WS),
     "passport_place_of_issue": (_PASS, _WS),
@@ -81,17 +79,16 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "mother_state": (_WS,),
     "mother_postal_code": (_WS,),
     "mother_country": (_WS,),
-    # --- Address (3): street có thể từ Passport_new/Application form; city/state/zip/country
-    # cũng cho phép Application form fill khi worksheet còn trống (báo lỗi thực tế 2026-08-04:
-    # OCR Application form/Job Application đọc đúng current_address + address_city nhưng field
-    # DS-260 3 Address vẫn trống vì whitelist trước đó không có _APP — enrich không bao giờ quét
-    # tới application_form cho các field này). ds260_customer_form (worksheet) vẫn luôn ưu tiên
-    # cao hơn (_record_fill_priority tier 0/1 vs application_form tier 2/3) — chỉ fill khi trống.
-    "current_address": (_WS, _APP, _PASS, _ADDR),
-    "current_city": (_WS, _APP),
-    "current_state": (_WS, _APP),
-    "postal_code": (_WS, _APP),
-    "current_country": (_WS, _APP),
+    # --- Address (3): CHỈ lấy từ worksheet DS-260 khách khai — Application form KHÔNG được
+    # cross-fill khi worksheet trống (khách yêu cầu: worksheet trống thì để trống, Job App chỉ
+    # dùng để ĐỐI CHIẾU conflict khi cả 2 bên đều có giá trị, xem WORKSHEET_OFFICIAL_DOC_OVERRIDES
+    # trong ds260_conflicts.py — không dùng để tự động điền). street vẫn cho phép Passport_new/
+    # address_document (không phải Job App) làm nguồn dự phòng.
+    "current_address": (_WS, _PASS, _ADDR),
+    "current_city": (_WS,),
+    "current_state": (_WS,),
+    "postal_code": (_WS,),
+    "current_country": (_WS,),
     "address_from_date": (_WS,),
     "other_addresses_used": (_WS,),
     "other_addresses_history": (_WS,),

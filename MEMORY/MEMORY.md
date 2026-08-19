@@ -1,0 +1,1 @@
+- [DS-260 worksheet is primary source](feedback_ds260_source_priority.md) — DS-260 khách khai luôn fill trước; giấy tờ khác chỉ để đối chiếu

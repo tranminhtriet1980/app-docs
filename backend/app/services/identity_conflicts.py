@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.entities import Applicant, Document, DocumentStatus
-from app.services.ds260_conflicts import DS260_CONFLICT_PREFIX, IDENTITY_OUTLIER_SEGMENT
+from app.services.ds260_conflicts import DS260_CONFLICT_PREFIX, IDENTITY_OUTLIER_SEGMENT, _display_conflict_date
 from app.services.ds260_dates import parse_full_date
 from app.services.field_mapping import FIELD_MAP, SOURCE_PRIORITY
 from app.services.merge import _field_norm
@@ -172,9 +172,9 @@ def build_identity_outlier_conflict_rows_from_documents(
                 rows.append(
                     {
                         "field_key": field_key,
-                        "value_a": majority_value,
+                        "value_a": _display_conflict_date(canonical_key, majority_value),
                         "document_a_id": majority_doc.id,
-                        "value_b": raw_value,
+                        "value_b": _display_conflict_date(canonical_key, raw_value),
                         "document_b_id": doc.id,
                         "majority_count": len(majority_items),
                         "total_count": total,

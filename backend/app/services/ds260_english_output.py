@@ -13,6 +13,7 @@ from app.services.birth_location import (
     format_person_name_ascii,
     format_place_name_title,
 )
+from app.services.ds260_normalize import normalize_gender
 
 _YES_MARKERS = frozenset(
     {
@@ -52,16 +53,6 @@ _NO_MARKERS = frozenset(
     }
 )
 
-_GENDER_MAP = {
-    "m": "Male",
-    "male": "Male",
-    "nam": "Male",
-    "f": "Female",
-    "female": "Female",
-    "nu": "Female",
-    "nữ": "Female",
-}
-
 _MARITAL_MAP = {
     "single": "Single",
     "doc than": "Single",
@@ -100,7 +91,6 @@ _SKIP_KEYS = frozenset(
     {
         "passport_number",
         "id_card_number",
-        "country_code",
         "postal_code",
         "father_postal_code",
         "mother_postal_code",
@@ -117,6 +107,10 @@ _SKIP_KEYS = frozenset(
         "father_death_year",
         "mother_death_year",
         "children_count",
+        # Lịch sử việc làm — khách khai tiếng Việt/tiếng Anh GIỮ NGUYÊN như gốc, không bỏ dấu
+        # (khách yêu cầu 2026-08-13). Đã format lại (3 dòng/entry, loại việc hiện tại trùng lặp)
+        # ở resolve_work_prior_jobs_field() (ds260_mapping.py) — không xử lý gì thêm ở đây.
+        "work_prior_jobs_history",
     }
 )
 
@@ -175,8 +169,11 @@ def format_yes_no(value: str) -> str:
 
 
 def format_gender(value: str) -> str:
-    token = _norm_token(value)
-    return _GENDER_MAP.get(token, format_place_name_title(value))
+    """DS-260 Sex: Male/Female/Other from nam/nữ/male/female/khác/other, incl. compound
+    strings like "NAM / M". Unrecognized text is returned unchanged rather than forced
+    to "Other" (bỏ fallback "Other" — khách yêu cầu: giữ nguyên raw value để không xoá
+    mất dữ liệu gốc khi model không nhận diện được)."""
+    return normalize_gender(value)
 
 
 def format_marital_status(value: str) -> str:
@@ -224,10 +221,13 @@ def format_ds260_field_value(key: str, value: str) -> str:
         return format_native_name(v)
 
     if key in {"nationality", "judicial_nationality"}:
-        token = _norm_token(v)
-        if token in {"vietnam", "viet nam", "vietnamese"}:
-            return "Vietnamese"
-        return format_place_name_title(v)
+        # Giấy tờ đôi khi ghi song ngữ "Viet Nam / Vietnamese" — CHỈ giữ 1 giá trị, KHÔNG
+        # ghép cả 2 ngôn ngữ vào field (khách yêu cầu 2026-08-12). Thử khớp từng phần tách bởi
+        # '/' trước khi thử cả chuỗi, để bắt được các trường hợp ghép song ngữ này.
+        for part in re.split(r"\s*/\s*", v):
+            if _norm_token(part) in {"vietnam", "viet nam", "vietnamese"}:
+                return "Vietnamese"
+        return format_place_name_title(v.split("/")[0].strip())
     if _GENDER_KEY_RE.search(key):
         return format_gender(v)
     if _MARITAL_KEY_RE.search(key):

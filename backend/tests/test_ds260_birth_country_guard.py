@@ -98,13 +98,13 @@ def test_boilerplate_defaults_present_in_schema():
     assert mappings["has_vaccination_docs"].default == "Yes"
 
 
-def test_date_format_dd_mon_yyyy():
+def test_date_format_dd_mm_yyyy():
     from app.services.ds260_dates import format_ds260_display_date
-    assert format_ds260_display_date("1983-03-14") == "14 Mar 1983"
-    assert format_ds260_display_date("14/03/1983") == "14 Mar 1983"
-    assert format_ds260_display_date("2017-08-01") == "01 Aug 2017"
-    # partial giữ nguyên tháng viết tắt / năm
-    assert format_ds260_display_date("2023-09") == "Sep 2023"
+    assert format_ds260_display_date("1983-03-14") == "14/03/1983"
+    assert format_ds260_display_date("14/03/1983") == "14/03/1983"
+    assert format_ds260_display_date("2017-08-01") == "01/08/2017"
+    # partial → mm/yyyy / năm
+    assert format_ds260_display_date("2023-09") == "09/2023"
     assert format_ds260_display_date("1993") == "1993"
 
 

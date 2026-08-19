@@ -32,6 +32,14 @@ def is_date_range_field_key(key: str) -> bool:
     return (key or "").lower().endswith("_period")
 
 
+def is_birth_date_field_key(key: str) -> bool:
+    """Field ngày SINH của bất kỳ ai (chủ hồ sơ/cha/mẹ/vợ chồng/con/lý lịch tư pháp...) — luôn
+    kết thúc bằng 'date_of_birth' hoặc '_dob' trong toàn bộ ds260_mapping.json. Khách yêu cầu
+    2026-08-12: ngày sinh CHỈ nhận giá trị đầy đủ ngày/tháng/năm, không dùng ngày thiếu."""
+    k = (key or "").lower()
+    return k.endswith("date_of_birth") or k.endswith("_dob")
+
+
 def parse_full_date(val: str) -> date | None:
     """Return date only when day + month + year are present; else None."""
     val = (val or "").strip()
@@ -77,14 +85,6 @@ def parse_full_date(val: str) -> date | None:
     return None
 
 
-_MONTHS_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-
-def _month_name(month: int) -> str:
-    """Tháng viết tắt tiếng Anh (vd. Mar) — thống nhất định dạng ngày DS-260 'DD Mon YYYY' (14 Mar 1983)."""
-    return _MONTHS_ABBR[month] if 1 <= month <= 12 else ""
-
-
 def format_partial_ds260_date(val: str) -> str | None:
     """
     Month/year or year-only → display string.
@@ -98,24 +98,24 @@ def format_partial_ds260_date(val: str) -> str | None:
     if m:
         y, mo = int(m.group(1)), int(m.group(2))
         if 1 <= mo <= 12:
-            return f"{_month_name(mo)} {y}"
+            return f"{mo:02d}/{y}"
 
     m = re.match(r"^(\d{1,2})[/.-](\d{4})$", val)
     if m:
         mo, y = int(m.group(1)), int(m.group(2))
         if 1 <= mo <= 12:
-            return f"{_month_name(mo)} {y}"
+            return f"{mo:02d}/{y}"
 
     m = re.match(r"^([A-Za-z]+)\s+(\d{4})$", val)
     if m:
         month_raw, year = m.group(1), m.group(2)
         try:
             mo = datetime.strptime(month_raw[:3], "%b").month
-            return f"{_month_name(mo)} {year}"
+            return f"{mo:02d}/{year}"
         except ValueError:
             try:
                 mo = datetime.strptime(month_raw, "%B").month
-                return f"{_month_name(mo)} {year}"
+                return f"{mo:02d}/{year}"
             except ValueError:
                 return f"{month_raw.title()} {year}"
 
@@ -166,11 +166,52 @@ def is_partial_date_value(val: str) -> bool:
     return format_partial_ds260_date(val) is not None
 
 
+def parse_date_lenient(val: str) -> tuple[date, str] | None:
+    """Parse a date at whatever granularity is actually present, so callers can compare
+    partial dates (mm/yyyy, yyyy) without treating them as unparseable. Returns
+    (date, granularity) with granularity one of "day"/"month"/"year"; partial values
+    resolve to the 1st of the month/year so comparisons stay orderable. None if the
+    value can't be parsed at all."""
+    val = (val or "").strip()
+    if not val:
+        return None
+    full = parse_full_date(val)
+    if full:
+        return full, "day"
+    partial = format_partial_ds260_date(val)
+    if partial is None:
+        return None
+    m = re.match(r"^(\d{2})/(\d{4})$", partial)
+    if m:
+        mo, y = int(m.group(1)), int(m.group(2))
+        return date(y, mo, 1), "month"
+    m = re.match(r"^(\d{4})$", partial)
+    if m:
+        return date(int(m.group(1)), 1, 1), "year"
+    return None
+
+
+def format_ds260_export_date(val: str) -> str:
+    """Ngày xuất Word theo mốc trọn, tháng viết tắt tiếng Anh (vd. '15 Aug 1990'); ngày chỉ có
+    tháng/năm → 'Aug 1990'; chỉ có năm → '1990'. Parse được cả input đã qua display format
+    (dd/mm/yyyy, mm/yyyy). Không parse được → giữ nguyên chuỗi gốc."""
+    parsed = parse_date_lenient(val)
+    if not parsed:
+        return val or ""
+    d, granularity = parsed
+    if granularity == "day":
+        return f"{d.day} {d.strftime('%b')} {d.year}"
+    if granularity == "month":
+        return f"{d.strftime('%b')} {d.year}"
+    return f"{d.year}"
+
+
 def format_ds260_display_date(val: str) -> str:
-    """Full date → 01 May 2026; partial → May 2023 / 2023; else empty."""
+    """Ngày đầy đủ (có ngày+tháng+năm, vd. ngày sinh) → dd/mm/yyyy; ngày chỉ có tháng/năm
+    (vd. ngày nhập cư, mốc địa chỉ) → mm/yyyy; chỉ có năm → yyyy; else empty."""
     d = parse_full_date(val)
     if d:
-        return f"{d.day:02d} {_month_name(d.month)} {d.year}"
+        return f"{d.day:02d}/{d.month:02d}/{d.year}"
     partial = format_partial_ds260_date(val)
     return partial or ""
 
@@ -191,9 +232,9 @@ def _format_range_endpoint(token: str) -> str:
 
 
 def format_ds260_display_date_range(val: str) -> str:
-    """Chuẩn hoá khoảng thời gian → 'DD Mon YYYY - DD Mon YYYY' (mỗi đầu theo chuẩn ngày DS-260).
+    """Chuẩn hoá khoảng thời gian → 'dd/mm/yyyy - dd/mm/yyyy' (mỗi đầu theo format_ds260_display_date).
 
-    'Aug 15, 2004 - Jun 01, 2008' → '15 Aug 2004 - 01 Jun 2008'; giữ 'Present' cho đầu mở
+    'Aug 15, 2004 - Jun 01, 2008' → '15/08/2004 - 01/06/2008'; giữ 'Present' cho đầu mở
     (Now/nay). Không tách được (không phải khoảng) → thử format như 1 ngày, không được thì giữ nguyên.
     """
     v = (val or "").strip()
@@ -207,9 +248,13 @@ def format_ds260_display_date_range(val: str) -> str:
 
 
 def format_sections_date_display(sections_out: list) -> None:
-    """Chuẩn hóa mọi trường ngày trên form DS-260 (Review + export) về 'DD Mon YYYY'.
+    """Chuẩn hóa mọi trường ngày trên form DS-260 (Review + export): ngày đầy đủ → dd/mm/yyyy,
+    ngày chỉ có tháng/năm (nhập cư, mốc địa chỉ...) → mm/yyyy.
 
-    Gồm cả field KHOẢNG thời gian ('_period': thời gian học) → 'DD Mon YYYY - DD Mon YYYY'.
+    Gồm cả field KHOẢNG thời gian ('_period': thời gian học) → 'dd/mm/yyyy - dd/mm/yyyy'.
+    Riêng field NGÀY SINH (is_birth_date_field_key): CHỈ nhận giá trị có đầy đủ ngày/tháng/năm —
+    ngày sinh thiếu (chỉ tháng/năm hoặc chỉ năm) bị coi là chưa đủ, để trống + cảnh báo thay vì
+    hiển thị ngày thiếu (khách yêu cầu 2026-08-12).
     """
     for sec in sections_out:
         for field in sec.get("fields", []):
@@ -219,6 +264,18 @@ def format_sections_date_display(sections_out: list) -> None:
                 continue
             if is_date_range_field_key(key):
                 field["value"] = format_ds260_display_date_range(val)
+            elif is_birth_date_field_key(key):
+                d = parse_full_date(val)
+                if d:
+                    field["value"] = f"{d.day:02d}/{d.month:02d}/{d.year}"
+                    if is_ambiguous_numeric_date(val):
+                        field["date_note"] = {"code": "ambiguous_date", "raw": val}
+                else:
+                    field["value"] = ""
+                    if format_partial_ds260_date(val) is not None:
+                        field["date_note"] = {"code": "partial_birth_date_rejected", "raw": val}
+                    else:
+                        field["date_note"] = {"code": "unparsed_date", "raw": val}
             elif is_date_field_key(key):
                 formatted = format_ds260_display_date(val)
                 if formatted:

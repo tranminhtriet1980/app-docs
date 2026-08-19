@@ -26,8 +26,14 @@ from app.services.llm_usage import UsageContext, chat_completion
 logger = logging.getLogger(__name__)
 
 QUOTA_WARNING = (
-    "OpenAI hết quota/credits (lỗi 429). Đã dùng chế độ demo từ tên file — "
+    "OpenAI hết quota/credits (lỗi 429 insufficient_quota). Đã dùng chế độ demo từ tên file — "
     "nạp tiền tại https://platform.openai.com/account/billing rồi upload lại."
+)
+
+RATE_LIMIT_WARNING = (
+    "OpenAI đang giới hạn tốc độ tạm thời (429 rate limit, KHÔNG PHẢI hết quota) — đã thử lại "
+    "nhiều lần vẫn chưa qua. Đã dùng chế độ demo từ tên file cho lần này — xử lý lại (reprocess) "
+    "sau ít phút thường sẽ qua."
 )
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
@@ -94,17 +100,80 @@ QUY TẮC ĐỊNH DẠNG:
 - UPPERCASE cho tên như in trên giấy
 - null chỉ khi thật sự không đọc được
 - image_quality.readable = false khi ảnh mờ/loá/thiếu sáng/bị cắt khiến BẤT KỲ phần nội dung nào không đọc được rõ ràng.
+- GIỮ NGUYÊN NGÔN NGỮ GỐC: chép lại đúng như văn bản gốc trên giấy tờ, tiếng Việt giữ tiếng Việt,
+  tiếng Anh giữ tiếng Anh. KHÔNG tự dịch/chuyển đổi bất kỳ giá trị field nào từ tiếng Việt sang
+  tiếng Anh hay ngược lại.
+- BỎ QUA CHỮ BỊ GẠCH NGANG: nếu một đoạn chữ/số bị gạch ngang, gạch chéo hoặc bị xoá đè (phần đã sửa/huỷ)
+  thì KHÔNG lấy nội dung đó làm value — chỉ lấy phần chữ KHÔNG bị gạch (bản sửa cuối cùng còn hiệu lực).
+  Nếu toàn bộ giá trị bị gạch ngang mà không có bản thay thế → để null, không dùng nội dung đã gạch.
 - CHỈ dùng các key sau (không thêm key ngoài schema):
 {expected_keys}"""
 
 
+def _openai_error_code(exc: Exception) -> str:
+    """Mã lỗi thật trong body JSON OpenAI trả về (vd. "insufficient_quota" vs
+    "rate_limit_exceeded") — status_code 429 dùng chung cho CẢ HAI trường hợp, phải đọc code mới
+    phân biệt được hết quota (billing, cần nạp tiền) với rate limit tạm thời (chờ rồi thử lại là
+    qua, KHÔNG liên quan billing)."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            return str(error.get("code") or error.get("type") or "").lower()
+    return ""
+
+
 def _is_quota_error(exc: Exception) -> bool:
-    if isinstance(exc, RateLimitError):
+    """Hết quota/credits THẬT (billing) — KHÔNG bao gồm rate limit tạm thời (xem
+    _is_rate_limit_error). Trước đây mọi RateLimitError/429 đều bị coi là hết quota, khiến các
+    lần bị giới hạn tốc độ bình thường (vd. gửi nhiều ảnh liên tiếp, chưa hết quota thật) cũng
+    hiện nhầm cảnh báo "hết quota, nạp tiền" — reprocess ngay sau đó vẫn xử lý được bình thường
+    vì quota chưa hề cạn (báo lỗi thực tế 2026-08-17)."""
+    if isinstance(exc, APIStatusError) and exc.status_code == 402:
         return True
-    if isinstance(exc, APIStatusError) and exc.status_code in (429, 402):
-        return True
+    code = _openai_error_code(exc)
+    if code:
+        return code == "insufficient_quota"
     msg = str(exc).lower()
     return "insufficient_quota" in msg or "exceeded your current quota" in msg
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """429 do giới hạn tốc độ (requests/tokens per minute) — tạm thời, chờ/thử lại là qua,
+    KHÔNG phải hết quota/billing."""
+    if _is_quota_error(exc):
+        return False
+    if isinstance(exc, RateLimitError):
+        return True
+    return isinstance(exc, APIStatusError) and exc.status_code == 429
+
+
+_RATE_LIMIT_RETRY_DELAYS_SEC = (5, 15, 30)
+
+
+async def _call_with_rate_limit_retry(fn: Callable):
+    """Gọi fn() (async, không tham số), tự chờ+thử lại thêm khi gặp rate limit TẠM THỜI (không
+    phải hết quota) — SDK (max_retries=5, xem llm_client.get_ocr_client) đã tự retry theo header
+    retry-after, nhưng dưới tải burst (nhiều ảnh/trang xử lý liên tiếp) 5 lần đó vẫn có thể chưa
+    đủ; thêm vài lần chờ dài hơn ở tầng app trước khi rơi về demo mode giúp giảm hẳn tình trạng
+    báo nhầm 429 dù quota chưa cạn (khách phải tự bấm reprocess mới qua)."""
+    try:
+        return await fn()
+    except Exception as exc:
+        if not _is_rate_limit_error(exc):
+            raise
+        last_exc: Exception = exc
+
+    for attempt, delay in enumerate(_RATE_LIMIT_RETRY_DELAYS_SEC, start=1):
+        logger.warning("OpenAI rate limit (429) — chờ %ss rồi thử lại (lần %s)", delay, attempt)
+        await asyncio.sleep(delay)
+        try:
+            return await fn()
+        except Exception as exc:
+            if not _is_rate_limit_error(exc):
+                raise
+            last_exc = exc
+    raise last_exc
 
 
 def _encode_image(path: Path) -> tuple[str, str]:
@@ -359,6 +428,42 @@ def _merge_batch_results(results: list[dict]) -> dict:
     return merged
 
 
+def _norm_extracted_field_value(value: object) -> str:
+    """Luôn trả str — toàn bộ code đọc field sau này (raw_data/form_data) giả định value là
+    string (.strip()). Model đôi khi trả list/dict cho field (vd. nhiều công việc cũ trong
+    prior_jobs_history) thay vì string phẳng như prompt yêu cầu — báo lỗi thực tế 2026-08-06:
+    "unhashable type: 'list'" khi Counter() nhận value kiểu list; và 2026-08-13: JSON thô kiểu
+    '[{"employer_name": ..., "end_date": ...}]' lọt ra UI Review/Conflict thay vì câu văn
+    thường vì chỉ được chuẩn hoá ở nhánh gộp nhiều lần OCR (consensus), không chạy ở nhánh phổ
+    biến hơn (1 lần OCR, xem normalize_extracted_fields())."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        return "; ".join(_norm_extracted_field_value(v) for v in value if v not in (None, ""))
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def normalize_extracted_fields(result: dict) -> dict:
+    """Ép value mọi field OCR trả về thành string — chạy ở MỌI nhánh (1 lần OCR hay nhiều lần
+    consensus) trước khi merged["fields"] được dùng ở bất kỳ đâu khác, tránh list/dict thô lọt
+    vào raw_data/form_data (xem docstring _norm_extracted_field_value)."""
+    fields = result.get("fields")
+    if not isinstance(fields, dict):
+        return result
+    normalized: dict = {}
+    for key, meta in fields.items():
+        if isinstance(meta, dict):
+            normalized[key] = {**meta, "value": _norm_extracted_field_value(meta.get("value"))}
+        else:
+            normalized[key] = meta
+    result["fields"] = normalized
+    return result
+
+
 def _merge_consensus_runs(results: list[dict]) -> dict:
     """Gộp N lần OCR ĐỘC LẬP trên CÙNG toàn bộ tài liệu (khác _merge_batch_results ở trên — hàm
     đó gộp các LÔ nhìn thấy PHẦN KHÁC nhau của tài liệu). Ở đây mọi run nhìn thấy y hệt nhau, nên
@@ -372,22 +477,7 @@ def _merge_consensus_runs(results: list[dict]) -> dict:
     if len(results) == 1:
         return results[0]
 
-    def _norm(value: object) -> str:
-        """Luôn trả str — Counter(values) bên dưới cần hashable, và toàn bộ code đọc field
-        sau này (raw_data/form_data) giả định value là string (.strip()). Model đôi khi trả
-        list/dict cho field (vd. nhiều công việc cũ trong prior_jobs_history) thay vì string
-        phẳng như prompt yêu cầu — báo lỗi thực tế 2026-08-06: "unhashable type: 'list'" khi
-        Counter() nhận value kiểu list."""
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value.strip()
-        if isinstance(value, (list, tuple)):
-            return "; ".join(_norm(v) for v in value if v not in (None, ""))
-        if isinstance(value, dict):
-            return json.dumps(value, ensure_ascii=False, sort_keys=True)
-        return str(value)
-
+    _norm = _norm_extracted_field_value
     merged: dict = dict(results[0])
 
     all_warnings: list[str] = []
@@ -677,6 +767,27 @@ def _mock_extraction(doc_type: str, filename: str) -> dict:
             val = f"[demo — {doc_type}]"
         fields[key] = {"value": val, "confidence": 0.5, "source_page": "demo"}
     return {"document_type": doc_type, "fields": fields}
+
+
+_FREE_TEXT_HISTORY_KEYS = frozenset(
+    {"other_addresses_history", "other_phones_history", "other_emails_history", "other_social_history"}
+)
+
+
+def _normalize_free_text_history_fields(extraction: dict) -> dict:
+    """Áp normalize_present_marker (birth_location.py) cho các field lịch sử dạng free-text
+    (địa chỉ/SĐT/email/MXH trước đây) — chạy cho MỌI doc_type, không chỉ birth_certificate/
+    ds260_customer_form."""
+    from app.services.birth_location import normalize_present_marker
+
+    fields = extraction.get("fields")
+    if not isinstance(fields, dict):
+        return extraction
+    for key in _FREE_TEXT_HISTORY_KEYS:
+        meta = fields.get(key)
+        if isinstance(meta, dict) and isinstance(meta.get("value"), str):
+            meta["value"] = normalize_present_marker(meta["value"])
+    return extraction
 
 
 _BIRTH_CERT_KEY_REMAP: dict[str, str] = {
@@ -990,9 +1101,12 @@ The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietname
 Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
 address → current_address (Street), address_city (City), address_state (State/Province),
 address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
-block on its own line in other_addresses_history as "Street, City, State, Country (MM/YYYY–MM/YYYY)"
-and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
-when choosing the current block.
+block on its own line in other_addresses_history as "MMM YYYY–MMM YYYY: Street, City, State, Country"
+(date range FIRST, then a colon, then the address — e.g. "Sep 1996–Present: Dong 21, Su Ngu Commune,
+Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
+when choosing the current block. other_addresses_history is an ENGLISH-ONLY field: write the open
+end of a still-ongoing period as "Present" — NEVER "Hiện tại"/"Hien Tai"/"đến nay"/"Nay" (street/
+ward/district names stay as printed, only the date marker must be English).
 
 CONTACT (section 4): primary_phone_number, secondary_phone_number, work_phone_number,
 other_phones_used (Yes/No), other_phones_history,
@@ -1007,7 +1121,7 @@ other_addresses_history, they are NOT child/birth data:
   - (male) military service → the address(es) while serving;
   - (female) gave birth in another locality → that locality's address.
 Capture each such period as its own line in other_addresses_history
-("Street, City, State, Country (MM/YYYY–MM/YYYY)") and set other_addresses_since_16 = Yes.
+("MMM YYYY–MMM YYYY: Street, City, State, Country") and set other_addresses_since_16 = Yes.
 
 Use Yes/No for yes-no questions. Dates as YYYY-MM-DD or dd/mm/yyyy as printed.
 """
@@ -1034,7 +1148,13 @@ Use ISO dates YYYY-MM-DD when possible. Names as printed on passport (uppercase 
 JUDICIAL_EXTRACT_HINT = """
 For JUDICIAL CERTIFICATE (lý lịch tư pháp), extract:
 full_name, date_of_birth, nationality, father_name, mother_name,
-document_number, issue_date, document_type.
+document_number, issue_date, document_type,
+criminal_record_status.
+
+criminal_record_status = câu/đoạn ghi TÌNH TRẠNG ÁN TÍCH đúng nguyên văn như in trên phiếu,
+vd. "Không có án tích" / "Có án tích" kèm tội danh, bản án, ngày xử nếu có liệt kê. Đây là
+mục QUAN TRỌNG NHẤT của phiếu lý lịch tư pháp — luôn cố gắng trích xuất, không bỏ trống nếu
+có in trên phiếu.
 """
 
 BIRTH_CERT_EXTRACT_HINT = """
@@ -1161,7 +1281,7 @@ PERSONAL (section 1): applicant_name, applicant_name_native, other_name_used, ot
 gender/sex, current_marital_status, date_of_birth, birth_city, birth_state, birth_country,
 nationality, id_card_number.
 
-PASSPORT (section 2): passport_number, passport_type, country_code, passport_issue_date,
+PASSPORT (section 2): passport_number, passport_issue_date,
 passport_expiration_date, passport_place_of_issue, passport_issuing_country,
 other_nationality_used, other_nationality_history.
 
@@ -1175,9 +1295,12 @@ The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietname
 Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
 address → current_address (Street), address_city (City), address_state (State/Province),
 address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
-block on its own line in other_addresses_history as "Street, City, State, Country (MM/YYYY–MM/YYYY)"
-and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
-when choosing the current block.
+block on its own line in other_addresses_history as "MMM YYYY–MMM YYYY: Street, City, State, Country"
+(date range FIRST, then a colon, then the address — e.g. "Sep 1996–Present: Dong 21, Su Ngu Commune,
+Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
+when choosing the current block. other_addresses_history is an ENGLISH-ONLY field: write the open
+end of a still-ongoing period as "Present" — NEVER "Hiện tại"/"Hien Tai"/"đến nay"/"Nay" (street/
+ward/district names stay as printed, only the date marker must be English).
 RESIDENCE-HISTORY rules (the form's "Lưu ý") add ADDRESS entries to other_addresses_history — they
 are NOT child/birth data: time studying/working in another locality → that real address; (male)
 military service → the address while serving; (female) gave birth in another locality → that
@@ -1207,8 +1330,10 @@ PREVIOUS SPOUSE / DIVORCE: previous_spouses_used, previous_spouse_full_name,
 previous_spouse_date_of_birth, previous_divorce_date, previous_marriage_date.
 
 CHILDREN: children_used (Yes/No), children_count,
-child_1_full_name, child_1_date_of_birth, child_1_birth_city, child_1_birth_state, child_1_birth_country,
-child_2_full_name, child_2_date_of_birth, child_3_full_name, child_3_date_of_birth.
+child_1_full_name, child_1_date_of_birth, child_1_place_of_birth, child_1_birth_city, child_1_birth_state, child_1_birth_country, child_1_lives_with, child_1_current_address, child_1_immigrating, child_1_immigrating_future,
+child_2_full_name, child_2_date_of_birth, child_2_place_of_birth, child_2_birth_city, child_2_birth_state, child_2_birth_country, child_2_lives_with, child_2_current_address, child_2_immigrating, child_2_immigrating_future,
+child_3_full_name, child_3_date_of_birth, child_3_place_of_birth, child_3_birth_city, child_3_birth_state, child_3_birth_country, child_3_lives_with, child_3_current_address, child_3_immigrating, child_3_immigrating_future,
+child_4_full_name, child_4_date_of_birth, child_4_place_of_birth, child_4_birth_city, child_4_birth_state, child_4_birth_country, child_4_lives_with, child_4_current_address, child_4_immigrating, child_4_immigrating_future.
 
 WORK / EDUCATION (section D) — Vietnamese header "CÔNG VIỆC / HỌC VẤN", "Work /Education /Training":
 primary_occupation (NGHỀ NGHIỆP CHÍNH, e.g. Owner/Manager/Student),
@@ -1236,16 +1361,24 @@ QUY TẮC BẮT BUỘC (chống bịa/nhầm dữ liệu):
 - QUỐC GIA NƠI SINH: người mang hộ chiếu Việt Nam sinh tại một địa danh Việt Nam (tỉnh/thành VN) thì
   birth_country / *_birth_country = "Vietnam". KHÔNG suy ra hay bịa nước khác (Canada, USA…) khi không có
   bằng chứng rõ ràng trên giấy tờ.
-- NGHỀ vs CÔNG TY: primary_occupation = CHỨC DANH nghề, DỊCH sang tiếng Anh (vd. "Nhân viên bán hàng" →
-  "Sales Staff", "Thợ may" → "Tailor"); present_employer = TÊN công ty/cửa hàng/trường (vd. "Dung Grocery
-  Store"). KHÔNG đặt chức danh vào ô công ty và ngược lại; không để trống occupation nếu đọc được chức danh.
+- NGHỀ vs CÔNG TY: primary_occupation = CHỨC DANH nghề, GIỮ NGUYÊN đúng như văn bản gốc (tiếng Việt hay
+  tiếng Anh đều ghi lại y như đọc được, KHÔNG tự dịch sang tiếng Anh); present_employer = TÊN công ty/cửa
+  hàng/trường (vd. "Dung Grocery Store"). KHÔNG đặt chức danh vào ô công ty và ngược lại; không để trống
+  occupation nếu đọc được chức danh.
+- KHÔNG TỰ DỊCH: với MỌI field, giữ nguyên dữ liệu gốc đúng như viết/in trên giấy tờ (tiếng Việt giữ
+  tiếng Việt, tiếng Anh giữ tiếng Anh). KHÔNG chuyển đổi/dịch bất kỳ giá trị nào từ tiếng Việt sang
+  tiếng Anh hay ngược lại — việc chuẩn hoá ngôn ngữ (nếu cần) sẽ xử lý ở bước khác, không phải lúc OCR.
+- BỎ QUA NỘI DUNG BỊ GẠCH NGANG: nếu một đoạn chữ/số bị gạch ngang, gạch chéo, hoặc bị xoá đè (đánh dấu
+  là phần đã sửa/huỷ bỏ) thì KHÔNG đọc nội dung đó vào field — chỉ lấy phần chữ KHÔNG bị gạch ngang gần
+  nhất (bản sửa cuối cùng, còn hiệu lực). Nếu toàn bộ giá trị của một field bị gạch ngang mà không có
+  bản thay thế nào khác trên form, để field đó là null/rỗng, không dùng nội dung đã gạch.
 
 C — LỊCH SỬ ĐẾN MỸ: been_in_us (Yes/No), issued_us_visa (Yes/No), refused_us_visa (Yes/No),
 us_travel_history (mỗi đợt: ngày đến – ngày đi – loại visa), us_visa_history.
 
 E.2 — THÔNG TIN KHÁC: other_languages_used (Yes/No) và other_languages_list — LIỆT KÊ đúng
-ngôn ngữ khách ghi (vd. "Tiếng Anh" → "English"). ĐỪNG để trống rồi mặc định "No" khi khách
-CÓ ghi ngôn ngữ. traveled_countries_5yr_used (Yes/No) + traveled_countries_history.
+ngôn ngữ khách ghi, GIỮ NGUYÊN như viết trên giấy tờ (không tự dịch). ĐỪNG để trống rồi mặc định
+"No" khi khách CÓ ghi ngôn ngữ. traveled_countries_5yr_used (Yes/No) + traveled_countries_history.
 
 F — AN NINH & LÝ LỊCH: đọc HẾT các câu Yes/No ở những trang cuối (bệnh lây nhiễm, giấy chích
 ngừa, ma túy, tiền án, mại dâm, rửa tiền, buôn người, khủng bố, trục xuất…). Mỗi câu trả lời
@@ -1308,6 +1441,19 @@ primary_phone_number (Phone/Tel/Contact number), email_address (Email).
 WORK: primary_occupation, occupation_other_specify, present_employer, employer_name,
 employer_address, employer_city, employer_state, employer_postal_code, employer_country,
 job_title, employment_start_date, prior_jobs_history.
+occupation_other_specify ← "Type of Business" field on the form (what the company/employer
+does, e.g. "Garment manufacturing", "Retail"). Do NOT use "Job Duties"/"Job Description" (what
+the APPLICANT personally does day-to-day) for this field — those are a different concept and
+must be left out if there is no separate "Type of Business" field.
+prior_jobs_history value MUST be a single flat STRING — a plain sentence/narrative, e.g. "From
+01 January 2009 to 31 December 2023 / Occupation: Manager / Company name: ... / Company
+address: ... / Supervisor name: ... / Supervisor phone number: ...". NEVER return a JSON
+object/array (like [{"employer_name": ..., "end_date": ...}]) for this field even if the form's
+layout looks like a structured table — always flatten it into one narrative string.
+
+DATE SIGNED: date_signed — the date next to the applicant's/employer's signature at the BOTTOM
+of the form (often printed "Date:" or "Ngày ký" beside a signature line). This is NOT
+employment_start_date — do not confuse the two.
 
 EDUCATION: middle_school_name (Cấp 2 / Trung học cơ sở / THCS),
 middle_school_address, middle_school_period,
@@ -1468,6 +1614,7 @@ async def _openai_extract(
     consensus_runs = max(1, settings.ocr_consensus_runs)
     run_results = [await _run_batches_once() for _ in range(consensus_runs)]
     merged = _merge_consensus_runs(run_results) if consensus_runs > 1 else run_results[0]
+    merged = normalize_extracted_fields(merged)
 
     if is_ds260_ws:
         actual_pages = _pdf_page_count(file_path)
@@ -1488,10 +1635,13 @@ async def classify_document(
     if not is_openai_configured():
         return _mock_classification(filename), None
     try:
-        return await _openai_classify(file_path, filename, db, ctx), None
+        result = await _call_with_rate_limit_retry(lambda: _openai_classify(file_path, filename, db, ctx))
+        return result, None
     except Exception as exc:
         if _is_quota_error(exc):
             return _mock_classification(filename), QUOTA_WARNING
+        if _is_rate_limit_error(exc):
+            return _mock_classification(filename), RATE_LIMIT_WARNING
         raise
 
 
@@ -1591,8 +1741,11 @@ async def extract_document(
         )
         return filtered, None, debug
     try:
-        extracted = await _openai_extract(file_path, doc_type, filename, db, ctx)
+        extracted = await _call_with_rate_limit_retry(
+            lambda: _openai_extract(file_path, doc_type, filename, db, ctx)
+        )
         enriched = _fallback_enrich_extraction(doc_type, filename, extracted)
+        enriched = _normalize_free_text_history_fields(enriched)
         if doc_type == "birth_certificate":
             enriched = _coerce_birth_certificate_extraction(enriched)
         if doc_type == "ds260_customer_form":
@@ -1612,7 +1765,7 @@ async def extract_document(
         )
         return filtered, warning, debug
     except Exception as exc:
-        if _is_quota_error(exc):
+        if _is_quota_error(exc) or _is_rate_limit_error(exc):
             raw = _fallback_enrich_extraction(doc_type, filename, _mock_extraction(doc_type, filename))
             filtered = _filter_extraction_to_schema(doc_type, raw)
             debug = (
@@ -1620,7 +1773,8 @@ async def extract_document(
                 if capture_debug
                 else None
             )
-            return filtered, QUOTA_WARNING, debug
+            warning = QUOTA_WARNING if _is_quota_error(exc) else RATE_LIMIT_WARNING
+            return filtered, warning, debug
         raise
 
 
@@ -1819,7 +1973,7 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
             document.processed_at = datetime.now(timezone.utc)
             document.error_message = warnings[0] if warnings else None
         except Exception as exc:
-            if _is_quota_error(exc):
+            if _is_quota_error(exc) or _is_rate_limit_error(exc):
                 classification = _mock_classification(document.original_filename)
                 ai_type = classification.get("document_type", "other")
                 doc_type, is_exception = _resolve_document_type(ai_type, document.original_filename or "")
@@ -1839,7 +1993,7 @@ async def process_document(db: AsyncSession, document: Document) -> Document:
                 from datetime import datetime, timezone
 
                 document.processed_at = datetime.now(timezone.utc)
-                document.error_message = QUOTA_WARNING
+                document.error_message = QUOTA_WARNING if _is_quota_error(exc) else RATE_LIMIT_WARNING
             else:
                 document.status = DocumentStatus.failed
                 document.error_message = str(exc)[:2000]

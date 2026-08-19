@@ -11,17 +11,17 @@
         {"key": "applicant_name_native", "label": "Full Name in Native Language", "document": "passport", "field": "full_name", "aliases": ["full_name_native", "name_native_language", "native_full_name"]},
         {"key": "other_name_used", "label": "Other Name Used? (Yes/No)", "document": "ds260_customer_form", "field": "other_name_used", "aliases": ["other_names_used"]},
         {"key": "other_names", "label": "Other Names (details)", "document": "ds260_customer_form", "field": "other_names", "aliases": ["other_name_history"]},
-        {"key": "family_name", "label": "Surname / Họ", "document": "passport", "field": "family_name", "aliases": ["surname", "last_name"]},
-        {"key": "given_names", "label": "Given Names / Tên", "document": "passport", "field": "given_names", "aliases": ["given_name", "first_name"]},
+        {"key": "family_name", "label": "Surname / Họ", "document": "passport", "field": "family_name", "aliases": ["surname", "last_name"], "review_hidden": true},
+        {"key": "given_names", "label": "Given Names / Tên", "document": "passport", "field": "given_names", "aliases": ["given_name", "first_name"], "review_hidden": true},
         {"key": "date_of_birth", "label": "Date of Birth / Ngày sinh", "document": "passport", "field": "date_of_birth", "aliases": ["dob", "birth_date"]},
-        {"key": "place_of_birth", "label": "Place of Birth / Nơi sinh", "document": "passport", "field": "place_of_birth", "aliases": ["birth_place"]},
+        {"key": "place_of_birth", "label": "Place of Birth / Nơi sinh", "document": "passport", "field": "place_of_birth", "aliases": ["birth_place"], "review_hidden": true},
         {"key": "birth_city", "label": "City of Birth", "document": "passport", "field": "birth_city", "aliases": ["city_of_birth"]},
         {"key": "birth_state", "label": "State/Province of Birth", "document": "passport", "field": "place_of_birth", "derive": "copy"},
         {"key": "birth_country", "label": "Country of Birth", "document": "passport", "field": "place_of_birth", "derive": "country_from_location"},
         {"key": "gender", "label": "Sex / Giới tính", "document": "passport", "field": "gender", "aliases": ["sex"]},
         {"key": "current_marital_status", "label": "Current Marital Status", "document": "ds260_customer_form", "field": "current_marital_status", "aliases": ["marital_status"]},
         {"key": "nationality", "label": "Nationality / Quốc tịch", "document": "passport", "field": "nationality", "aliases": ["country_of_nationality"]},
-        {"key": "id_card_number", "label": "ID Card N° / Số CMND-CCCD", "document": "passport", "field": "id_card_number", "aliases": ["national_id", "cmnd", "cccd"]}
+        {"key": "id_card_number", "label": "ID Card N° / Số CMND-CCCD", "document": "passport", "field": "id_card_number", "aliases": ["national_id", "cmnd", "cccd"], "review_hidden": true}
       ]
     },
     {
@@ -29,71 +29,13 @@
       "title": "DS-260 A.2 — Passport / Travel Document",
       "subtitle": "Nguồn: Passport",
       "fields": [
-        {"key": "passport_type", "label": "Type / Loại", "document": "passport", "field": "passport_type", "aliases": ["document_type", "type"]},
-        {"key": "country_code", "label": "Country Code / Mã quốc gia", "document": "passport", "field": "country_code", "aliases": ["passport_country_code"]},
         {"key": "passport_number", "label": "Passport Number / Số hộ chiếu", "document": "passport", "field": "passport_number", "aliases": ["passport_no", "passport_id", "document_number"]},
         {"key": "passport_issue_date", "label": "Date of Issue / Ngày cấp", "document": "passport", "field": "issue_date", "aliases": ["passport_issue_date", "date_of_issue"]},
         {"key": "passport_expiration_date", "label": "Date of Expiry / Có giá trị đến", "document": "passport", "field": "expiration_date", "aliases": ["expiry_date", "passport_expiry_date", "date_of_expiry"]},
-        {"key": "passport_place_of_issue", "label": "Place of Issue / Nơi cấp", "document": "passport", "field": "place_of_issue", "aliases": ["issuing_authority", "authority"]},
+        {"key": "passport_place_of_issue", "label": "Place of Issue / Nơi cấp", "document": "passport", "field": "place_of_issue", "aliases": ["issuing_authority", "authority"], "review_hidden": true},
         {"key": "passport_issuing_country", "label": "Country of Issuance", "document": "passport", "field": "issuing_country", "aliases": ["passport_issuing_country", "country_of_issue"]},
         {"key": "other_nationality_used", "label": "Other nationality held? (Yes/No)", "document": "ds260_customer_form", "field": "other_nationality_used", "aliases": ["other_nationality_used_last_5_years"]},
         {"key": "other_nationality_history", "label": "Other nationality details", "document": "ds260_customer_form", "field": "other_nationality_history", "aliases": ["other_nationalities_history"]}
-      ]
-    },
-    {
-      "id": "section_birth_certificate",
-      "title": "Giấy khai sinh (chủ hồ sơ)",
-      "subtitle": "Nguồn: Birth certificate",
-      "fields": [
-        {"key": "birth_cert_full_name", "label": "Full Name", "document": "birth_certificate", "field": "full_name"},
-        {"key": "birth_cert_date_of_birth", "label": "Date of Birth", "document": "birth_certificate", "field": "date_of_birth"},
-        {"key": "birth_cert_place_of_birth", "label": "Place of Birth", "document": "birth_certificate", "field": "place_of_birth"},
-        {"key": "birth_cert_gender", "label": "Gender", "document": "birth_certificate", "field": "gender"},
-        {"key": "birth_cert_father_name", "label": "Father's Name", "document": "birth_certificate", "field": "father_name"},
-        {"key": "birth_cert_mother_name", "label": "Mother's Name", "document": "birth_certificate", "field": "mother_name"},
-        {"key": "birth_cert_registration_number", "label": "Registration Number", "document": "birth_certificate", "field": "registration_number"}
-      ]
-    },
-    {
-      "id": "section_father",
-      "title": "DS-260 — Father Information",
-      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
-      "fields": [
-        {"key": "father_surname", "label": "Father's Surnames / Họ cha", "document": "birth_certificate", "field": "father_surname", "aliases": ["father_family_name", "father_last_name"]},
-        {"key": "father_given_names", "label": "Father's Given Names / Tên cha", "document": "birth_certificate", "field": "father_given_names", "aliases": ["father_first_name", "father_given_name"]},
-        {"key": "father_date_of_birth", "label": "Father Date of Birth / Ngày sinh cha", "document": "birth_certificate", "field": "father_date_of_birth", "aliases": ["father_dob", "father_birth_date"]},
-        {"key": "father_birth_city", "label": "Father City of Birth / TP nơi sinh cha", "document": "birth_certificate", "field": "father_birth_city", "aliases": ["father_city_of_birth"]},
-        {"key": "father_birth_state", "label": "Father State/Province of Birth / Tỉnh sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "copy", "aliases": ["father_birth_place", "father_birth_state"]},
-        {"key": "father_birth_country", "label": "Father Country of Birth / Quốc gia sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "country_from_location", "aliases": ["father_birth_place", "father_birth_country"]},
-        {"key": "father_full_name", "label": "Father Full Name / Họ tên cha (gộp)", "document": "birth_certificate", "field": "father_name", "aliases": ["father_full_name"]},
-        {"key": "father_is_living", "label": "Is your father still living?", "document": "ds260_customer_form", "field": "father_is_living", "aliases": []},
-        {"key": "father_death_year", "label": "Father Year of Death / Năm mất cha", "document": "ds260_customer_form", "field": "father_death_year", "aliases": ["father_date_of_death"]},
-        {"key": "father_address", "label": "Father Current Address / Địa chỉ hiện tại cha", "document": "ds260_customer_form", "field": "father_address", "aliases": ["father_address_line1"]},
-        {"key": "father_city", "label": "Father Current City / Thành phố hiện tại cha", "document": "ds260_customer_form", "field": "father_city", "aliases": []},
-        {"key": "father_state", "label": "Father Current State / Tỉnh hiện tại cha", "document": "ds260_customer_form", "field": "father_state", "aliases": []},
-        {"key": "father_postal_code", "label": "Father Postal Code / Mã bưu điện cha", "document": "ds260_customer_form", "field": "father_postal_code", "aliases": []},
-        {"key": "father_country", "label": "Father Current Country / Quốc gia hiện tại cha", "document": "ds260_customer_form", "field": "father_country", "aliases": []}
-      ]
-    },
-    {
-      "id": "section_mother",
-      "title": "DS-260 — Mother Information",
-      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
-      "fields": [
-        {"key": "mother_surname", "label": "Mother's Surnames / Họ mẹ", "document": "birth_certificate", "field": "mother_surname", "aliases": ["mother_family_name", "mother_last_name"]},
-        {"key": "mother_given_names", "label": "Mother's Given Names / Tên mẹ", "document": "birth_certificate", "field": "mother_given_names", "aliases": ["mother_first_name", "mother_given_name"]},
-        {"key": "mother_date_of_birth", "label": "Mother Date of Birth / Ngày sinh mẹ", "document": "birth_certificate", "field": "mother_date_of_birth", "aliases": ["mother_dob", "mother_birth_date", "mother_year_of_birth"]},
-        {"key": "mother_birth_city", "label": "Mother City of Birth / TP nơi sinh mẹ", "document": "birth_certificate", "field": "mother_birth_city", "aliases": ["mother_city_of_birth"]},
-        {"key": "mother_birth_state", "label": "Mother State/Province of Birth / Tỉnh sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "copy", "aliases": ["mother_birth_place", "mother_birth_state"]},
-        {"key": "mother_birth_country", "label": "Mother Country of Birth / Quốc gia sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "country_from_location", "aliases": ["mother_birth_place", "mother_birth_country", "mother_nationality"]},
-        {"key": "mother_full_name", "label": "Mother Full Name / Họ tên mẹ (gộp)", "document": "birth_certificate", "field": "mother_name", "aliases": ["mother_full_name"]},
-        {"key": "mother_is_living", "label": "Is your mother still living?", "document": "ds260_customer_form", "field": "mother_is_living", "aliases": []},
-        {"key": "mother_death_year", "label": "Mother Year of Death / Năm mất mẹ", "document": "ds260_customer_form", "field": "mother_death_year", "aliases": ["mother_date_of_death"]},
-        {"key": "mother_address", "label": "Mother Current Address / Địa chỉ hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_address", "aliases": ["mother_address_line1", "mother_residence"]},
-        {"key": "mother_city", "label": "Mother Current City / Thành phố hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_city", "aliases": []},
-        {"key": "mother_state", "label": "Mother Current State / Tỉnh hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_state", "aliases": []},
-        {"key": "mother_postal_code", "label": "Mother Postal Code / Mã bưu điện mẹ", "document": "ds260_customer_form", "field": "mother_postal_code", "aliases": []},
-        {"key": "mother_country", "label": "Mother Current Country / Quốc gia hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_country", "aliases": []}
       ]
     },
     {
@@ -138,42 +80,59 @@
       ]
     },
     {
-      "id": "section_judicial",
-      "title": "Lý lịch tư pháp",
-      "subtitle": "Nguồn: JUDICIAL CERTIFICATE",
+      "id": "section_birth_certificate",
+      "title": "Giấy khai sinh (chủ hồ sơ)",
+      "subtitle": "Nguồn: Birth certificate",
       "fields": [
-        {"key": "judicial_full_name", "label": "Full Name", "document": "judicial_certificate", "field": "full_name"},
-        {"key": "judicial_date_of_birth", "label": "Date of Birth", "document": "judicial_certificate", "field": "date_of_birth"},
-        {"key": "judicial_nationality", "label": "Nationality", "document": "judicial_certificate", "field": "nationality"},
-        {"key": "judicial_certificate_number", "label": "Certificate Number", "document": "judicial_certificate", "field": "document_number", "aliases": ["certificate_number"]},
-        {"key": "judicial_issue_date", "label": "Issue Date", "document": "judicial_certificate", "field": "issue_date"}
+        {"key": "birth_cert_full_name", "label": "Full Name", "document": "birth_certificate", "field": "full_name"},
+        {"key": "birth_cert_date_of_birth", "label": "Date of Birth", "document": "birth_certificate", "field": "date_of_birth"},
+        {"key": "birth_cert_place_of_birth", "label": "Place of Birth", "document": "birth_certificate", "field": "place_of_birth"},
+        {"key": "birth_cert_gender", "label": "Gender", "document": "birth_certificate", "field": "gender"},
+        {"key": "birth_cert_father_name", "label": "Father's Name", "document": "birth_certificate", "field": "father_name"},
+        {"key": "birth_cert_mother_name", "label": "Mother's Name", "document": "birth_certificate", "field": "mother_name"},
+        {"key": "birth_cert_registration_number", "label": "Registration Number", "document": "birth_certificate", "field": "registration_number"}
       ]
     },
     {
-      "id": "section_divorce",
-      "title": "Ly hôn",
-      "subtitle": "Nguồn: Divorce",
+      "id": "section_father",
+      "title": "DS-260 — Father Information",
+      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
       "fields": [
-        {"key": "divorce_husband_name", "label": "Husband Full Name", "document": "divorce", "field": "husband_full_name"},
-        {"key": "divorce_wife_name", "label": "Wife Full Name", "document": "divorce", "field": "wife_full_name"},
-        {"key": "divorce_marriage_date", "label": "Marriage Date", "document": "divorce", "field": "marriage_date"},
-        {"key": "divorce_date", "label": "Divorce Date", "document": "divorce", "field": "divorce_date"},
-        {"key": "divorce_document_number", "label": "Document Number", "document": "divorce", "field": "document_number"}
+        {"key": "father_surname", "label": "Father's Surnames / Họ cha", "document": "birth_certificate", "field": "father_surname", "aliases": ["father_family_name", "father_last_name"]},
+        {"key": "father_given_names", "label": "Father's Given Names / Tên cha", "document": "birth_certificate", "field": "father_given_names", "aliases": ["father_first_name", "father_given_name"]},
+        {"key": "father_date_of_birth", "label": "Father Date of Birth / Ngày sinh cha", "document": "birth_certificate", "field": "father_date_of_birth", "aliases": ["father_dob", "father_birth_date"]},
+        {"key": "father_birth_city", "label": "Father City of Birth / TP nơi sinh cha", "document": "birth_certificate", "field": "father_birth_city", "aliases": ["father_city_of_birth"]},
+        {"key": "father_birth_state", "label": "Father State/Province of Birth / Tỉnh sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "copy", "aliases": ["father_birth_place", "father_birth_state"]},
+        {"key": "father_birth_country", "label": "Father Country of Birth / Quốc gia sinh cha", "document": "birth_certificate", "field": "father_place_of_birth", "derive": "country_from_location", "aliases": ["father_birth_place", "father_birth_country"]},
+        {"key": "father_full_name", "label": "Father Full Name / Họ tên cha (gộp)", "document": "birth_certificate", "field": "father_name", "aliases": ["father_full_name"], "review_hidden": true},
+        {"key": "father_is_living", "label": "Is your father still living?", "document": "ds260_customer_form", "field": "father_is_living", "aliases": []},
+        {"key": "father_death_year", "label": "Father Year of Death / Năm mất cha", "document": "ds260_customer_form", "field": "father_death_year", "aliases": ["father_date_of_death"]},
+        {"key": "father_address", "label": "Father Current Address / Địa chỉ hiện tại cha", "document": "ds260_customer_form", "field": "father_address", "aliases": ["father_address_line1"]},
+        {"key": "father_city", "label": "Father Current City / Thành phố hiện tại cha", "document": "ds260_customer_form", "field": "father_city", "aliases": []},
+        {"key": "father_state", "label": "Father Current State / Tỉnh hiện tại cha", "document": "ds260_customer_form", "field": "father_state", "aliases": []},
+        {"key": "father_postal_code", "label": "Father Postal Code / Mã bưu điện cha", "document": "ds260_customer_form", "field": "father_postal_code", "aliases": []},
+        {"key": "father_country", "label": "Father Current Country / Quốc gia hiện tại cha", "document": "ds260_customer_form", "field": "father_country", "aliases": []}
       ]
     },
     {
-      "id": "section_previous_spouse",
-      "title": "DS-260 — Previous Spouse / THÔNG TIN NGƯỜI PHỐI NGẪU CŨ (ĐÃ LY HÔN)",
-      "subtitle": "Nguồn: Divorce decree",
+      "id": "section_mother",
+      "title": "DS-260 — Mother Information",
+      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
       "fields": [
-        {"key": "previous_spouses_used", "label": "Do you have any Previous Spouses?", "document": "divorce", "field": "previous_spouses_used"},
-        {"key": "previous_spouse_full_name", "label": "Previous spouse's name", "document": "divorce", "field": "previous_spouse_full_name", "aliases": ["spouse_name", "plaintiff_name", "defendant_name"]},
-        {"key": "previous_spouse_date_of_birth", "label": "Previous Spouse Date of Birth", "document": "divorce", "field": "previous_spouse_date_of_birth", "aliases": ["wife_date_of_birth", "husband_date_of_birth", "spouse_date_of_birth", "date_of_birth"]},
-        {"key": "previous_divorce_date", "label": "Date of Divorce", "document": "divorce", "field": "divorce_date"},
-        {"key": "previous_marriage_date", "label": "Date of previous marriage", "document": "divorce", "field": "marriage_date", "aliases": ["date_of_marriage"]},
-        {"key": "divorce_husband_name", "label": "Husband Full Name (ly hôn)", "document": "divorce", "field": "husband_full_name", "aliases": ["husband_name"]},
-        {"key": "divorce_wife_name", "label": "Wife Full Name (ly hôn)", "document": "divorce", "field": "wife_full_name", "aliases": ["wife_name"]},
-        {"key": "divorce_document_number", "label": "Divorce Document Number", "document": "divorce", "field": "document_number"}
+        {"key": "mother_surname", "label": "Mother's Surnames / Họ mẹ", "document": "birth_certificate", "field": "mother_surname", "aliases": ["mother_family_name", "mother_last_name"]},
+        {"key": "mother_given_names", "label": "Mother's Given Names / Tên mẹ", "document": "birth_certificate", "field": "mother_given_names", "aliases": ["mother_first_name", "mother_given_name"]},
+        {"key": "mother_date_of_birth", "label": "Mother Date of Birth / Ngày sinh mẹ", "document": "birth_certificate", "field": "mother_date_of_birth", "aliases": ["mother_dob", "mother_birth_date", "mother_year_of_birth"]},
+        {"key": "mother_birth_city", "label": "Mother City of Birth / TP nơi sinh mẹ", "document": "birth_certificate", "field": "mother_birth_city", "aliases": ["mother_city_of_birth"]},
+        {"key": "mother_birth_state", "label": "Mother State/Province of Birth / Tỉnh sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "copy", "aliases": ["mother_birth_place", "mother_birth_state"]},
+        {"key": "mother_birth_country", "label": "Mother Country of Birth / Quốc gia sinh mẹ", "document": "birth_certificate", "field": "mother_place_of_birth", "derive": "country_from_location", "aliases": ["mother_birth_place", "mother_birth_country", "mother_nationality"]},
+        {"key": "mother_full_name", "label": "Mother Full Name / Họ tên mẹ (gộp)", "document": "birth_certificate", "field": "mother_name", "aliases": ["mother_full_name"], "review_hidden": true},
+        {"key": "mother_is_living", "label": "Is your mother still living?", "document": "ds260_customer_form", "field": "mother_is_living", "aliases": []},
+        {"key": "mother_death_year", "label": "Mother Year of Death / Năm mất mẹ", "document": "ds260_customer_form", "field": "mother_death_year", "aliases": ["mother_date_of_death"]},
+        {"key": "mother_address", "label": "Mother Current Address / Địa chỉ hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_address", "aliases": ["mother_address_line1", "mother_residence"]},
+        {"key": "mother_city", "label": "Mother Current City / Thành phố hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_city", "aliases": []},
+        {"key": "mother_state", "label": "Mother Current State / Tỉnh hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_state", "aliases": []},
+        {"key": "mother_postal_code", "label": "Mother Postal Code / Mã bưu điện mẹ", "document": "ds260_customer_form", "field": "mother_postal_code", "aliases": []},
+        {"key": "mother_country", "label": "Mother Current Country / Quốc gia hiện tại mẹ", "document": "ds260_customer_form", "field": "mother_country", "aliases": []}
       ]
     },
     {
@@ -199,6 +158,45 @@
         {"key": "marriage_husband_name", "label": "Husband Full Name (giấy kết hôn)", "document": "marriage_certificate", "field": "husband_full_name", "aliases": ["husband_name"], "review_hidden": true},
         {"key": "marriage_wife_name", "label": "Wife Full Name (giấy kết hôn)", "document": "marriage_certificate", "field": "wife_full_name", "aliases": ["wife_name"], "review_hidden": true},
         {"key": "marriage_document_number", "label": "Marriage Certificate Number", "document": "marriage_certificate", "field": "document_number", "aliases": ["registration_number", "certificate_number"], "review_hidden": true}
+      ]
+    },
+    {
+      "id": "section_previous_spouse",
+      "title": "DS-260 — Previous Spouse / THÔNG TIN NGƯỜI PHỐI NGẪU CŨ (ĐÃ LY HÔN)",
+      "subtitle": "Nguồn: Divorce decree",
+      "fields": [
+        {"key": "previous_spouses_used", "label": "Do you have any Previous Spouses?", "document": "divorce", "field": "previous_spouses_used"},
+        {"key": "previous_spouse_full_name", "label": "Previous spouse's name", "document": "divorce", "field": "previous_spouse_full_name", "aliases": ["spouse_name", "plaintiff_name", "defendant_name"]},
+        {"key": "previous_spouse_date_of_birth", "label": "Previous Spouse Date of Birth", "document": "divorce", "field": "previous_spouse_date_of_birth", "aliases": ["wife_date_of_birth", "husband_date_of_birth", "spouse_date_of_birth", "date_of_birth"]},
+        {"key": "previous_divorce_date", "label": "Date of Divorce", "document": "divorce", "field": "divorce_date"},
+        {"key": "previous_marriage_date", "label": "Date of previous marriage", "document": "divorce", "field": "marriage_date", "aliases": ["date_of_marriage"]},
+        {"key": "divorce_husband_name", "label": "Husband Full Name (ly hôn)", "document": "divorce", "field": "husband_full_name", "aliases": ["husband_name"]},
+        {"key": "divorce_wife_name", "label": "Wife Full Name (ly hôn)", "document": "divorce", "field": "wife_full_name", "aliases": ["wife_name"]},
+        {"key": "divorce_document_number", "label": "Divorce Document Number", "document": "divorce", "field": "document_number"}
+      ]
+    },
+    {
+      "id": "section_judicial",
+      "title": "Lý lịch tư pháp",
+      "subtitle": "Nguồn: JUDICIAL CERTIFICATE",
+      "fields": [
+        {"key": "judicial_full_name", "label": "Full Name", "document": "judicial_certificate", "field": "full_name"},
+        {"key": "judicial_date_of_birth", "label": "Date of Birth", "document": "judicial_certificate", "field": "date_of_birth"},
+        {"key": "judicial_nationality", "label": "Nationality", "document": "judicial_certificate", "field": "nationality"},
+        {"key": "judicial_certificate_number", "label": "Certificate Number", "document": "judicial_certificate", "field": "document_number", "aliases": ["certificate_number"]},
+        {"key": "judicial_issue_date", "label": "Issue Date", "document": "judicial_certificate", "field": "issue_date"}
+      ]
+    },
+    {
+      "id": "section_divorce",
+      "title": "Ly hôn",
+      "subtitle": "Nguồn: Divorce",
+      "fields": [
+        {"key": "divorce_husband_name", "label": "Husband Full Name", "document": "divorce", "field": "husband_full_name"},
+        {"key": "divorce_wife_name", "label": "Wife Full Name", "document": "divorce", "field": "wife_full_name"},
+        {"key": "divorce_marriage_date", "label": "Marriage Date", "document": "divorce", "field": "marriage_date"},
+        {"key": "divorce_date", "label": "Divorce Date", "document": "divorce", "field": "divorce_date"},
+        {"key": "divorce_document_number", "label": "Document Number", "document": "divorce", "field": "document_number"}
       ]
     },
     {
@@ -259,6 +257,19 @@
       ]
     },
     {
+      "id": "section_us_travel",
+      "title": "DS-260 C — Previous U.S Travel / Lịch sử đến Mỹ",
+      "subtitle": "Nguồn: I-94 (đã đến Mỹ), VISA (đã được cấp visa) → DS-260 khách khai nếu không có file",
+      "fields": [
+        {"key": "been_in_us", "label": "Have you ever been in the U.S? / Đã từng đến Mỹ?", "document": "ds260_customer_form", "field": "been_in_us", "aliases": ["ever_been_in_us", "us_travel_used"], "default": "No"},
+        {"key": "us_travel_history", "label": "U.S travel details (date/duration — I-94) / Chi tiết (ngày đến, ở bao lâu)", "document": "ds260_customer_form", "field": "us_travel_history", "aliases": ["us_travel_detail", "i94_history"]},
+        {"key": "issued_us_visa", "label": "Have you ever been issued a U.S visa? / Đã từng được cấp visa Mỹ?", "document": "ds260_customer_form", "field": "issued_us_visa", "aliases": ["us_visa_issued_used", "ever_issued_us_visa"], "default": "No"},
+        {"key": "us_visa_history", "label": "U.S visa details (type/date/number — VISA) / Chi tiết visa (loại, ngày cấp, số visa)", "document": "ds260_customer_form", "field": "us_visa_history", "aliases": ["us_visa_detail"]},
+        {"key": "refused_us_visa", "label": "Refused U.S visa / admission / withdrawn? / Bị từ chối visa/nhập cảnh?", "document": "ds260_customer_form", "field": "refused_us_visa", "aliases": ["us_visa_refused_used", "ever_refused_us_visa"], "default": "No"},
+        {"key": "us_visa_refusal_history", "label": "Refusal details (visa type/date/reason) / Chi tiết (loại visa, ngày, lý do)", "document": "ds260_customer_form", "field": "us_visa_refusal_history", "aliases": ["us_visa_refusal_detail"]}
+      ]
+    },
+    {
       "id": "section_work_education",
       "title": "DS-260 D — Work / Education / Training",
       "subtitle": "Nghề nghiệp/công ty hiện tại: ưu tiên DS-260 khách khai (mới hơn Application form). Các trường còn lại: nguồn chính Application form (Luồng 1), bổ sung DS-260 khách khai (01_6) nếu thiếu",
@@ -271,7 +282,7 @@
         {"key": "work_employer_state", "label": "Employer State/Province / Tỉnh-Bang", "document": "application_form", "field": "employer_state", "aliases": ["employer_province"]},
         {"key": "work_employer_postal_code", "label": "Employer Postal Code / Mã bưu điện", "document": "application_form", "field": "employer_postal_code", "aliases": ["employer_zip"]},
         {"key": "work_employer_country", "label": "Employer Country / Quốc gia", "document": "application_form", "field": "employer_country", "aliases": []},
-        {"key": "work_job_title", "label": "Job Title / Chức danh", "document": "application_form", "field": "job_title", "aliases": ["position", "title"]},
+        {"key": "work_job_title", "label": "Job Title / Chức danh", "document": "application_form", "field": "job_title", "aliases": ["position", "title"], "review_hidden": true},
         {"key": "work_start_date", "label": "Employment Start Date / Ngày bắt đầu làm việc", "document": "application_form", "field": "employment_start_date", "aliases": ["start_date", "employment_start"]},
         {"key": "work_other_occupation_used", "label": "Other occupation in last 5 years? (Yes/No)", "document": "ds260_customer_form", "field": "other_occupation_used", "aliases": ["other_occupation_in_last_5_years"]},
         {"key": "work_other_occupation_detail", "label": "Other occupation details / Chi tiết nghề khác", "document": "ds260_customer_form", "field": "other_occupation_detail", "aliases": []},
@@ -303,19 +314,6 @@
         {"key": "military_service_start", "label": "Service Start", "document": "military_discharge", "field": "service_from_date", "aliases": ["service_from"]},
         {"key": "military_service_end", "label": "Service End", "document": "military_discharge", "field": "service_to_date", "aliases": ["service_to"]},
         {"key": "military_document_number", "label": "Document Number", "document": "military_discharge", "field": "document_number"}
-      ]
-    },
-    {
-      "id": "section_us_travel",
-      "title": "DS-260 C — Previous U.S Travel / Lịch sử đến Mỹ",
-      "subtitle": "Nguồn: I-94 (đã đến Mỹ), VISA (đã được cấp visa) → DS-260 khách khai nếu không có file",
-      "fields": [
-        {"key": "been_in_us", "label": "Have you ever been in the U.S? / Đã từng đến Mỹ?", "document": "ds260_customer_form", "field": "been_in_us", "aliases": ["ever_been_in_us", "us_travel_used"], "default": "No"},
-        {"key": "us_travel_history", "label": "U.S travel details (date/duration — I-94) / Chi tiết (ngày đến, ở bao lâu)", "document": "ds260_customer_form", "field": "us_travel_history", "aliases": ["us_travel_detail", "i94_history"]},
-        {"key": "issued_us_visa", "label": "Have you ever been issued a U.S visa? / Đã từng được cấp visa Mỹ?", "document": "ds260_customer_form", "field": "issued_us_visa", "aliases": ["us_visa_issued_used", "ever_issued_us_visa"], "default": "No"},
-        {"key": "us_visa_history", "label": "U.S visa details (type/date/number — VISA) / Chi tiết visa (loại, ngày cấp, số visa)", "document": "ds260_customer_form", "field": "us_visa_history", "aliases": ["us_visa_detail"]},
-        {"key": "refused_us_visa", "label": "Refused U.S visa / admission / withdrawn? / Bị từ chối visa/nhập cảnh?", "document": "ds260_customer_form", "field": "refused_us_visa", "aliases": ["us_visa_refused_used", "ever_refused_us_visa"], "default": "No"},
-        {"key": "us_visa_refusal_history", "label": "Refusal details (visa type/date/reason) / Chi tiết (loại visa, ngày, lý do)", "document": "ds260_customer_form", "field": "us_visa_refusal_history", "aliases": ["us_visa_refusal_detail"]}
       ]
     },
     {

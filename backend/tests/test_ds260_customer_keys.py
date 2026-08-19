@@ -50,11 +50,21 @@ def test_document_number_maps_to_passport_with_passport_context():
     raw = normalize_ds260_customer_raw(
         {
             "document_number": "B1234567",
-            "passport_type": "P",
             "date_of_issue": "2020-01-01",
         }
     )
     assert raw["passport_number"] == "B1234567"
+
+
+def test_passport_type_and_country_code_removed_from_ds260():
+    # Khách yêu cầu: passport Type/Country Code không cần thiết trên DS-260 — xóa hẳn khỏi
+    # schema mapping. OCR/panel hộ chiếu Luồng 1 giữ nguyên (không liên quan mapping này).
+    mappings = flatten_ds260_mappings()
+    assert "passport_type" not in mappings
+    assert "country_code" not in mappings
+    keys = build_ds260_customer_extract_keys()
+    assert "passport_type" not in keys
+    assert "country_code" not in keys
 
 
 def test_judicial_document_number_does_not_map_to_passport():
@@ -185,7 +195,7 @@ def test_worksheet_fills_passport_and_father_gaps():
     father = {f["key"]: f["value"] for f in sections[2]["fields"]}
     assert personal["applicant_name"] == "NGUYEN VAN A"
     assert personal["date_of_birth"] == "1990-01-15"
-    assert passport["passport_number"] == ""
+    assert passport["passport_number"] == "B9999999"
     assert father["father_surname"] == "NGUYEN"
     assert sections[3]["fields"][0]["value"] == "123 LE LOI"
     mappings = flatten_ds260_mappings()

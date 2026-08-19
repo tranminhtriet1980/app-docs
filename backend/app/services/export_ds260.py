@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from datetime import datetime, timezone
@@ -9,13 +10,15 @@ from pathlib import Path
 
 from docx import Document as DocxDocument
 from docx.shared import Pt
+from docx.text.paragraph import Paragraph
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.entities import Applicant, ApplicantStatus, Export, FormTemplate
 from app.services.ds260_mapping import flatten_ds260_mappings, resolve_ds260_form
-from app.services.ds260_dates import format_ds260_display_date, is_date_field_key
+from app.services.ds260_dates import format_ds260_export_date, is_date_field_key
+from app.services.ds260_normalize import normalize_gender
 from app.services.ds260_validate import flatten_ds260_values, validate_ds260
 from app.services.postal_code import derive_postal_code_from_location
 from app.services.birth_location import (
@@ -27,6 +30,7 @@ from app.services.birth_location import (
     format_person_name_ascii,
     format_place_name_title,
     normalize_location,
+    normalize_present_marker,
 )
 
 DS260_TEMPLATE_CODE = "ds260_final"
@@ -41,6 +45,11 @@ DEFAULT_TEMPLATE_FALLBACKS = (
 _COLON_FILLER = re.compile(r"[\s\t_\.·…\-\u00a0\u2013\u2014]+")
 _TIME_LIKE = re.compile(r":\d{1,2}\b")
 _URL_LIKE = re.compile(r"://")
+
+# Một dòng "trống dành để viết câu trả lời" trong template: chỉ chứa dấu ':' đầu dòng (tùy chọn)
+# + khoảng trắng/gạch dưới/gạch ngang — không có nội dung câu hỏi nào khác.
+_CONTINUATION_BLANK_RE = re.compile(r"^[\s:\._·…\-\u00a0\u2013\u2014]*$")
+_BARE_COLON_REST_MAX_LEN = 6
 
 DS260_LABEL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"full name in native language", re.I), "applicant_name_native"),
@@ -390,12 +399,7 @@ _CHILD_BIRTH_COUNTRY_KEY = re.compile(r"^child_\d+_birth_country$")
 
 
 def _format_gender(val: str) -> str:
-    u = (val or "").upper()
-    if u in {"M", "MALE", "NAM"}:
-        return "Male"
-    if u in {"F", "FEMALE", "NU", "NỮ"}:
-        return "Female"
-    return val
+    return normalize_gender(val)
 
 
 def _has_meaningful_current_address(out: dict[str, str]) -> bool:
@@ -513,8 +517,26 @@ def _cross_check_birth_country(out: dict[str, str]) -> None:
                 out[country_key] = "Vietnam"
 
 
+_HISTORY_ENTRY_BOUNDARY_RE = re.compile(r";\s+(?=[A-Z][a-z]{2}\s+\d{4}\s*[–—-])")
+
+
+def _reflow_history_newlines(text: str) -> str:
+    """Lịch sử nhiều mốc thời gian (địa chỉ/công việc/du lịch…) đôi khi bị dồn thành 1 dòng,
+    phân cách bằng "; " thay vì xuống dòng thật (vd. sau khi qua enrich/loose-match, ranh giới
+    \\n gốc không được giữ) — Word cần \\n thật để mỗi mốc nằm 1 dòng riêng qua
+    _fill_blank_line_history_block (khách yêu cầu 2026-08-07: "mỗi mốc thời gian thì phải xuống
+    dòng"). Khôi phục dựa vào mẫu bắt đầu mốc mới "MMM YYYY–…:" nếu chưa có \\n thật; không đụng
+    tới nếu đã có \\n (giữ nguyên ranh giới OCR gốc)."""
+    if not text or "\n" in text:
+        return text
+    return _HISTORY_ENTRY_BOUNDARY_RE.sub("\n", text)
+
+
 def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     out = {k: (v or "").strip() for k, v in values.items()}
+    for _hk in _OTHER_USED_HISTORY.values():
+        if out.get(_hk):
+            out[_hk] = _reflow_history_newlines(out[_hk])
     # children_count là ô SỐ ("Number of Children:") — khi không có con, ds260_mapping cố ý gán
     # "No" cho nó để hiển thị nhất quán trên web (Case C-2: không để trống trong khi anh chị em
     # ghi "No"). Đáp án "No" đó thuộc về câu hỏi children_used ("Do you have any children?"), KHÔNG
@@ -595,6 +617,10 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
     for key in _ADDRESS_ENGLISH_KEYS:
         if out.get(key):
             out[key] = format_address_english(out[key])
+    if out.get("other_addresses_history"):
+        # Chốt an toàn cuối cùng trước khi ghi ra Word — phòng dữ liệu không qua ocr_pipeline
+        # (nhập tay/nguồn khác) còn sót "hiện tại/đến nay" tiếng Việt (DS-260 chỉ dùng tiếng Anh).
+        out["other_addresses_history"] = normalize_present_marker(out["other_addresses_history"])
     for key in list(out.keys()):
         if re.match(r"^child_\d+_current_address$", key) and out.get(key):
             out[key] = format_address_english(out[key])
@@ -606,7 +632,9 @@ def _prepare_display_values(values: dict[str, str]) -> dict[str, str]:
             continue
         if is_date_field_key(key):
             # Giữ nguyên text nếu không phải 1 ngày chuẩn (vd. "Sep 2008 to Now") — đừng xoá trắng.
-            out[key] = format_ds260_display_date(val) or val
+            # Xuất Word dùng mốc trọn kiểu Anh, tháng viết tắt ("15 Aug 1990") — dashboard vẫn dd/mm/yyyy
+            # (format_sections_date_display, không đổi).
+            out[key] = format_ds260_export_date(val) or val
     return out
 
 
@@ -828,8 +856,8 @@ def _fill_period_from_to(text: str, value: str) -> str | None:
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) < 2:
         return None
-    d_from = format_ds260_display_date(parts[0]) or parts[0]
-    d_to = format_ds260_display_date(parts[1]) or parts[1]
+    d_from = format_ds260_export_date(parts[0]) or parts[0]
+    d_to = format_ds260_export_date(parts[1]) or parts[1]
     return _PERIOD_FROM_TO_RE.sub(
         lambda m: f"{m.group(1)} {d_from}   {m.group(3)} {d_to}", text, count=1
     )
@@ -908,6 +936,120 @@ def _other_used_answer(key: str, values: dict[str, str]) -> str:
     if used.lower() in _AFFIRMATIVE_TOKENS:
         return "Yes"
     return "No"
+
+
+# Mọi field "Yes/No + chi tiết" trong _OTHER_USED_HISTORY đều dùng chung layout DS-260 gốc: câu
+# hỏi chỉ nhận "Yes -"/"No", còn chi tiết (mỗi mốc/dòng riêng) được điền vào các dòng trống
+# "_______" NGAY BÊN DƯỚI câu hỏi, không dồn chung vào cuối dòng câu hỏi (khách yêu cầu
+# 2026-08-07 rồi mở rộng lại 2026-08-12: áp dụng cho TẤT CẢ field dạng này, không chỉ vài field).
+# An toàn cho field không có dòng trống trong template: _find_blank_run_ahead trả None khi gặp
+# '{{' trước khi thấy dòng trống, lúc đó _fill_blank_line_history_block tự rơi về cách cũ (dồn
+# "Yes - <chi tiết>" vào cuối dòng câu hỏi) — không mất dữ liệu.
+_BLANK_LINE_HISTORY_KEYS = frozenset(_OTHER_USED_HISTORY.keys())
+_HISTORY_BLANK_LOOKAHEAD = 25
+
+
+def _find_blank_run_ahead(paras: list, start_idx: int) -> int | None:
+    """Tìm dòng TRỐNG (chỉ khoảng trắng/rỗng) gần nhất từ start_idx để bắt đầu điền chi tiết theo
+    từng dòng. Gặp '{{...}}' (field khác chưa render) trước khi thấy dòng trống → trả None, nơi
+    gọi sẽ dùng lại cách cũ (dồn hết vào dòng câu hỏi) để không mất dữ liệu."""
+    limit = min(len(paras), start_idx + _HISTORY_BLANK_LOOKAHEAD)
+    for i in range(start_idx, limit):
+        t = paras[i].text
+        if "{{" in t:
+            return None
+        if t.strip() == "":
+            return i
+    return None
+
+
+def _insert_blank_line_after(paras: list, idx: int) -> int:
+    """Chèn 1 dòng MỚI ngay sau paras[idx] — nhân bản định dạng (cùng font/underline dòng trống
+    gốc) cả trong list `paras` LẪN cây XML thật của document (addnext). Dùng khi số mốc thời gian
+    nhiều hơn số dòng trống có sẵn trong template, để mỗi mốc luôn nằm 1 dòng riêng thay vì dồn
+    chung vào dòng cuối (khách yêu cầu 2026-08-07: "mỗi mốc thời gian thì phải xuống dòng")."""
+    template_p = paras[idx]._p
+    new_p = copy.deepcopy(template_p)
+    template_p.addnext(new_p)
+    new_para = Paragraph(new_p, paras[idx]._parent)
+    paras.insert(idx + 1, new_para)
+    return idx + 1
+
+
+def _fill_history_into_blank_lines(paras: list, blank_start_idx: int, entries: list[str]) -> int:
+    """Điền entries vào các dòng trống liên tiếp từ blank_start_idx — mỗi entry LUÔN có dòng
+    riêng: dùng hết dòng trống sẵn có trong template rồi CHÈN THÊM dòng mới cho phần dư, không
+    bao giờ dồn nhiều mốc vào chung 1 dòng."""
+    i = blank_start_idx
+    idx = 0
+    while i < len(paras) and paras[i].text.strip() == "" and idx < len(entries):
+        paras[i].text = entries[idx]
+        idx += 1
+        i += 1
+    last_used = i - 1
+    while idx < len(entries):
+        last_used = _insert_blank_line_after(paras, last_used)
+        paras[last_used].text = entries[idx]
+        idx += 1
+        i = last_used + 1
+    return i
+
+
+def _fill_blank_line_history_block(
+    paras: list, question_idx: int, key: str, values: dict[str, str]
+) -> int:
+    """Đáp án Yes/No nằm ở DÒNG GẠCH NGANG ĐẦU TIÊN sau câu hỏi (không nối vào cuối dòng câu
+    hỏi/dòng chú thích nữa) — chi tiết (nếu có) xuống các dòng gạch ngang kế tiếp, mỗi mốc 1
+    dòng (khách yêu cầu 2026-08-14). Câu hỏi và dòng chú thích "(Yes or No, if 'Yes' write
+    details below)..." giữ NGUYÊN VĂN, không chỉnh sửa gì."""
+    used = (values.get(key) or "").strip()
+    history_raw = (values.get(_OTHER_USED_HISTORY[key]) or "").strip()
+    entries = [e.strip() for e in history_raw.split("\n") if e.strip()]
+    answer = "Yes" if (entries or used.lower() in _AFFIRMATIVE_TOKENS) else "No"
+
+    blank_idx = _find_blank_run_ahead(paras, question_idx + 1)
+    if blank_idx is None:
+        # Không có dòng trống nào để dùng — rơi về cách cũ (nhồi vào cuối dòng câu hỏi) để
+        # không mất dữ liệu, còn hơn âm thầm bỏ qua.
+        question = paras[question_idx]
+        suffix = f"Yes - {'; '.join(entries)}" if entries else answer
+        new_text = _fill_question_line(question.text, suffix)
+        if new_text != question.text:
+            question.text = new_text
+        return question_idx + 1
+
+    return _fill_history_into_blank_lines(paras, blank_idx, [answer, *entries])
+
+
+def _is_bare_colon_question(text: str) -> bool:
+    """True nếu dòng kết thúc bằng dấu ':' gần như trơ — KHÔNG có khoảng trống/gạch dưới riêng
+    ngay trên dòng này để điền câu trả lời (khác đa số field 1-dòng đã có sẵn 1 chuỗi dài
+    khoảng trắng/gạch dưới ngay sau dấu ':')."""
+    idx = text.rfind(":")
+    if idx < 0:
+        return False
+    rest = text[idx + 1 :]
+    return len(rest.strip()) == 0 and len(rest) <= _BARE_COLON_REST_MAX_LEN
+
+
+def _fill_bare_colon_continuation(paras: list, question_idx: int, value: str) -> bool:
+    """Khi câu hỏi kết thúc bằng dấu ':' trơ nhưng dòng NGAY SAU là dòng trống dành riêng để viết
+    câu trả lời (mẫu DS-260 gốc hay tách riêng — vd mục địa chỉ hiện tại của con), điền value vào
+    dòng đó, KHÔNG nhồi vào cuối dòng câu hỏi. Áp dụng chung cho MỌI field có kiểu layout này
+    (khách yêu cầu 2026-08-12: không riêng field nào, gặp layout này ở đâu cũng phải xử lý).
+    Trả về False nếu dòng kế tiếp không phải dòng trống dành để viết — nơi gọi sẽ dùng lại cách cũ
+    (nhồi vào cuối dòng câu hỏi) để không mất dữ liệu."""
+    if not value:
+        return False
+    if question_idx + 1 >= len(paras):
+        return False
+    blank_para = paras[question_idx + 1]
+    blank_text = blank_para.text
+    if blank_text.strip() == "" or not _CONTINUATION_BLANK_RE.match(blank_text):
+        return False
+    prefix = ":" if blank_text.lstrip().startswith(":") else ""
+    blank_para.text = f"{prefix} {value}".strip()
+    return True
 
 
 def _is_question_fill_key(key: str) -> bool:
@@ -1003,9 +1145,32 @@ def _replace_in_paragraph(
 def _fill_paragraphs_with_context(
     paragraphs, values: dict[str, str], mapping: dict[str, str], context: str, filled: set[str] | None = None
 ) -> str:
-    for paragraph in paragraphs:
-        context = _update_section_context(paragraph.text, context)
+    paras = list(paragraphs)
+    i = 0
+    while i < len(paras):  # len(paras) tính lại mỗi vòng — paras có thể phình ra khi chèn dòng mới
+        paragraph = paras[i]
+        text = paragraph.text
+        context = _update_section_context(text, context)
+        key = None if "{{" in text else _match_ds260_key(text, context)
+        if key in _BLANK_LINE_HISTORY_KEYS and (filled is None or key not in filled):
+            if filled is not None:
+                filled.add(key)
+            i = _fill_blank_line_history_block(paras, i, key, values)
+            continue
+        if (
+            key
+            and key not in _OTHER_USED_HISTORY
+            and (filled is None or key not in filled)
+            and _is_bare_colon_question(text)
+        ):
+            value = (values.get(key) or "").strip()
+            if value and _fill_bare_colon_continuation(paras, i, value):
+                if filled is not None:
+                    filled.add(key)
+                i += 2
+                continue
         _replace_in_paragraph(paragraph, values, mapping, context, filled)
+        i += 1
     return context
 
 

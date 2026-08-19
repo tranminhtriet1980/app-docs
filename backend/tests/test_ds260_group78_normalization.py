@@ -75,7 +75,8 @@ def test_upgrade_partial_date_from_worksheet():
 def test_period_from_to_split():
     from app.services.export_ds260 import _fill_period_from_to
 
+    # Word export dùng mốc trọn kiểu Anh, tháng viết tắt ("5 Sep 1991") — dashboard vẫn dd/mm/yyyy.
     line = "Period (Thời gian học): from (từ)      to (đến):"
     out = _fill_period_from_to(line, "05/09/1991 - 30/05/1994")
-    assert "from (từ) 05 Sep 1991" in out
+    assert "from (từ) 5 Sep 1991" in out
     assert "to (đến): 30 May 1994" in out

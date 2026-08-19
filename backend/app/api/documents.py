@@ -255,7 +255,8 @@ async def _save_upload(
 
 
 async def _run_applicant_pipeline(applicant_id: uuid.UUID) -> None:
-    """OCR từng file → lưu bảng doc_type. Không merge profile."""
+    """OCR tất cả files SONG SONG → lưu bảng doc_type. Không merge profile."""
+    # Lấy pending docs trong session riêng, commit ngay để không giữ connection
     async with async_session() as db:
         applicant = await db.get(Applicant, applicant_id)
         if not applicant:
@@ -272,27 +273,43 @@ async def _run_applicant_pipeline(applicant_id: uuid.UUID) -> None:
             .order_by(Document.uploaded_at.asc())
         )
         pending = list(result.scalars().all())
-        logger.info("Pipeline start applicant=%s pending_docs=%d", applicant_id, len(pending))
+        await db.commit()
+    logger.info("Pipeline start applicant=%s pending_docs=%d", applicant_id, len(pending))
 
-        for document in pending:
-            if applicant_id in _CANCELLED_APPLICANTS:
-                logger.info("Pipeline cancelled applicant=%s", applicant_id)
-                return
-            doc_id = document.id
+    async def _process_one(doc: Document) -> tuple[uuid.UUID, str | None, str | None]:
+        """Process single document, return (doc_id, error_message | None, status)."""
+        async with async_session() as session:
             try:
-                await process_document(db, document)
-                await sync_doc_record_from_document(db, document)
-                await db.commit()
-                logger.info("Processed doc=%s status=%s", doc_id, document.status.value)
+                doc_fresh = await session.get(Document, doc.id)
+                if not doc_fresh:
+                    return doc.id, "Document not found", DocumentStatus.failed.value
+                await process_document(session, doc_fresh)
+                await sync_doc_record_from_document(session, doc_fresh)
+                await session.commit()
+                return doc.id, None, doc_fresh.status.value
             except Exception as exc:
-                await db.rollback()
-                logger.exception("OCR failed doc=%s", doc_id)
-                doc = await db.get(Document, doc_id)
-                if doc:
-                    doc.status = DocumentStatus.failed
-                    doc.error_message = str(exc)[:2000]
-                    await db.commit()
+                await session.rollback()
+                logger.exception("OCR failed doc=%s", doc.id)
+                doc_fresh = await session.get(Document, doc.id)
+                if doc_fresh:
+                    doc_fresh.status = DocumentStatus.failed
+                    doc_fresh.error_message = str(exc)[:2000]
+                    await session.commit()
+                return doc.id, str(exc), DocumentStatus.failed.value
 
+    # Chạy song song, giới hạn 5 task để tránh exhaust DB connection pool
+    semaphore = asyncio.Semaphore(5)
+    async def _process_with_semaphore(doc: Document):
+        async with semaphore:
+            return await _process_one(doc)
+    results = await asyncio.gather(*[_process_with_semaphore(doc) for doc in pending], return_exceptions=True)
+
+    for result in results:
+        if isinstance(result, Exception):
+            logger.exception("Unexpected error in pipeline: %s", result)
+
+    # Finalize trong session riêng
+    async with async_session() as db:
         try:
             await finalize_applicant_after_ocr(db, applicant_id)
             await db.commit()
@@ -477,6 +494,7 @@ async def reprocess_document(
     document.status = DocumentStatus.uploaded
     document.processed_at = None
     document.error_message = None
+    document.classification_confidence = None
     applicant.status = ApplicantStatus.processing
     await db.commit()
     background_tasks.add_task(_run_applicant_pipeline, applicant.id)
@@ -500,6 +518,7 @@ async def reprocess_all_documents(
         document.status = DocumentStatus.uploaded
         document.processed_at = None
         document.error_message = None
+        document.classification_confidence = None
 
     applicant.status = ApplicantStatus.processing
     await db.commit()

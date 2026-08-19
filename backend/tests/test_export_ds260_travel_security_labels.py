@@ -307,9 +307,14 @@ def test_real_template_end_to_end_fill_no_blank_answers():
     # 3 ô "chi tiết lịch sử" là free-text (điền khi trả lời Yes), đúng ra để TRỐNG khi không có
     # lịch sử — không phải câu Yes/No, nên loại khỏi khẳng định "phải kết thúc bằng đáp án".
     history_detail = {"us_travel_history", "us_visa_history", "us_visa_refusal_history"}
-    yesno_keys = [k for k in _EXPORT_DEBUG_WATCH_KEYS if k not in history_detail]
+    # Yes/No của 3 câu Section C nằm ở DÒNG GẠCH NGANG ĐẦU TIÊN riêng (không nối vào cuối dòng
+    # câu hỏi nữa, khách yêu cầu 2026-08-14, xem _fill_blank_line_history_block) — kiểm tra riêng
+    # bên dưới bằng cách khớp GIÁ TRỊ đoạn nguyên (không phải endswith trên dòng câu hỏi).
+    blank_line_yesno = {"been_in_us", "issued_us_visa", "refused_us_visa"}
+    yesno_keys = [k for k in _EXPORT_DEBUG_WATCH_KEYS if k not in history_detail and k not in blank_line_yesno]
     values = {k: ("Yes" if k in ("has_vaccination_docs", "want_ssn_issued", "authorize_ssn_disclosure") else "No")
               for k in yesno_keys}
+    values.update({k: "No" for k in blank_line_yesno})
 
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "out.docx"
@@ -328,6 +333,22 @@ def test_real_template_end_to_end_fill_no_blank_answers():
         assert not blanks, "Câu bị bỏ trống khi xuất Word:\n" + "\n".join(
             f"  {k} (đáp án {a!r}) | {t!r}" for k, a, t in blanks
         )
+
+        # 3 câu Section C: đáp án phải xuất hiện ở 1 đoạn RIÊNG (dòng gạch ngang đầu tiên) là
+        # đúng bằng "No" — KHÔNG được nối vào cuối dòng câu hỏi/dòng chú thích.
+        exact_no_paragraphs = {t.strip() for _ctx, t in para_ctx if t.strip() == "No"}
+        assert len(exact_no_paragraphs) >= 1, "Không thấy đoạn riêng nào chỉ chứa 'No' cho Section C"
+        question_lines = {
+            t
+            for _ctx, t in para_ctx
+            if "Have you ever been in the U.S" in t
+            or "Have you ever been issued a U.S visa" in t
+            or "Have you ever been refused a U.S visa" in t
+        }
+        for line in question_lines:
+            assert not line.rstrip().endswith("No"), (
+                f"Câu hỏi Section C KHÔNG được nối 'No' vào cuối dòng nữa: {line!r}"
+            )
 
 
 def test_no_children_answers_question_not_the_count_field():
@@ -383,3 +404,86 @@ def test_all_security_and_ssn_keys_are_fillable_without_colon():
         )
     ]
     assert not missing, f"Field chưa đăng ký vào whitelist điền dòng: {missing}"
+
+
+class _FakePara:
+    def __init__(self, text: str):
+        self.text = text
+
+
+def test_fill_blank_line_history_block_yes_on_first_blank_line_details_below():
+    """Khách yêu cầu 2026-08-14: đáp án Yes/No nằm ở DÒNG GẠCH NGANG ĐẦU TIÊN sau câu hỏi, KHÔNG
+    nối vào cuối câu hỏi/dòng chú thích nữa — chi tiết (nếu có) xuống các dòng kế tiếp."""
+    from app.services.export_ds260 import _fill_blank_line_history_block
+
+    paras = [
+        _FakePara("Have you ever been in the U.S? (Bạn đã từng đến nước MỸ chưa?)"),
+        _FakePara("(Yes or No, if 'Yes' write details below) (...)"),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+    ]
+    values = {"been_in_us": "Yes", "us_travel_history": "Da den My ngay 01/01/2018, o 30 ngay"}
+    _fill_blank_line_history_block(paras, 0, "been_in_us", values)
+
+    assert paras[0].text == "Have you ever been in the U.S? (Bạn đã từng đến nước MỸ chưa?)"
+    assert paras[1].text == "(Yes or No, if 'Yes' write details below) (...)"
+    assert paras[2].text == "Yes"
+    assert paras[3].text == "Da den My ngay 01/01/2018, o 30 ngay"
+    assert paras[4].text.strip() == ""
+    assert paras[5].text.strip() == ""
+
+
+def test_fill_blank_line_history_block_no_on_first_blank_line_rest_stays_empty():
+    from app.services.export_ds260 import _fill_blank_line_history_block
+
+    paras = [
+        _FakePara("Have you ever been in the U.S? (Bạn đã từng đến nước MỸ chưa?)"),
+        _FakePara("(Yes or No, if 'Yes' write details below) (...)"),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+    ]
+    values = {"been_in_us": "No"}
+    _fill_blank_line_history_block(paras, 0, "been_in_us", values)
+
+    assert paras[0].text == "Have you ever been in the U.S? (Bạn đã từng đến nước MỸ chưa?)"
+    assert paras[1].text == "(Yes or No, if 'Yes' write details below) (...)"
+    assert paras[2].text == "No"
+    assert paras[3].text.strip() == ""
+    assert paras[4].text.strip() == ""
+    assert paras[5].text.strip() == ""
+
+
+def test_address_history_semicolon_joined_reflows_to_one_entry_per_line():
+    """Báo lỗi thực tế 2026-08-17: other_addresses_history đến từ nguồn dữ liệu bị dồn thành 1
+    dòng, phân cách bằng "; " thay vì \\n thật — mỗi mốc thời gian phải nằm 1 dòng riêng khi xuất
+    Word, không được dồn chung thành 1 khối text dài."""
+    from app.services.export_ds260 import _fill_blank_line_history_block, _prepare_display_values
+
+    raw_history = (
+        "Jan 2016–Apr 2016: 22/2A Ngo Duc Ke, Ward 12, Tan Binh Dist, Ho Chi Minh City, "
+        "Vietnam 700000; Aug 2004–Jan 2016: 367/12 Le Duc Tho, Ward 16, Go Vap Dist, "
+        "Ho Chi Minh City, Vietnam 700000; Jun 1980–Aug 2004: 151 Phan Dinh Phung, "
+        "Nguyen Nghiem Ward, Quang Ngai, Vietnam 570000"
+    )
+    values = {"other_addresses_used": "Yes", "other_addresses_history": raw_history}
+    display = _prepare_display_values(values)
+    assert display["other_addresses_history"].count("\n") == 2
+
+    paras = [
+        _FakePara("Have you lived anywhere other than this address since the age of sixteen?"),
+        _FakePara("(Yes or No, if 'Yes' write details below) (...)"),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+        _FakePara("                    "),
+    ]
+    _fill_blank_line_history_block(paras, 0, "other_addresses_used", display)
+
+    assert paras[2].text == "Yes"
+    assert paras[3].text.startswith("Jan 2016–Apr 2016:")
+    assert paras[4].text.startswith("Aug 2004–Jan 2016:")
+    assert paras[5].text.startswith("Jun 1980–Aug 2004:")

@@ -24,7 +24,7 @@ def test_scope_worksheets_to_person_keeps_only_matching():
     wife_ws = _ws("VĂN THỊ HƯỜNG", "No", "w2")
     records = [long_ws, wife_ws]
 
-    scoped = scope_worksheets_to_person(records, "VĂN THỊ HƯƠNG")  # khác dấu vẫn khớp
+    scoped = scope_worksheets_to_person(records, "VĂN THỊ HƯƠNG", is_family_case=True)  # khác dấu vẫn khớp
     ws = [r for r in scoped if r.doc_type == "ds260_customer_form"]
     assert len(ws) == 1
     assert ws[0].id == "w2"
@@ -37,19 +37,35 @@ def test_scope_worksheets_no_person_returns_all():
     assert len(scope_worksheets_to_person(records, "")) == 2
 
 
-def test_parent_is_living_respects_worksheet_no():
-    from app.services.ds260_mapping import enrich_parent_is_living
+def test_scope_worksheets_single_member_case_keeps_lone_worksheet():
+    """Hồ sơ ĐƠN (is_family_case=False, mặc định): chỉ 1 người trong cả case → 1 worksheet
+    nghiễm nhiên là của người đó, dù tên không khớp/không truyền tên."""
+    from app.services.ds260_mapping import scope_worksheets_to_person
 
-    bc = SimpleNamespace(
-        doc_type="birth_certificate",
-        variant="standard",
-        id="bc",
-        raw_data=json.dumps({"mother_name": "HOANG THI CAM"}),
-        form_data="{}",
-    )
-    fields = [{"key": "mother_is_living", "value": "No", "source": {}}]  # worksheet đã khai No
-    enrich_parent_is_living(fields, bc, "mother")
-    assert fields[0]["value"] == "No"  # KHÔNG bị ghi đè thành Yes
+    records = [_ws("NGUYEN VAN A", "Yes", "w1")]
+    scoped = scope_worksheets_to_person(records, "TEN KHONG KHOP")
+    assert len([r for r in scoped if r.doc_type == "ds260_customer_form"]) == 1
+
+
+def test_scope_worksheets_family_case_excludes_lone_foreign_worksheet():
+    """Báo lỗi thực tế 2026-08-12: hồ sơ gia đình chỉ có 1 worksheet (của thành viên A) — khi
+    resolve DS-260 cho thành viên B, worksheet đó phải bị LOẠI (không phải trả nguyên vẹn), nếu
+    không applicant_name của B sẽ bị điền nhầm tên A."""
+    from app.services.ds260_mapping import scope_worksheets_to_person
+
+    records = [_ws("NGUYEN DANG DANG", "Yes", "w1")]
+    scoped = scope_worksheets_to_person(records, "NGUYEN HOANG YEN", is_family_case=True)
+    assert [r for r in scoped if r.doc_type == "ds260_customer_form"] == []
+
+
+def test_scope_worksheets_family_case_no_name_excludes_all():
+    """Hồ sơ gia đình mà không xác định được đang xem ai (person_name rỗng) → không dám đoán,
+    loại hết worksheet thay vì trả nguyên vẹn."""
+    from app.services.ds260_mapping import scope_worksheets_to_person
+
+    records = [_ws("A B C", "Yes", "w1"), _ws("D E F", "No", "w2")]
+    scoped = scope_worksheets_to_person(records, "", is_family_case=True)
+    assert [r for r in scoped if r.doc_type == "ds260_customer_form"] == []
 
 
 def test_con_song_maps_to_yes():

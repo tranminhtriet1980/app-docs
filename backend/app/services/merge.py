@@ -17,6 +17,7 @@ from app.models.entities import (
     ExtractedField,
     ProfileField,
 )
+from app.services.ds260_normalize import normalize_gender as _shared_normalize_gender
 from app.services.field_mapping import FIELD_MAP, FIELD_LABELS_VI, PROFILE_SECTIONS, SOURCE_PRIORITY
 
 CANONICAL_PROFILE_KEYS = {key for keys in PROFILE_SECTIONS.values() for key in keys}
@@ -204,10 +205,9 @@ def _normalize_gender(value: str | None) -> str | None:
     n = _normalize(value)
     if not n:
         return None
-    if n in {"M", "MALE", "NAM", "MAN"}:
-        return "MALE"
-    if n in {"F", "FEMALE", "NU", "WOMAN"}:
-        return "FEMALE"
+    normalized = _shared_normalize_gender(n)
+    if normalized in {"Male", "Female"}:
+        return normalized.upper()
     return n
 
 
