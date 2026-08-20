@@ -15,6 +15,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from app.services.ds260_normalize import normalize_gender
+
 DocVariant = Literal["standard", "exception"]
 
 EXCEPTION_SUFFIX = "_new"
@@ -268,6 +270,7 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
             "college_address",
             "college_major",
             "college_period",
+            "date_signed",
         ),
         profile_keys=(),
     ),
@@ -392,11 +395,9 @@ def format_field_value(key: str, value: str | None) -> str:
     if "date" in key_l or key_l.endswith("_dob") or key_l == "dob":
         val = _format_date(val)
     elif key_l in {"gender", "sex"}:
-        u = val.upper()
-        if u in {"M", "MALE", "NAM"}:
-            val = "MALE"
-        elif u in {"F", "FEMALE", "NỮ", "NU"}:
-            val = "FEMALE"
+        normalized = normalize_gender(val)
+        if normalized in {"Male", "Female"}:
+            val = normalized.upper()
     elif "name" in key_l or key_l.endswith("_name"):
         val = val.upper()
     elif key_l.endswith("_used") or key_l.startswith("is_") or key_l in _yes_no_field_keys():
@@ -434,28 +435,22 @@ _BIRTH_CERT_CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
     "mother_given_names": ("mother_first_name", "mother_given_name"),
     "mother_name": ("mother_full_name",),
     "mother_date_of_birth": ("mother_dob", "mother_birth_date", "mother_year_of_birth"),
-    "mother_birth_city": ("mother_city_of_birth", "mother_city"),
-    "mother_place_of_birth": (
-        "mother_birth_place",
-        "mother_address",
-        "mother_address_line1",
-        "mother_birth_address",
-        "mother_residence",
-    ),
-    "mother_birth_country": ("mother_country", "mother_nationality"),
+    # KHÔNG alias mother_city (nơi THƯỜNG TRÚ) vào mother_birth_city, và KHÔNG alias
+    # mother_address/mother_residence vào mother_place_of_birth, và KHÔNG alias mother_country/
+    # mother_nationality (QUỐC TỊCH) vào mother_birth_country — giấy khai sinh VN chỉ ghi nơi
+    # thường trú + quốc tịch HIỆN TẠI của mẹ, KHÔNG ghi nơi/quốc gia mẹ được SINH RA. Coi
+    # thường trú/quốc tịch là nơi sinh sẽ ra kết quả SAI (khách yêu cầu 2026-08-12: tránh đọc
+    # thông tin thường trú/quốc tịch cha/mẹ ra thành nơi sinh của họ).
+    "mother_birth_city": ("mother_city_of_birth",),
+    "mother_place_of_birth": ("mother_birth_place", "mother_birth_address"),
+    "mother_birth_country": (),
     "father_surname": ("father_family_name", "father_last_name"),
     "father_given_names": ("father_first_name", "father_given_name"),
     "father_name": ("father_full_name",),
     "father_date_of_birth": ("father_dob", "father_birth_date", "father_year_of_birth"),
-    "father_birth_city": ("father_city_of_birth", "father_city"),
-    "father_place_of_birth": (
-        "father_birth_place",
-        "father_address",
-        "father_address_line1",
-        "father_birth_address",
-        "father_residence",
-    ),
-    "father_birth_country": ("father_country", "father_nationality"),
+    "father_birth_city": ("father_city_of_birth",),
+    "father_place_of_birth": ("father_birth_place", "father_birth_address"),
+    "father_birth_country": (),
 }
 
 
@@ -476,23 +471,7 @@ def normalize_birth_certificate_raw(raw: dict[str, str]) -> dict[str, str]:
             if val:
                 out[canonical] = val
                 break
-    _normalize_parent_birth_city(out, "mother")
-    _normalize_parent_birth_city(out, "father")
     return out
-
-
-def _normalize_parent_birth_city(raw: dict[str, str], prefix: str) -> None:
-    """Ưu tiên mother_city/father_city; tránh gán cả địa chỉ vào *_birth_city."""
-    from app.services.birth_location import derive_city_from_place
-
-    city = (raw.get(f"{prefix}_city") or raw.get(f"{prefix}_city_of_birth") or "").strip()
-    birth_city = (raw.get(f"{prefix}_birth_city") or "").strip()
-    if city:
-        raw[f"{prefix}_birth_city"] = city
-    elif birth_city and "," in birth_city:
-        derived = derive_city_from_place(birth_city)
-        if derived:
-            raw[f"{prefix}_birth_city"] = derived
 
 
 BIRTH_CERT_CANONICAL_ALIASES = _BIRTH_CERT_CANONICAL_ALIASES

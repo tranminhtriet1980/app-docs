@@ -176,3 +176,29 @@ def test_blank_state_untouched_when_city_also_blank():
     secs = _sections({"birth_city": "", "birth_state": ""})
     normalize_ds260_na_conventions(secs)
     assert _flat(secs)["birth_state"] == ""
+
+
+def test_email_showing_no_becomes_na():
+    """_NA_NOT_NO_KEYS trước đây liệt kê 'email_address' — key thật trong DS-260 mapping là
+    'email', nên rule này chưa từng chạy cho field email (rule chết). Sửa key đúng."""
+    from app.services.ds260_mapping import normalize_ds260_na_conventions
+
+    secs = _sections({"email": "No"})
+    normalize_ds260_na_conventions(secs)
+    assert _flat(secs)["email"] == "N/A"
+
+
+def test_current_state_becomes_na_when_current_city_present():
+    from app.services.ds260_mapping import normalize_ds260_na_conventions
+
+    secs = _sections({"current_city": "Da Nang", "current_state": ""})
+    normalize_ds260_na_conventions(secs)
+    assert _flat(secs)["current_state"] == "N/A"
+
+
+def test_work_employer_state_becomes_na_when_work_employer_city_present():
+    from app.services.ds260_mapping import normalize_ds260_na_conventions
+
+    secs = _sections({"work_employer_city": "Ho Chi Minh", "work_employer_state": ""})
+    normalize_ds260_na_conventions(secs)
+    assert _flat(secs)["work_employer_state"] == "N/A"

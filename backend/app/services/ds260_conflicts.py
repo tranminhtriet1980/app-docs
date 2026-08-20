@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entities import ApplicantDocRecord, Conflict, ConflictStatus, ProfileField
 from app.services.doc_record_sync import list_doc_records
+from app.services.ds260_normalize import normalize_gender, normalize_phone
 
 # Luồng 1 — file mẫu chuẩn
 LUONG1_DOC_TYPES: frozenset[str] = frozenset(
@@ -43,25 +44,34 @@ CHILD_IDENTITY_SEGMENT = "child_identity"
 CHILD_PARENT_IDENTITY_SEGMENT = "child_parent_identity"
 
 def _application_form_worksheet_keys() -> frozenset[str]:
-    """Section D (công việc/học vấn) — mọi field nguồn application_form, trừ narrative tự do
-    (work_prior_jobs_history: so khớp chuỗi tuyệt đối luôn khác nhau dù nội dung đúng)."""
+    """Section D (công việc/học vấn) — mọi field nguồn application_form, gồm cả narrative tự do
+    work_prior_jobs_history (khách yêu cầu 2026-08-13: DS-260 trống mà Job Application có dữ
+    liệu vẫn phải tạo Conflict để người dùng chọn điền — xem build_worksheet_conflict_rows)."""
     from app.services.ds260_mapping import flatten_ds260_mappings
 
-    return frozenset(
-        k
-        for k, m in flatten_ds260_mappings().items()
-        if m.document == "application_form" and k != "work_prior_jobs_history"
-    )
+    return frozenset(k for k, m in flatten_ds260_mappings().items() if m.document == "application_form")
 
 
 # DS-260 mapping keys compared: official (Luồng 1 resolved) vs ds260_customer_form
 WORKSHEET_COMPARE_KEYS: frozenset[str] = frozenset(
     {
+        # DS-260 A.1 — Personal Information: TOÀN BỘ field nguồn passport phải đối chiếu với
+        # DS-260 khách khai, không chỉ vài field — trước đây thiếu applicant_name_native,
+        # family_name, given_names, birth_city, birth_state, birth_country, id_card_number nên
+        # passport và worksheet khác nhau ở các field này không hề bị phát hiện (khách yêu cầu
+        # 2026-08-14).
         "applicant_name",
+        "applicant_name_native",
+        "family_name",
+        "given_names",
         "date_of_birth",
         "gender",
         "nationality",
         "place_of_birth",
+        "birth_city",
+        "birth_state",
+        "birth_country",
+        "id_card_number",
         "passport_number",
         "passport_issue_date",
         "passport_expiration_date",
@@ -142,6 +152,30 @@ _DATE_COMPARE_KEYS = frozenset(
         "passport_expiration_date",
     }
 )
+
+
+def _is_date_compare_key(mapping_key: str) -> bool:
+    """Mọi field ngày (không riêng 3 field cũ) đều nên so bằng ngày đã parse, không phải chuỗi
+    thô — 2 ngày viết khác định dạng nhưng CÙNG giá trị (vd. '01/05/1986' vs '1 May 1986') không
+    được báo xung đột giả (khách yêu cầu 2026-08-12, áp dụng rộng ra mọi ngày sinh cha/mẹ/vợ
+    chồng/con/lý lịch tư pháp — trước đây chỉ 3 key trên mới so kiểu này)."""
+    if mapping_key in _DATE_COMPARE_KEYS:
+        return True
+    from app.services.ds260_dates import is_date_field_key
+
+    return is_date_field_key(mapping_key)
+
+
+def _display_conflict_date(mapping_key: str, val: str) -> str:
+    """value_a/value_b của Conflict hiển thị cho người dùng CHỌN — ngày phải luôn dd/mm/yyyy
+    (đồng nhất với toàn bộ form/input), không phải chuỗi thô từ OCR (thường yyyy-mm-dd) — 2 nguồn
+    hiển thị khác định dạng nhau khiến người dùng khó so sánh/chọn nhầm (khách yêu cầu). Không
+    parse được thì giữ nguyên chuỗi gốc thay vì làm mất dữ liệu hiển thị."""
+    if not val or not _is_date_compare_key(mapping_key):
+        return val
+    from app.services.ds260_dates import format_ds260_display_date
+
+    return format_ds260_display_date(val) or val
 
 
 # Hồ sơ gia đình (nhiều thành viên): field_key được gắn hậu tố ".memberNN" để phân biệt
@@ -240,23 +274,39 @@ def parse_ds260_conflict_key(field_key: str) -> tuple[str, str] | None:
 
 
 def _norm_value(val: str) -> str:
-    return re.sub(r"\s+", " ", (val or "").strip().upper())
+    """Chuẩn hoá để so khớp: bỏ dấu tiếng Việt + gộp khoảng trắng + IN HOA — 2 giá trị chỉ khác
+    HOA/thường hoặc có/không dấu (vd. 'Ba Ria - Vung Tau' vs 'BA RIA - VUNG TAU', 'Việt Nam' vs
+    'VIET NAM') không được coi là xung đột (khách yêu cầu 2026-08-12)."""
+    from app.services.birth_location import _strip_accents
+
+    text = _strip_accents((val or "").strip())
+    return re.sub(r"\s+", " ", text).upper()
 
 
 def _norm_gender(val: str) -> str:
-    u = _norm_value(val)
-    if u in {"M", "MALE", "NAM"}:
-        return "MALE"
-    if u in {"F", "FEMALE", "NU", "NỮ"}:
-        return "FEMALE"
-    return u
+    normalized = normalize_gender(val)
+    if normalized in {"Male", "Female"}:
+        return normalized.upper()
+    return _norm_value(val)
+
+
+_COUNTRY_COMPARE_KEY_RE = re.compile(r"(country|nationality)", re.I)
+_PHONE_COMPARE_KEY_RE = re.compile(r"phone", re.I)
+
+
+def _norm_phone(val: str) -> str:
+    """Số VN dạng nội địa (0398333484) và dạng quốc tế (+84 398333484 / 84398333484 /
+    0084398333484) là CÙNG 1 số — bỏ tiền tố quay số quốc tế, mã quốc gia 84, và số 0
+    đầu (nếu có) để so khớp (khách yêu cầu 2026-08-14)."""
+    return normalize_phone(val)
 
 
 def norm_conflict_value(mapping_key: str, val: str) -> str:
-    """Normalize for comparison — dates to ISO, gender canonical, else uppercase trim."""
+    """Normalize for comparison — dates to ISO, gender canonical, country/nationality via alias
+    map, phone number quốc gia/nội địa cùng 1 số, else accent-insensitive uppercase trim."""
     if not (val or "").strip():
         return ""
-    if mapping_key in _DATE_COMPARE_KEYS:
+    if _is_date_compare_key(mapping_key):
         from app.services.ds260_dates import parse_full_date
 
         parsed = parse_full_date(val)
@@ -264,6 +314,20 @@ def norm_conflict_value(mapping_key: str, val: str) -> str:
             return parsed.isoformat()
     if mapping_key == "gender":
         return _norm_gender(val)
+    if _PHONE_COMPARE_KEY_RE.search(mapping_key or ""):
+        normalized = _norm_phone(val)
+        if normalized:
+            return normalized
+    if _COUNTRY_COMPARE_KEY_RE.search(mapping_key or ""):
+        # "Vietnam" vs "Viet Nam" vs "VIỆT NAM" đều CÙNG một quốc gia — chỉ khác cách viết,
+        # KHÔNG phải xung đột dữ liệu (khách yêu cầu 2026-08-12). Thử alias map trước, phần nào
+        # không nhận diện được (quốc gia hiếm) thì rơi về so sánh chuỗi thường.
+        from app.services.birth_location import _match_country_alias
+
+        for part in re.split(r"\s*/\s*", val):
+            canon = _match_country_alias(part.strip())
+            if canon:
+                return _norm_value(canon)
     return _norm_value(val)
 
 
@@ -492,6 +556,18 @@ def _strict_field_value(
             return val, mapping.key
     val = _resolve_from_record(rec, mapping.field, aliases)
     if val.strip():
+        if mapping.derive == "country_from_location":
+            # vd. birth_country: mapping.field trỏ vào place_of_birth (chuỗi thô "Da Nang" hay
+            # "Da Nang, Vietnam"), KHÔNG phải tên quốc gia đã tách sẵn. So sánh nguyên văn chuỗi
+            # thô với worksheet (khách khai thẳng tên quốc gia, vd. "Vietnam") gần như luôn khác
+            # nhau dù đúng dữ liệu — báo Conflict giả (khách yêu cầu 2026-08-14: passport chỉ
+            # ghi "Da Nang" không kèm "Vietnam" vẫn phải nhận ra là Vietnam). Áp derive thật trước
+            # khi so sánh; không tách được quốc gia thì mới rơi về so chuỗi thô (giữ hành vi cũ).
+            from app.services.birth_location import derive_country_from_place
+
+            derived = derive_country_from_place(val)
+            if derived:
+                return derived, mapping.field
         return val, mapping.field
     return "", mapping.field
 
@@ -634,6 +710,244 @@ def _worksheet_value(
     return val, ds260_rec
 
 
+# Field công việc HIỆN TẠI dạng 1 giá trị đơn (không phải narrative nhiều dòng) — an toàn để so
+# khớp mờ xuyên ngôn ngữ. work_start_date là ngày nên vẫn dùng norm_conflict_value (date-aware),
+# không cần dịch từ vựng.
+_WORK_JOB_TEXT_COMPARE_KEYS = _WORK_CURRENT_JOB_KEYS - {"work_start_date"}
+
+# Field Section D chỉ có DS-260 khách khai là nguồn để ĐIỀN (xem resolve_work_current_job_field/
+# resolve_work_prior_jobs_field trong ds260_mapping.py) — nhưng vẫn phải ĐỐI CHIẾU với
+# Application form: DS-260 trống mà Application form có dữ liệu vẫn phải tạo Conflict để người
+# dùng chọn điền, không được âm thầm bỏ qua như field khác (khách yêu cầu 2026-08-13).
+_WORK_ONLY_COMPARE_KEYS = _WORK_CURRENT_JOB_KEYS | {"work_prior_jobs_history"}
+
+# ADDRESS (current_address/city/state/postal/country): worksheet DS-260 KHÔNG còn được tự động
+# fill từ Application form khi trống nữa (xem ds260_field_allowed_docs.py — khách yêu cầu: trống
+# thì để trống). Nhưng "trống thì để trống" KHÔNG có nghĩa là bỏ qua đối chiếu — DS-260 trống mà
+# Application form có dữ liệu vẫn phải tạo Conflict để người dùng tự chọn có lấy vào hay không,
+# giống hệt Section D (cùng lớp yêu cầu, khách phản hồi: bỏ auto-fill nhưng lỡ tay bỏ luôn cả
+# Conflict — phải tách 2 khái niệm này ra).
+_ADDRESS_COMPARE_KEYS = frozenset(
+    {"current_address", "current_city", "current_state", "postal_code", "current_country"}
+)
+
+
+def _json_values_if_json_like(text: str) -> str:
+    """Model OCR đôi khi trả prior_jobs_history dạng JSON list/dict thay vì câu văn thường (báo
+    lỗi thực tế 2026-08-13, xem normalize_extracted_fields() trong ocr_pipeline.py) — nếu vậy,
+    TÊN KHOÁ JSON (employer_name, occupation_other_specify, end_date…) sẽ lẫn vào token so khớp
+    như thể là nội dung công việc thật, làm containment tính sai (thấp giả). Nếu text parse được
+    JSON, chỉ lấy các GIÁ TRỊ (bỏ tên khoá) để so khớp cho sạch; không phải JSON thì giữ nguyên."""
+    raw = (text or "").strip()
+    if not raw or raw[0] not in "[{":
+        return text
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return text
+
+    values: list[str] = []
+
+    def _collect(node: Any) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                _collect(v)
+        elif isinstance(node, list):
+            for v in node:
+                _collect(v)
+        elif node not in (None, ""):
+            values.append(str(node))
+
+    _collect(data)
+    return " ".join(values) if values else text
+
+
+def _work_values_match(mapping_key: str, official_val: str, worksheet_val: str) -> bool:
+    """So khớp field công việc HIỆN TẠI xuyên ngôn ngữ (Application form thường tiếng Anh, DS-260
+    khách khai thường tiếng Việt) — trước tiên thử so trực tiếp (norm_conflict_value), không khớp
+    mới thử token hoá + dịch từ vựng VN/EN (_job_identity_tokens) cho field dạng 1 giá trị đơn.
+    Hiển thị vẫn giữ nguyên văn — hàm này CHỈ quyết định có tạo Conflict hay không."""
+    if norm_conflict_value(mapping_key, official_val) == norm_conflict_value(mapping_key, worksheet_val):
+        return True
+    from app.services.ds260_mapping import _job_identity_tokens
+
+    if mapping_key == "work_prior_jobs_history":
+        # work_prior_jobs_history là narrative NHIỀU công việc (DS-260) so với Application form
+        # thường chỉ tả 1 công việc — Jaccard đầy đủ sẽ luôn thấp dù DS-260 đã có sẵn đúng job
+        # đó (báo lỗi thực tế 2026-08-13: DS-260 đã liệt kê đủ Greentech Headgear Co 06/02/2019–
+        # 11/09/2020, vẫn bị báo Conflict với Application form vì so nguyên văn). Dùng
+        # CONTAINMENT: token nhận diện job của Application form đã NẰM PHẦN LỚN trong narrative
+        # DS-260 → coi như đã được phản ánh đủ, không cần Conflict.
+        a = _job_identity_tokens("", _json_values_if_json_like(official_val))
+        b = _job_identity_tokens("", worksheet_val)
+        if not a or not b:
+            return False
+        # Ngưỡng thấp hơn field 1-giá-trị (0.5) vì DS-260 định dạng lại chỉ giữ công ty/vị trí/
+        # quản lý/SĐT (bỏ địa chỉ, xem format_prior_jobs_history_display) — Application form vẫn
+        # còn đủ địa chỉ nên containment tự nhiên thấp hơn dù đúng là cùng 1 công việc.
+        return len(a & b) / len(a) >= 0.35
+
+    if mapping_key not in _WORK_JOB_TEXT_COMPARE_KEYS:
+        return False
+
+    a = _job_identity_tokens("", official_val)
+    b = _job_identity_tokens("", worksheet_val)
+    if not a or not b:
+        return False
+    overlap = len(a & b) / len(a | b)
+    return overlap >= 0.5
+
+
+# Field địa chỉ/tên trường — 1 giấy tờ có thể ghi tiếng Việt, giấy khác ghi bản dịch tiếng Anh,
+# hoặc chỉ khác mức chi tiết (1 bên có thêm tỉnh/thành) — so nguyên văn (norm_conflict_value) sẽ
+# luôn khác dù nội dung thực chất giống nhau (khách yêu cầu 2026-08-13: "Ba Ria - Vung Tau" =
+# "BÀ RỊA - VŨNG TÀU", "Continuing Education Center..." = "Trung tâm giáo dục thường xuyên...").
+_PLACE_SCHOOL_COMPARE_KEY_RE = re.compile(r"(_city|_state|_address)$|^edu_\w+_(name|address)$", re.I)
+
+
+def _place_or_school_values_match(a: str, b: str) -> bool:
+    """CONTAINMENT (không phải Jaccard đầy đủ): 1 bên có thể ghi chi tiết hơn bên kia (vd. có
+    thêm tên tỉnh) mà vẫn là cùng 1 địa danh/trường — chỉ cần bên NGẮN HƠN nằm phần lớn trong
+    bên kia là đủ, không cần cả 2 bên tương đồng kích thước."""
+    from app.services.birth_location import place_or_school_identity_tokens
+
+    a_tokens = place_or_school_identity_tokens(a)
+    b_tokens = place_or_school_identity_tokens(b)
+    if not a_tokens or not b_tokens:
+        return False
+    containment = len(a_tokens & b_tokens) / min(len(a_tokens), len(b_tokens))
+    return containment >= 0.6
+
+
+def _address_from_date_plausibility_row(
+    records: list[ApplicantDocRecord],
+    resolutions: dict[str, str],
+    member_suffix: str | None,
+) -> dict[str, Any] | None:
+    """address_from_date (DS-260 khách khai — mốc chuyển đến địa chỉ hiện tại) sau date_signed
+    (Application form — ngày ký form) là bất hợp lý: không thể đã chuyển đến SAU KHI form ghi
+    địa chỉ đó đã ký xong. Chỉ so khi CÙNG 1 địa chỉ hiện tại giữa 2 nguồn (predicate như
+    reattribute_matching_worksheet_sources/build_worksheet_conflict_rows) — địa chỉ khác nhau thì
+    không có gì để đối chiếu mốc thời gian. So ở granularity THÁNG (address_from_date thường chỉ
+    mm/yyyy) để không mis-fire vì thiếu ngày cụ thể."""
+    fk = worksheet_conflict_field_key("address_from_date", member_suffix)
+    if fk in resolutions:
+        return None
+
+    official_addr, _official_rec = _official_value_for_worksheet_compare(
+        records, "current_address", resolutions, member_suffix
+    )
+    worksheet_addr, _ = _worksheet_value(records, "current_address")
+    official_addr = official_addr.strip()
+    worksheet_addr = worksheet_addr.strip()
+    if not official_addr or not worksheet_addr:
+        return None
+    same_address = norm_conflict_value("current_address", official_addr) == norm_conflict_value(
+        "current_address", worksheet_addr
+    ) or _place_or_school_values_match(official_addr, worksheet_addr)
+    if not same_address:
+        return None
+
+    app_rec = pick_latest_by_variant(records, "application_form", "standard") or pick_latest_by_variant(
+        records, "application_form", "exception"
+    )
+    if not app_rec:
+        return None
+    from app.services.ds260_mapping import _resolve_from_record
+
+    date_signed_val = _resolve_from_record(app_rec, "date_signed", ()).strip()
+    address_from_val, ws_rec = _worksheet_value(records, "address_from_date")
+    address_from_val = address_from_val.strip()
+    if not date_signed_val or not address_from_val:
+        return None
+
+    from app.services.ds260_dates import parse_date_lenient
+
+    signed_parsed = parse_date_lenient(date_signed_val)
+    from_parsed = parse_date_lenient(address_from_val)
+    if not signed_parsed or not from_parsed:
+        return None
+    signed_date, _sg = signed_parsed
+    from_date, _fg = from_parsed
+    if not (from_date.year, from_date.month) > (signed_date.year, signed_date.month):
+        return None
+
+    return {
+        "field_key": fk,
+        "value_a": _display_conflict_date("address_from_date", date_signed_val),
+        "document_a_id": app_rec.source_document_id,
+        "value_b": _display_conflict_date("address_from_date", address_from_val),
+        "document_b_id": ws_rec.source_document_id if ws_rec else None,
+    }
+
+
+def _work_start_date_plausibility_row(
+    records: list[ApplicantDocRecord],
+    resolutions: dict[str, str],
+    member_suffix: str | None,
+) -> dict[str, Any] | None:
+    """Application form và DS-260 khách khai cùng mô tả MỘT công việc (employer khớp qua
+    _job_identity_tokens, cùng ngưỡng với _application_form_job_confirmed_as_prior) nhưng ngày
+    bắt đầu lệch nhau — đọc TRỰC TIẾP từ record (không qua _official_value_for_worksheet_compare)
+    nên chạy độc lập với suppression "confirmed as prior" — suppression đó chỉ nhằm tránh so
+    occupation/employer của 2 công việc KHÁC NHAU, không nên chặn luôn việc đối chiếu ngày khi
+    employer đã được xác nhận khớp ở đây. So ở granularity THÁNG — cùng lý do với
+    _address_from_date_plausibility_row."""
+    fk = worksheet_conflict_field_key("work_start_date", member_suffix)
+    if fk in resolutions:
+        return None
+
+    app_rec = pick_latest_by_variant(records, "application_form", "standard") or pick_latest_by_variant(
+        records, "application_form", "exception"
+    )
+    if not app_rec:
+        return None
+
+    from app.services.ds260_mapping import _job_identity_tokens
+
+    app_occ, _ = _strict_field_value(app_rec, "work_primary_occupation")
+    app_emp, _ = _strict_field_value(app_rec, "work_present_employer")
+    app_tokens = _job_identity_tokens(app_occ, app_emp)
+    if not app_tokens:
+        return None
+
+    ws_occ, _ = _worksheet_value(records, "work_primary_occupation")
+    ws_emp, _ = _worksheet_value(records, "work_present_employer")
+    ws_tokens = _job_identity_tokens(ws_occ, ws_emp)
+    if not ws_tokens:
+        return None
+
+    overlap = len(app_tokens & ws_tokens) / len(app_tokens)
+    if overlap < 0.5:
+        return None
+
+    app_start_val, _ = _strict_field_value(app_rec, "work_start_date")
+    ws_start_val, ws_rec = _worksheet_value(records, "work_start_date")
+    app_start_val = app_start_val.strip()
+    ws_start_val = ws_start_val.strip()
+    if not app_start_val or not ws_start_val:
+        return None
+
+    from app.services.ds260_dates import parse_date_lenient
+
+    app_parsed = parse_date_lenient(app_start_val)
+    ws_parsed = parse_date_lenient(ws_start_val)
+    if not app_parsed or not ws_parsed:
+        return None
+    app_date, _ag = app_parsed
+    ws_date, _wg = ws_parsed
+    if (app_date.year, app_date.month) == (ws_date.year, ws_date.month):
+        return None
+
+    return {
+        "field_key": fk,
+        "value_a": _display_conflict_date("work_start_date", app_start_val),
+        "document_a_id": app_rec.source_document_id,
+        "value_b": _display_conflict_date("work_start_date", ws_start_val),
+        "document_b_id": ws_rec.source_document_id if ws_rec else None,
+    }
+
+
 def build_worksheet_conflict_rows(
     records: list[ApplicantDocRecord],
     resolutions: dict[str, str],
@@ -660,20 +974,47 @@ def build_worksheet_conflict_rows(
             records, mapping_key, resolutions, member_suffix
         )
         worksheet_val, worksheet_rec = _worksheet_value(records, mapping_key)
-        if not official_val.strip() or not worksheet_val.strip():
+        if not official_val.strip():
             continue
-        if norm_conflict_value(mapping_key, official_val) == norm_conflict_value(mapping_key, worksheet_val):
+
+        is_work_only = mapping_key in _WORK_ONLY_COMPARE_KEYS
+        compare_even_if_worksheet_empty = is_work_only or mapping_key in _ADDRESS_COMPARE_KEYS
+        if worksheet_val.strip():
+            if is_work_only:
+                if _work_values_match(mapping_key, official_val, worksheet_val):
+                    continue
+            elif norm_conflict_value(mapping_key, official_val) == norm_conflict_value(mapping_key, worksheet_val):
+                continue
+            elif _PLACE_SCHOOL_COMPARE_KEY_RE.search(mapping_key) and _place_or_school_values_match(
+                official_val, worksheet_val
+            ):
+                continue
+        elif not compare_even_if_worksheet_empty:
+            # DS-260 trống + không phải field Section D/Address → không có gì để đối chiếu, bỏ qua.
             continue
+        # Section D hoặc Address + worksheet trống: vẫn rơi xuống đây để tạo Conflict (DS-260
+        # trống nhưng Application form có dữ liệu — người dùng cần tự chọn điền, xem docstring
+        # ở _WORK_ONLY_COMPARE_KEYS/_ADDRESS_COMPARE_KEYS).
 
         rows.append(
             {
                 "field_key": fk,
-                "value_a": official_val,
+                "value_a": _display_conflict_date(mapping_key, official_val),
                 "document_a_id": official_rec.source_document_id if official_rec else None,
-                "value_b": worksheet_val,
+                "value_b": _display_conflict_date(mapping_key, worksheet_val),
                 "document_b_id": worksheet_rec.source_document_id if worksheet_rec else None,
             }
         )
+
+    existing_keys = {r["field_key"] for r in rows}
+    for extra_row in (
+        _address_from_date_plausibility_row(records, resolutions, member_suffix),
+        _work_start_date_plausibility_row(records, resolutions, member_suffix),
+    ):
+        if extra_row and extra_row["field_key"] not in existing_keys:
+            rows.append(extra_row)
+            existing_keys.add(extra_row["field_key"])
+
     return rows
 
 
@@ -707,9 +1048,9 @@ def _sync_document_exception_conflicts(
             rows.append(
                 {
                     "field_key": fk,
-                    "value_a": val_a,
+                    "value_a": _display_conflict_date(key, val_a),
                     "document_a_id": standard.source_document_id,
-                    "value_b": val_b,
+                    "value_b": _display_conflict_date(key, val_b),
                     "document_b_id": reference.source_document_id,
                 }
             )

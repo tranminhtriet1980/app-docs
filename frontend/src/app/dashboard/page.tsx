@@ -257,10 +257,10 @@ function DashboardContent() {
             {isFamilyBundle && (
               <div className="grid gap-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3 sm:grid-cols-2">
                 <div>
-                  <label className="label">Chủ hồ sơ / Chồng</label>
+                  <label className="label">Chủ hồ sơ (người đứng đơn chính)</label>
                   <input
                     className="input"
-                    placeholder="DANG VAN HUNG"
+                    placeholder="DANG VAN HUNG hoặc MAI THI HUONG"
                     value={principalName}
                     onChange={(e) => setPrincipalName(e.target.value)}
                   />

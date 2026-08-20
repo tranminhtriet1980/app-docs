@@ -34,6 +34,65 @@ def test_pick_wife_when_applicant_is_husband():
     assert _pick_spouse_side_from_marriage(marriage, passport) == "wife"
 
 
+def test_pick_side_uses_gender_when_both_sides_share_surname():
+    """Vợ chồng trùng họ (hoặc tên chủ hồ sơ nhiễu OCR chỉ còn lại họ) — _names_match chỉ so
+    HỌ nên khớp CẢ HAI bên. Trước đây luôn chọn nhầm 'wife' (thứ tự if ưu tiên husband match) bất
+    kể applicant thực ra là vợ hay chồng — giới tính hộ chiếu phải phân định đúng bên."""
+    marriage = _rec(
+        {
+            "husband_full_name": "TRAN VAN HUNG",
+            "wife_full_name": "TRAN THI HOA",
+            "marriage_date": "2006-12-21",
+        }
+    )
+    male_applicant = _rec({"full_name": "TRAN VAN HUNG", "gender": "MALE"}, "passport")
+    assert _pick_spouse_side_from_marriage(marriage, male_applicant) == "wife"
+
+    female_applicant = _rec({"full_name": "TRAN THI HOA", "gender": "FEMALE"}, "passport")
+    assert _pick_spouse_side_from_marriage(marriage, female_applicant) == "husband"
+
+
+def test_pick_side_returns_empty_when_ambiguous_and_gender_unknown():
+    marriage = _rec(
+        {"husband_full_name": "TRAN VAN HUNG", "wife_full_name": "TRAN THI HOA"}
+    )
+    applicant = _rec({"full_name": "TRAN VAN HUNG", "gender": ""}, "passport")
+    assert _pick_spouse_side_from_marriage(marriage, applicant) == ""
+
+
+def test_enrich_spouse_dob_filled_even_when_spouse_full_name_unresolved():
+    """Giấy kết hôn có DOB rõ nhưng tên vợ/chồng OCR trống/thiếu (husband_full_name/wife_full_name
+    và mọi alias đều rỗng) — trước đây early-return trước khi fill bất cứ field nào, mất luôn DOB
+    dù dữ liệu ngày sinh không liên quan gì đến việc thiếu tên."""
+    marriage = _rec(
+        {
+            "husband_full_name": "DANG VAN HUNG",
+            # wife_full_name / wife_name đều thiếu — chỉ có DOB.
+            "wife_date_of_birth": "1979-07-19",
+        }
+    )
+    passport = _rec({"full_name": "DANG VAN HUNG", "gender": "MALE"}, "passport")
+    fields = [
+        {"key": "spouse_date_of_birth", "value": "", "source": {}},
+        {"key": "spouse_surname", "value": "", "source": {}},
+    ]
+    enrich_spouse_section_from_marriage(fields, marriage, passport)
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["spouse_date_of_birth"] == "1979-07-19"
+    assert by_key["spouse_surname"] == ""  # tên vẫn không điền được — chỉ DOB được cứu
+
+
+def test_split_vn_person_name_various_lengths():
+    from app.services.ds260_mapping import _split_vn_person_name
+
+    assert _split_vn_person_name("TRAN AN") == ("TRAN", "AN")
+    assert _split_vn_person_name("TRAN VAN AN") == ("TRAN", "VAN AN")
+    assert _split_vn_person_name("TRAN THI VAN AN") == ("TRAN", "THI VAN AN")
+    assert _split_vn_person_name("TRAN") == ("TRAN", "")
+    assert _split_vn_person_name("") == ("", "")
+    assert _split_vn_person_name("  TRAN   VAN   AN  ") == ("TRAN", "VAN AN")
+
+
 def test_enrich_spouse_fields():
     marriage = _rec(
         {

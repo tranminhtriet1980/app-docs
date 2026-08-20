@@ -299,11 +299,14 @@ async def create_applicant(
     db.add(applicant)
     await db.flush()
     if body.is_family_bundle and body.members:
-        await create_case_members(
+        created = await create_case_members(
             db,
             applicant.id,
             [{"role": m.role, "display_name": m.display_name} for m in body.members],
         )
+        principal = next((m for m in created if m.role == PersonRole.principal.value), None)
+        if principal and principal.display_name.strip():
+            applicant.display_name = principal.display_name
     elif body.is_family_bundle:
         await create_case_members(
             db,
@@ -345,6 +348,9 @@ async def set_case_members(
 
     created = await create_case_members(db, applicant.id, members_payload)
     applicant.is_family_bundle = True
+    principal = next((m for m in created if m.role == PersonRole.principal.value), None)
+    if principal and principal.display_name.strip():
+        applicant.display_name = principal.display_name
     await log_audit(
         db,
         user=user,

@@ -467,12 +467,12 @@ def test_grandchild_no_principal_fallback_when_birth_cert_missing_parent():
     ]
     # Con: fallback chủ hồ sơ.
     assert (
-        _resolve_child_parent_name_for_fill(grandchild_bc, "father", members, "child")
+        _resolve_child_parent_name_for_fill(grandchild_bc, "father", members, "child")[0]
         == "DANG VAN TIEN"
     )
     # Cháu: không fallback.
     assert (
-        _resolve_child_parent_name_for_fill(grandchild_bc, "father", members, "grandchild")
+        _resolve_child_parent_name_for_fill(grandchild_bc, "father", members, "grandchild")[0]
         == ""
     )
 

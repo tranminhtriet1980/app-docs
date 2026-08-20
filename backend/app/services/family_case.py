@@ -536,35 +536,131 @@ def pick_child_birth_cert_for_person(
     return max(matched, key=_sort_key)
 
 
+def _is_member_female(member: CaseMember, records: list[ApplicantDocRecord] | None) -> bool:
+    if not member or not member.display_name:
+        return False
+    from app.services.ds260_mapping import _resolve_from_record, pick_luong1_pair_for_person
+
+    # 1. Check passport
+    if records:
+        passport_rec, passport_ref = pick_luong1_pair_for_person(records, "passport", member.display_name)
+        p_rec = passport_rec or passport_ref
+        if p_rec:
+            gender = (_resolve_from_record(p_rec, "gender", ("sex",)) or "").strip().lower()
+            if gender in ("female", "nữ", "nu", "f"):
+                return True
+            if gender in ("male", "nam", "m"):
+                return False
+
+    # 2. Check birth certificate of the member
+    if records:
+        bc_rec = pick_child_birth_cert_for_person(records, member.display_name)
+        if bc_rec:
+            gender = (_resolve_from_record(bc_rec, "child_gender", ("gender",)) or "").strip().lower()
+            if gender in ("female", "nữ", "nu", "f"):
+                return True
+            if gender in ("male", "nam", "m"):
+                return False
+
+    # 3. Guess from Vietnamese name: containing "THI" or "THỊ"
+    name = (member.display_name or "").upper()
+    words = name.split()
+    if "THI" in words or "THỊ" in words:
+        return True
+    return False
+
+
+def _is_member_male(member: CaseMember, records: list[ApplicantDocRecord] | None) -> bool:
+    if not member or not member.display_name:
+        return False
+    from app.services.ds260_mapping import _resolve_from_record, pick_luong1_pair_for_person
+
+    # 1. Check passport
+    if records:
+        passport_rec, passport_ref = pick_luong1_pair_for_person(records, "passport", member.display_name)
+        p_rec = passport_rec or passport_ref
+        if p_rec:
+            gender = (_resolve_from_record(p_rec, "gender", ("sex",)) or "").strip().lower()
+            if gender in ("male", "nam", "m"):
+                return True
+            if gender in ("female", "nữ", "nu", "f"):
+                return False
+
+    # 2. Check birth certificate of the member
+    if records:
+        bc_rec = pick_child_birth_cert_for_person(records, member.display_name)
+        if bc_rec:
+            gender = (_resolve_from_record(bc_rec, "child_gender", ("gender",)) or "").strip().lower()
+            if gender in ("male", "nam", "m"):
+                return True
+            if gender in ("female", "nữ", "nu", "f"):
+                return False
+    return False
+
+
 def _resolve_child_parent_name_for_fill(
     child_rec: ApplicantDocRecord | None,
     parent: str,
     members: list[CaseMember] | None,
     role: str = PersonRole.child.value,
-) -> str:
+    records: list[ApplicantDocRecord] | None = None,
+) -> tuple[str, str, str, str]:
     """
     Tên cha/mẹ trên DS-260 con: ưu tiên GKS con.
 
-    - Con (child): fallback chủ hồ sơ (cha) / phối ngẫu (mẹ).
+    - Con (child): fallback chủ hồ sơ (cha) / phối ngẫu (mẹ) tùy thuộc vào giới tính.
     - Cháu (grandchild): chỉ lấy từ GKS của cháu — cha/mẹ là một thành viên 'con'
       trong hồ sơ, khớp tên ở bước enrich (cây gia phả), không fallback ông/bà.
     """
     from app.services.ds260_mapping import _resolve_from_record
 
+    doc_type = (
+        child_rec.doc_type
+        if child_rec and child_rec.doc_type in ("birth_certificate_child", "birth_certificate")
+        else "birth_certificate_child"
+    )
     aliases = ("father_full_name",) if parent == "father" else ("mother_full_name",)
     if child_rec:
         name = _resolve_from_record(child_rec, f"{parent}_name", aliases)
         if name.strip():
-            return name.strip()
+            return name.strip(), doc_type, f"{parent}_name", "child_birth_cert_parent"
 
     if not members or role == PersonRole.grandchild.value:
-        return ""
+        return "", "", "", ""
+
+    principal = next((m for m in members if m.role == PersonRole.principal.value), None)
+    spouse = next((m for m in members if m.role == PersonRole.spouse.value), None)
+
+    # Xử lý giới tính
+    principal_is_female = _is_member_female(principal, records) if principal else False
+    spouse_is_female = _is_member_female(spouse, records) if spouse else False
+
+    father_member = None
+    mother_member = None
+
+    if principal_is_female:
+        mother_member = principal
+        father_member = spouse
+    elif spouse_is_female:
+        father_member = principal
+        mother_member = spouse
+    else:
+        # Default fallback
+        father_member = principal
+        mother_member = spouse
 
     if parent == "father":
-        principal = next((m for m in members if m.role == PersonRole.principal.value), None)
-        return (principal.display_name or "").strip() if principal else ""
-    spouse = next((m for m in members if m.role == PersonRole.spouse.value), None)
-    return (spouse.display_name or "").strip() if spouse else ""
+        if father_member:
+            source_field = "principal_display_name" if father_member == principal else "spouse_display_name"
+            derived = "child_father_from_principal_member" if father_member == principal else "child_father_from_spouse_member"
+            return (father_member.display_name or "").strip(), "case_member", source_field, derived
+    else:  # parent == "mother"
+        if mother_member:
+            source_field = "principal_display_name" if mother_member == principal else "spouse_display_name"
+            derived = "child_mother_from_principal_member" if mother_member == principal else "child_mother_from_spouse_member"
+            return (mother_member.display_name or "").strip(), "case_member", source_field, derived
+
+    return "", "", "", ""
 
 
 def _fill_child_parent_identity(
@@ -1210,15 +1306,27 @@ def apply_child_sections_from_birth_cert(
     """
     from app.services.ds260_mapping import (
         _resolve_from_record,
-        apply_father_absent_rule,
-        apply_mother_absent_rule,
         empty_ds260_field_source,
         enrich_parent_death_from_death_cert,
         pick_latest_record,
     )
 
-    father_name = _resolve_child_parent_name_for_fill(child_rec, "father", members, role)
-    mother_name = _resolve_child_parent_name_for_fill(child_rec, "mother", members, role)
+    # Khoan hẵn fill thông tin vào khi chưa upload GKS con
+    if not child_rec:
+        for sec in sections_out:
+            if sec["id"] not in ("section_father", "section_mother", "section_birth_certificate"):
+                continue
+            for field in sec["fields"]:
+                field["value"] = ""
+                field["source"] = empty_ds260_field_source()
+        return
+
+    father_name, father_doc_type, father_src_field, father_derived = _resolve_child_parent_name_for_fill(
+        child_rec, "father", members, role, records
+    )
+    mother_name, mother_doc_type, mother_src_field, mother_derived = _resolve_child_parent_name_for_fill(
+        child_rec, "mother", members, role, records
+    )
 
     for sec in sections_out:
         if sec["id"] not in ("section_father", "section_mother", "section_birth_certificate"):
@@ -1242,10 +1350,10 @@ def apply_child_sections_from_birth_cert(
                         sec["fields"],
                         "father",
                         father_name,
-                        document_type="case_member",
-                        source_field="principal_display_name",
+                        document_type=father_doc_type,
+                        source_field=father_src_field,
                         record_id=rid,
-                        derived="child_father_from_principal_member",
+                        derived=father_derived,
                     )
                 if records is not None and members is not None and father_name:
                     enrich_child_parent_details_from_case(
@@ -1253,8 +1361,6 @@ def apply_child_sections_from_birth_cert(
                     )
                 if records is not None:
                     enrich_child_parent_details_from_own_worksheet(sec["fields"], "father", records)
-            else:
-                apply_father_absent_rule(sec["fields"])
         elif sec["id"] == "section_mother":
             if child_rec or mother_name:
                 bc_mother_name = ""
@@ -1270,10 +1376,10 @@ def apply_child_sections_from_birth_cert(
                         sec["fields"],
                         "mother",
                         mother_name,
-                        document_type="case_member",
-                        source_field="spouse_display_name",
+                        document_type=mother_doc_type,
+                        source_field=mother_src_field,
                         record_id=rid,
-                        derived="child_mother_from_spouse_member",
+                        derived=mother_derived,
                     )
                 if records is not None and members is not None and mother_name:
                     enrich_child_parent_details_from_case(
@@ -1281,8 +1387,6 @@ def apply_child_sections_from_birth_cert(
                     )
                 if records is not None:
                     enrich_child_parent_details_from_own_worksheet(sec["fields"], "mother", records)
-            else:
-                apply_mother_absent_rule(sec["fields"])
         elif sec["id"] == "section_birth_certificate" and child_rec:
             enrich_child_birth_certificate_section(sec["fields"], child_rec)
             rid = str(child_rec.id)

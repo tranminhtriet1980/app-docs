@@ -62,3 +62,7 @@ quy-trinh/file-rieng/09-Go-live.xlsx
 # Logs
 *.log
 npm-debug.log*
+
+.claude/
+CLAUDE.md
+graphify-out/

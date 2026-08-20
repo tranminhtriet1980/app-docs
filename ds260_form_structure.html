@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DS-260 Form — 247 Fields / 21 Sections</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --header-bg: #1a3a5c;
+    --accent: #2c7be5;
+    --accent-light: #e8f0fd;
+    --border: #dde3ed;
+    --text: #1e2a3a;
+    --muted: #6b7a8d;
+    --tag-bg: #e3eaf6;
+    --tag-text: #1a3a5c;
+    --ok: #27ae60;
+    --warn: #e67e22;
+    --total-bg: #1a3a5c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  .toc-bar {
+    background: var(--header-bg);
+    color: #fff;
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .toc-bar h1 { font-size: 1.1rem; font-weight: 600; padding: 0.75rem 0; white-space: nowrap; }
+  .toc-bar nav { display: flex; gap: 0.25rem; overflow-x: auto; scrollbar-width: none; padding: 0.5rem 0; }
+  .toc-bar nav::-webkit-scrollbar { display: none; }
+  .toc-bar nav a {
+    display: inline-block;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    color: rgba(255,255,255,0.75);
+    text-decoration: none;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .toc-bar nav a:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+  .summary-strip {
+    background: var(--total-bg);
+    color: #fff;
+    padding: 1.5rem 2rem;
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+  .summary-strip .stat { display: flex; flex-direction: column; }
+  .summary-strip .stat .val { font-size: 2rem; font-weight: 700; }
+  .summary-strip .stat .lbl { font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+  .section-card {
+    background: var(--card);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.9rem 1.25rem;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid transparent;
+    transition: background 0.15s;
+  }
+  .section-header:hover { background: var(--accent-light); }
+  .section-card.open .section-header { border-bottom-color: var(--border); }
+
+  .section-num {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .section-num.dark { background: #34495e; }
+
+  .section-info { flex: 1; min-width: 0; }
+  .section-info h2 { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+  .section-info .section-slug { font-size: 0.72rem; color: var(--muted); margin-top: 0.1rem; font-family: monospace; }
+
+  .section-meta { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+  .badge.dark { background: #e8ecf0; color: var(--muted); }
+
+  .chevron {
+    width: 20px; height: 20px;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+    color: var(--muted);
+  }
+  .section-card.open .chevron { transform: rotate(180deg); }
+
+  .section-body { display: none; padding: 1rem 1.25rem; }
+  .section-card.open .section-body { display: block; }
+
+  .fields-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.5rem;
+  }
+
+  .field-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+  }
+  .field-item .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .field-item .fname {
+    font-family: 'Courier New', monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .child-group {
+    background: #f0f4fb;
+    border: 1px solid #c8d4ec;
+    border-radius: 8px;
+    padding: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .child-group:last-child { margin-bottom: 0; }
+  .child-group h4 { font-size: 0.8rem; font-weight: 700; color: #34495e; margin-bottom: 0.6rem; }
+  .child-group .fields-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+  .prior-jobs-group {
+    background: #faf8f0;
+    border: 1px solid #e8dfc0;
+    border-radius: 8px;
+    padding: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .prior-jobs-group:last-child { margin-bottom: 0; }
+  .prior-jobs-group h4 { font-size: 0.8rem; font-weight: 700; color: #7d6608; margin-bottom: 0.6rem; }
+  .prior-jobs-group .fields-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+  .security-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.4rem;
+  }
+  .security-field {
+    background: #fff8f8;
+    border: 1px solid #f5c6c6;
+    border-radius: 5px;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.78rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+  .security-field .dot { background: #e74c3c; margin-top: 0.3rem; flex-shrink: 0; }
+  .security-field .fname { font-family: 'Courier New', monospace; font-size: 0.7rem; color: #c0392b; }
+
+  .doc-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #fef9e7;
+    border: 1px solid #f9e79f;
+    border-radius: 4px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.72rem;
+    color: #7d6608;
+    margin-bottom: 0.75rem;
+  }
+
+  .back-to-top {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 10px rgba(44,123,229,0.4);
+    font-size: 1.1rem;
+    transition: transform 0.15s;
+  }
+  .back-to-top:hover { transform: scale(1.1); }
+
+  @media (max-width: 600px) {
+    .fields-grid { grid-template-columns: 1fr; }
+    .security-group { grid-template-columns: 1fr; }
+    .summary-strip { gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toc-bar">
+  <h1>DS-260 — 247 Fields</h1>
+  <nav>
+    <a href="#s1">1. Personal</a>
+    <a href="#s2">2. Passport</a>
+    <a href="#s3">3. Address</a>
+    <a href="#s4">4. Contact</a>
+    <a href="#s5">5. Social Media</a>
+    <a href="#s6">6. Birth Cert</a>
+    <a href="#s7">7. Father</a>
+    <a href="#s8">8. Mother</a>
+    <a href="#s9">9. Spouse</a>
+    <a href="#s10">10. Prev Spouse</a>
+    <a href="#s11">11. Judicial</a>
+    <a href="#s12">12. Divorce</a>
+    <a href="#s13">13. Death</a>
+    <a href="#s14">14. Children</a>
+    <a href="#s15">15. US Travel</a>
+    <a href="#s16">16. Work/Edu</a>
+    <a href="#s17">17. Military</a>
+    <a href="#s18">18. Additional</a>
+    <a href="#s19">19. Security</a>
+    <a href="#s20">20. SSN</a>
+  </nav>
+</div>
+
+<div class="summary-strip">
+  <div class="stat"><span class="val">247</span><span class="lbl">Total Fields</span></div>
+  <div class="stat"><span class="val">21</span><span class="lbl">Sections</span></div>
+  <div class="stat"><span class="val">3</span><span class="lbl">Document Types</span></div>
+  <div class="stat"><span class="val">4</span><span class="lbl">Children Supported</span></div>
+</div>
+
+<main>
+
+<!-- ===================== SECTION 1 ===================== -->
+<div class="section-card open" id="s1">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">1</div>
+    <div class="section-info">
+      <h2>A.1 — Personal Information / Thông Tin Cá Nhân</h2>
+      <div class="section-slug">section_a_personal &nbsp;·&nbsp; Form chính của ứng viên</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">15 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">applicant_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">applicant_name_native</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_name_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_names</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">family_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">given_names</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">date_of_birth</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">place_of_birth</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">birth_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">birth_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">birth_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">gender</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">current_marital_status</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">nationality</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">id_card_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 2 ===================== -->
+<div class="section-card" id="s2">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">2</div>
+    <div class="section-info">
+      <h2>A.2 — Passport / Travel Document &nbsp;·&nbsp; Hộ chiếu / Giấy tờ du hành</h2>
+      <div class="section-slug">section_a_passport &nbsp;·&nbsp; Form chính</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">7 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">passport_number</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">passport_issue_date</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">passport_expiration_date</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">passport_place_of_issue</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">passport_issuing_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_nationality_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_nationality_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 3 ===================== -->
+<div class="section-card" id="s3">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">3</div>
+    <div class="section-info">
+      <h2>3 — Address / Địa Chỉ</h2>
+      <div class="section-slug">section_address &nbsp;·&nbsp; Form chính</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">8 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">current_address</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">current_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">current_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">postal_code</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">current_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">address_from_date</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_addresses_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_addresses_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 4 ===================== -->
+<div class="section-card" id="s4">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">4</div>
+    <div class="section-info">
+      <h2>4 — Contact Information / Thông Tin Liên Lạc</h2>
+      <div class="section-slug">section_contact &nbsp;·&nbsp; Form chính</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">8 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">primary_phone</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">secondary_phone</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">work_phone</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_phones_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_phones_history</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">email</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_emails_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_emails_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 5 ===================== -->
+<div class="section-card" id="s5">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">5</div>
+    <div class="section-info">
+      <h2>5 — Social Media / Mạng Xã Hội</h2>
+      <div class="section-slug">section_social &nbsp;·&nbsp; Form chính</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">4 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">social_media_platform</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">social_media_identifier</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_social_media_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_social_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 6 ===================== -->
+<div class="section-card" id="s6">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">6</div>
+    <div class="section-info">
+      <h2>Giấy Khai Sinh — Chủ Hồ Sơ &nbsp;·&nbsp; Birth Certificate (Applicant)</h2>
+      <div class="section-slug">section_birth_certificate &nbsp;·&nbsp; Document type: Giấy khai sinh</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">7 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="doc-info">📄 OCR từ giấy khai sinh chính chủ hồ sơ</div>
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_full_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_date_of_birth</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_place_of_birth</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_gender</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_father_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_mother_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">birth_cert_registration_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 7 ===================== -->
+<div class="section-card" id="s7">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">7</div>
+    <div class="section-info">
+      <h2>Father Information / Thông Tin Cha</h2>
+      <div class="section-slug">section_father &nbsp;·&nbsp; Form chính — 14 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">14 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">father_surname</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_given_names</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_date_of_birth</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_birth_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_birth_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_birth_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_full_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_is_living</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_death_year</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_address</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_postal_code</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">father_country</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 8 ===================== -->
+<div class="section-card" id="s8">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">8</div>
+    <div class="section-info">
+      <h2>Mother Information / Thông Tin Mẹ</h2>
+      <div class="section-slug">section_mother &nbsp;·&nbsp; Form chính — 14 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">14 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_surname</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_given_names</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_date_of_birth</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_birth_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_birth_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_birth_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_full_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_is_living</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_death_year</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_address</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_postal_code</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">mother_country</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 9 ===================== -->
+<div class="section-card" id="s9">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">9</div>
+    <div class="section-info">
+      <h2>Spouse Information / Thông Tin Người Phối Ngẫu</h2>
+      <div class="section-slug">section_spouse &nbsp;·&nbsp; Form chính — 18 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">18 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_surname</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_given_names</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_full_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_date_of_birth</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_birth_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_birth_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_birth_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_address</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_occupation</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_occupation_other</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_marriage_date</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_marriage_city</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_marriage_state</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_marriage_country</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">spouse_immigrating</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">marriage_husband_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">marriage_wife_name</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">marriage_document_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 10 ===================== -->
+<div class="section-card" id="s10">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">10</div>
+    <div class="section-info">
+      <h2>Previous Spouse / Thông Tin Người Phối Ngẫu Cũ (Đã Ly Hôn)</h2>
+      <div class="section-slug">section_previous_spouse &nbsp;·&nbsp; Form chính — 8 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">8 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">previous_spouses_used</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">previous_spouse_full_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">previous_spouse_date_of_birth</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">previous_divorce_date</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">previous_marriage_date</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">divorce_husband_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">divorce_wife_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">divorce_document_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 11 ===================== -->
+<div class="section-card" id="s11">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">11</div>
+    <div class="section-info">
+      <h2>Lý Lịch Tư Pháp &nbsp;·&nbsp; Judicial / Criminal Record Certificate</h2>
+      <div class="section-slug">section_judicial &nbsp;·&nbsp; Document type: Lý lịch tư pháp — 5 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">5 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="doc-info">📄 OCR từ Giấy chứng nhận lý lịch tư pháp</div>
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">judicial_full_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">judicial_date_of_birth</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">judicial_nationality</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">judicial_certificate_number</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">judicial_issue_date</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 12 ===================== -->
+<div class="section-card" id="s12">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">12</div>
+    <div class="section-info">
+      <h2>Ly Hôn &nbsp;·&nbsp; Divorce Certificate</h2>
+      <div class="section-slug">section_divorce &nbsp;·&nbsp; Document type: Giấy ly hôn — 5 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">5 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="doc-info">📄 OCR từ Giấy ly hôn</div>
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">divorce_husband_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">divorce_wife_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">divorce_marriage_date</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">divorce_date</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">divorce_document_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 13 ===================== -->
+<div class="section-card" id="s13">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">13</div>
+    <div class="section-info">
+      <h2>Giấy Báo Tử &nbsp;·&nbsp; Death Certificate</h2>
+      <div class="section-slug">section_death &nbsp;·&nbsp; Document type: Giấy báo tử — 5 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">5 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="doc-info">📄 OCR từ Giấy báo tử</div>
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">death_deceased_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">death_date</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">death_place</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">death_relationship</div></div>
+      <div class="field-item"><div class="dot" style="background:#e67e22"></div><div class="fname">death_document_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 14 ===================== -->
+<div class="section-card" id="s14">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">14</div>
+    <div class="section-info">
+      <h2>5 — Thông Tin Con Cái &nbsp;·&nbsp; Children Information</h2>
+      <div class="section-slug">section_children &nbsp;·&nbsp; Form chính — 38 fields (4 children × ~9 fields)</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">38 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+
+    <div class="child-group">
+      <h4>👶 Child 1</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_full_name</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_date_of_birth</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_birth_city</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_birth_state</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_birth_country</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_lives_with</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_current_address</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_immigrating</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_1_immigrating_future</div></div>
+      </div>
+    </div>
+
+    <div class="child-group">
+      <h4>👧 Child 2</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_full_name</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_date_of_birth</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_birth_city</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_birth_state</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_birth_country</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_lives_with</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_current_address</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_immigrating</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_2_immigrating_future</div></div>
+      </div>
+    </div>
+
+    <div class="child-group">
+      <h4>🧒 Child 3</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_full_name</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_date_of_birth</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_birth_city</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_birth_state</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_birth_country</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_lives_with</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_current_address</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_immigrating</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_3_immigrating_future</div></div>
+      </div>
+    </div>
+
+    <div class="child-group">
+      <h4>🧒 Child 4</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_full_name</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_date_of_birth</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_birth_city</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_birth_state</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_birth_country</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_lives_with</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_current_address</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_immigrating</div></div>
+        <div class="field-item"><div class="dot"></div><div class="fname">child_4_immigrating_future</div></div>
+      </div>
+    </div>
+
+    <div class="fields-grid" style="margin-top:0.5rem">
+      <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">children_used</div></div>
+      <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">children_count</div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== SECTION 15 ===================== -->
+<div class="section-card" id="s15">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">15</div>
+    <div class="section-info">
+      <h2>C — Previous U.S. Travel / Lịch Sử Đến Mỹ</h2>
+      <div class="section-slug">section_us_travel &nbsp;·&nbsp; Form chính — 6 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">6 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">been_in_us</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">us_travel_history</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">issued_us_visa</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">us_visa_history</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">refused_us_visa</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">us_visa_refusal_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 16 ===================== -->
+<div class="section-card" id="s16">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">16</div>
+    <div class="section-info">
+      <h2>D — Work / Education / Training &nbsp;·&nbsp; Công Việc / Học Vấn / Đào Tạo</h2>
+      <div class="section-slug">section_work_education &nbsp;·&nbsp; Form chính — 24 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">24 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+
+    <div class="prior-jobs-group">
+      <h4>💼 Employment — Current Job</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_primary_occupation</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_occupation_other_specify</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_present_employer</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_employer_address</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_employer_city</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_employer_state</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_employer_postal_code</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_employer_country</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_job_title</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_start_date</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_other_occupation_used</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_other_occupation_detail</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_prior_jobs_used</div></div>
+        <div class="field-item"><div class="dot" style="background:#2980b9"></div><div class="fname">work_prior_jobs_history</div></div>
+      </div>
+    </div>
+
+    <div class="prior-jobs-group">
+      <h4>🎓 Education — Middle School</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_middle_school_name</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_middle_school_address</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_middle_school_period</div></div>
+      </div>
+    </div>
+
+    <div class="prior-jobs-group">
+      <h4>🎓 Education — High School</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_high_school_name</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_high_school_address</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_high_school_period</div></div>
+      </div>
+    </div>
+
+    <div class="prior-jobs-group">
+      <h4>🎓 Education — College / University</h4>
+      <div class="fields-grid">
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_college_name</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_college_address</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_college_major</div></div>
+        <div class="field-item"><div class="dot" style="background:#27ae60"></div><div class="fname">edu_college_period</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== SECTION 17 ===================== -->
+<div class="section-card" id="s17">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">17</div>
+    <div class="section-info">
+      <h2>Nghĩa Vụ Quân Sự &nbsp;·&nbsp; Military Service</h2>
+      <div class="section-slug">section_military &nbsp;·&nbsp; Form chính — 9 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">9 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_served</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_full_name</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_country</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_branch</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_rank</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_specialty</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_service_start</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_service_end</div></div>
+      <div class="field-item"><div class="dot" style="background:#16a085"></div><div class="fname">military_document_number</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 18 ===================== -->
+<div class="section-card" id="s18">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num">18</div>
+    <div class="section-info">
+      <h2>E.2 — Additional Information / Thông Tin Khác</h2>
+      <div class="section-slug">section_additional_info &nbsp;·&nbsp; Form chính — 4 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge">4 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot"></div><div class="fname">other_languages_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">other_languages</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">traveled_countries_5yr_used</div></div>
+      <div class="field-item"><div class="dot"></div><div class="fname">traveled_countries_history</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 19 ===================== -->
+<div class="section-card" id="s19">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">19</div>
+    <div class="section-info">
+      <h2>F — Security and Background / An Ninh &amp; Lý Lịch</h2>
+      <div class="section-slug">section_security &nbsp;·&nbsp; Form chính — 46 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">46 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="security-group">
+
+      <!-- Communicable Disease -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">communicable_disease</div>
+      </div>
+
+      <!-- Vaccination -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">has_vaccination_docs</div>
+      </div>
+
+      <!-- Physical/Mental Disorder -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">mental_physical_disorder</div>
+      </div>
+
+      <!-- Drug Abuse -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">drug_abuser</div>
+      </div>
+
+      <!-- Arrested / Convicted -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">arrested_convicted</div>
+      </div>
+
+      <!-- Violated controlled substance -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">violated_controlled_substance</div>
+      </div>
+
+      <!-- Family drug trafficking -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">family_drug_trafficking_benefited</div>
+      </div>
+
+      <!-- Prostitution -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">prostitution</div>
+      </div>
+
+      <!-- Money laundering -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">money_laundering</div>
+      </div>
+
+      <!-- Human trafficking committed -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">human_trafficking_committed</div>
+      </div>
+
+      <!-- Human trafficking aided -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">human_trafficking_aided</div>
+      </div>
+
+      <!-- Family human trafficking benefited -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">family_human_trafficking_benefited</div>
+      </div>
+
+      <!-- Espionage / Sabotage -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">espionage_sabotage</div>
+      </div>
+
+      <!-- Terrorist activities -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">terrorist_activities</div>
+      </div>
+
+      <!-- Terrorist financial support -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">terrorist_financial_support</div>
+      </div>
+
+      <!-- Terrorist organization member -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">terrorist_org_member</div>
+      </div>
+
+      <!-- Family terrorist activity -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">family_terrorist_activity</div>
+      </div>
+
+      <!-- Genocide -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">genocide</div>
+      </div>
+
+      <!-- Torture -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">torture</div>
+      </div>
+
+      <!-- Extrajudicial killings -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">extrajudicial_killings</div>
+      </div>
+
+      <!-- Child soldiers -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">child_soldiers</div>
+      </div>
+
+      <!-- Religious freedom violations -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">religious_freedom_violations</div>
+      </div>
+
+      <!-- Communist party member -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">communist_party_member</div>
+      </div>
+
+      <!-- Colombia groups support -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">colombia_groups_support</div>
+      </div>
+
+      <!-- Abuse position to confiscate property -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">abuse_position_confiscate_property</div>
+      </div>
+
+      <!-- Family abuse position property -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">family_abuse_position_property</div>
+      </div>
+
+      <!-- Population control / abortion -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">population_control_abortion</div>
+      </div>
+
+      <!-- Chemical weapons disclosure -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">chemical_weapons_disclosure</div>
+      </div>
+
+      <!-- Family chemical weapons disclosure -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">family_chemical_weapons_disclosure</div>
+      </div>
+
+      <!-- Visa fraud -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">visa_fraud</div>
+      </div>
+
+      <!-- Removed / deported -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">removed_deported</div>
+      </div>
+
+      <!-- Withheld custody of US child -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">withheld_custody_us_child</div>
+      </div>
+
+      <!-- Assisted withholding custody -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">assisted_withhold_custody</div>
+      </div>
+
+      <!-- Voted illegally -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">voted_illegally</div>
+      </div>
+
+      <!-- Renounced citizenship for tax -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">renounced_citizenship_tax</div>
+      </div>
+
+      <!-- Attended public school with F status -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">attended_public_school_f_status</div>
+      </div>
+
+      <!-- Skilled labor no certification -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">skilled_labor_no_certification</div>
+      </div>
+
+      <!-- Foreign medical grad no exam -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">foreign_medical_grad_no_exam</div>
+      </div>
+
+      <!-- Health care worker no cert -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">health_care_worker_no_cert</div>
+      </div>
+
+      <!-- Permanently ineligible for citizenship -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">permanently_ineligible_citizenship</div>
+      </div>
+
+      <!-- Departed US to evade military service -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">departed_us_evade_military</div>
+      </div>
+
+      <!-- Polygamy -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">polygamy</div>
+      </div>
+
+      <!-- Exchange visitor J unfulfilled -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">exchange_visitor_j_unfulfilled</div>
+      </div>
+
+      <!-- Frivolous asylum -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">frivolous_asylum</div>
+      </div>
+
+      <!-- Public charge -->
+      <div class="security-field">
+        <div class="dot"></div>
+        <div class="fname">public_charge</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SECTION 20 ===================== -->
+<div class="section-card" id="s20">
+  <div class="section-header" onclick="toggle(this)">
+    <div class="section-num dark">20</div>
+    <div class="section-info">
+      <h2>G — Social Security Number / Số An Sinh Xã Hội</h2>
+      <div class="section-slug">section_ssn &nbsp;·&nbsp; Form chính — 3 fields</div>
+    </div>
+    <div class="section-meta">
+      <span class="badge dark">3 fields</span>
+    </div>
+    <svg class="chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="section-body">
+    <div class="fields-grid">
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">applied_ssn_before</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">want_ssn_issued</div></div>
+      <div class="field-item"><div class="dot" style="background:#8e44ad"></div><div class="fname">authorize_ssn_disclosure</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Summary table -->
+<div class="section-card open" style="background:#f8fafc">
+  <div class="section-header">
+    <div class="section-num" style="background:#27ae60">✓</div>
+    <div class="section-info">
+      <h2>Field Count Summary</h2>
+      <div class="section-slug">247 fields across 21 sections</div>
+    </div>
+  </div>
+  <div class="section-body">
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead>
+        <tr style="background:#e8edf5">
+          <th style="padding:0.4rem 0.75rem;text-align:left">#</th>
+          <th style="padding:0.4rem 0.75rem;text-align:left">Section</th>
+          <th style="padding:0.4rem 0.75rem;text-align:center">Fields</th>
+          <th style="padding:0.4rem 0.75rem;text-align:left">Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">1</td><td style="padding:0.35rem 0.75rem">A.1 — Personal Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">15</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">2</td><td style="padding:0.35rem 0.75rem">A.2 — Passport / Travel Document</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">7</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">3</td><td style="padding:0.35rem 0.75rem">3 — Address</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">8</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">4</td><td style="padding:0.35rem 0.75rem">4 — Contact Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">8</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">5</td><td style="padding:0.35rem 0.75rem">5 — Social Media</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">4</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">6</td><td style="padding:0.35rem 0.75rem">Giấy Khai Sinh (chủ hồ sơ)</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">7</td><td style="padding:0.35rem 0.75rem;color:#e67e22">Birth Cert (OCR)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">7</td><td style="padding:0.35rem 0.75rem">Father Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">14</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">8</td><td style="padding:0.35rem 0.75rem">Mother Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">14</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">9</td><td style="padding:0.35rem 0.75rem">Spouse Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">18</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">10</td><td style="padding:0.35rem 0.75rem">Previous Spouse (Đã ly hôn)</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">8</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">11</td><td style="padding:0.35rem 0.75rem">Lý Lịch Tư Pháp</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">5</td><td style="padding:0.35rem 0.75rem;color:#e67e22">Judicial Cert (OCR)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">12</td><td style="padding:0.35rem 0.75rem">Ly Hôn</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">5</td><td style="padding:0.35rem 0.75rem;color:#e67e22">Divorce Cert (OCR)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">13</td><td style="padding:0.35rem 0.75rem">Giấy Báo Tử</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">5</td><td style="padding:0.35rem 0.75rem;color:#e67e22">Death Cert (OCR)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">14</td><td style="padding:0.35rem 0.75rem">5 — Children Information (×4)</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">38</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">15</td><td style="padding:0.35rem 0.75rem">C — U.S. Travel History</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">6</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">16</td><td style="padding:0.35rem 0.75rem">D — Work / Education</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">24</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">17</td><td style="padding:0.35rem 0.75rem">Nghĩa Vụ Quân Sự</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">9</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">18</td><td style="padding:0.35rem 0.75rem">E.2 — Additional Information</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">4</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">19</td><td style="padding:0.35rem 0.75rem">F — Security &amp; Background</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">46</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:0.35rem 0.75rem">20</td><td style="padding:0.35rem 0.75rem">G — Social Security Number</td><td style="padding:0.35rem 0.75rem;text-align:center;font-weight:700">3</td><td style="padding:0.35rem 0.75rem;color:#6b7a8d">DS-260 Form</td></tr>
+        <tr style="background:#1a3a5c;color:#fff">
+          <td style="padding:0.5rem 0.75rem;font-weight:700" colspan="2">TOTAL</td>
+          <td style="padding:0.5rem 0.75rem;text-align:center;font-weight:700;font-size:1.1rem">247</td>
+          <td style="padding:0.5rem 0.75rem"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</main>
+
+<button class="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+function toggle(header) {
+  header.closest('.section-card').classList.toggle('open');
+}
+</script>
+</body>
+</html>

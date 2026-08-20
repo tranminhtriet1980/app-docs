@@ -77,6 +77,10 @@ _ADDRESS_PREFIX_TERMS: list[tuple[str, str]] = [
     ("khu pho", "Quarter"),
     ("ap", "Hamlet"),
     ("thon", "Hamlet"),
+    ("duong", "Street"),
+    ("kiet", "Alley"),
+    ("hem", "Alley"),
+    ("ngo", "Alley"),
 ]
 
 # Viết tắt nguyên cụm → tên đầy đủ.
@@ -86,6 +90,12 @@ _ADDRESS_WHOLE_MAP: dict[str, str] = {
     "tp.hcm": "Ho Chi Minh",
     "tp ho chi minh": "Ho Chi Minh",
 }
+
+
+_HOUSE_NUMBER_TERM_RE = re.compile(
+    r"(?i)^(?P<num>[\d/]+)\s+(?P<term>duong|kiet|hem|ngo)\s+(?P<rest>.+)$"
+)
+_HOUSE_NUMBER_TERM_ENGLISH = {"duong": "Street", "kiet": "Alley", "hem": "Alley", "ngo": "Alley"}
 
 
 def _format_address_segment(seg: str) -> str:
@@ -98,6 +108,18 @@ def _format_address_segment(seg: str) -> str:
     m = re.match(r"(?i)^quoc\s*lo\s+(.+)$", ascii_seg)  # Quốc lộ 50 → Highway 50
     if m:
         return f"Highway {m.group(1).strip().title()}".strip()
+    # Số nhà dính liền thuật ngữ trong cùng 1 đoạn (vd. "196 Kiet 7", "60/14 Duong Thich Buu
+    # Dang") — vòng lặp suffix bên dưới chỉ khớp khi thuật ngữ đứng ĐẦU đoạn nên bỏ sót case này.
+    m2 = _HOUSE_NUMBER_TERM_RE.match(ascii_seg)
+    if m2:
+        term = m2.group("term").lower()
+        rest = m2.group("rest").strip()
+        num = m2.group("num")
+        english = _HOUSE_NUMBER_TERM_ENGLISH[term]
+        if term == "duong":
+            return f"{num} {rest.title()} {english}".strip()
+        rest_fmt = rest if re.fullmatch(r"\d+", rest) else rest.title()
+        return f"{num} {english} {rest_fmt}".strip()
     for prefix, suffix in _ADDRESS_PREFIX_TERMS:
         if low.startswith(prefix + " "):
             rest = ascii_seg[len(prefix) :].strip()
@@ -110,14 +132,43 @@ def _format_address_segment(seg: str) -> str:
     return ascii_seg.title()
 
 
+_VN_PRESENT_MARKER_RE = re.compile(
+    r"(?<=[–—-])\s*(hiện\s*tại|hien\s*tai|đến\s*nay|den\s*nay|hiện\s*nay|hien\s*nay|nay)\s*(?=\)|,|;|$)",
+    re.IGNORECASE,
+)
+
+
+def normalize_present_marker(text: str) -> str:
+    """DS-260 chỉ dùng tiếng Anh — chuẩn hoá mốc thời gian mở "hiện tại/đến nay/nay" (mọi cách
+    viết có/không dấu) ở cuối khoảng ngày thành "Present". Dùng chung cho cả OCR extraction
+    (ocr_pipeline.py) và export (export_ds260.py) — 2 điểm dữ liệu có thể lẫn tiếng Việt vào
+    field lẽ ra chỉ tiếng Anh (other_addresses_history…)."""
+    if not text:
+        return text
+    return _VN_PRESENT_MARKER_RE.sub("Present", text)
+
+
+def _format_address_line(raw: str) -> str:
+    parts = [_format_address_segment(s) for s in re.split(r"\s*,\s*", raw)]
+    return ", ".join(p for p in parts if p)
+
+
 def format_address_english(text: str) -> str:
     """Địa chỉ VN → Anh: bỏ dấu, dịch thuật ngữ hành chính (Xã→Commune, Huyện/Quận→District,
-    Quốc lộ→Highway, Phường→Ward, Ấp/Thôn→Hamlet…) và đặt thuật ngữ sau tên theo văn phong Anh."""
+    Quốc lộ→Highway, Phường→Ward, Ấp/Thôn→Hamlet…) và đặt thuật ngữ sau tên theo văn phong Anh.
+
+    Giữ NGUYÊN ranh giới xuống dòng (vd. other_addresses_history — mỗi mốc ở/khai một dòng) — xử
+    lý riêng từng dòng rồi ghép lại bằng '\\n', KHÔNG format cả khối làm một: nếu gộp chung, dòng
+    trống giữa 2 dòng không có dấu phẩy sẽ bị `_format_address_segment` (dùng \\s+ nuốt luôn \\n)
+    xoá mất, làm mọi mốc thời gian dính liền thành 1 dòng và bỏ sót việc dịch ở giữa khối (báo lỗi
+    thực tế 2026-08-07: "196 Kiet 7" chỉ được dịch thành "Alley 7" ở dòng đầu, các dòng sau y
+    nguyên vì lọt ra ngoài phạm vi so khớp)."""
     raw = (text or "").strip()
     if not raw:
         return ""
-    parts = [_format_address_segment(s) for s in re.split(r"\s*,\s*", raw)]
-    return ", ".join(p for p in parts if p)
+    if "\n" in raw:
+        return "\n".join(_format_address_line(line.strip()) for line in raw.split("\n") if line.strip())
+    return _format_address_line(raw)
 
 
 def format_nationality_country(text: str) -> str:
@@ -143,6 +194,49 @@ def normalize_location(text: str) -> str:
     text = _LOCATION_SUFFIXES.sub(" ", text)
     text = re.sub(r"[^\w\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Địa chỉ/trường học đôi khi 1 giấy tờ ghi tiếng Việt, giấy khác ghi bản dịch tiếng Anh (vd. "Trung
+# tâm giáo dục thường xuyên huyện Châu Đức" ↔ "Continuing Education Center of Chau Duc District")
+# — dịch cụm/từ hành chính + giáo dục thường gặp sang tiếng Anh trước khi tokenize để so khớp
+# xuyên ngôn ngữ (dùng cho Conflict, KHÔNG dùng để format giá trị hiển thị/export). Cụm dài xếp
+# trước cụm ngắn để khớp đúng cụm trước khi rơi xuống từ đơn.
+_PLACE_SCHOOL_VOCAB_VI_TO_EN: tuple[tuple[str, str], ...] = tuple(
+    (term, english.lower()) for term, english in _ADDRESS_PREFIX_TERMS
+) + (
+    ("trung tam giao duc thuong xuyen", "continuing education center"),
+    ("giao duc thuong xuyen", "continuing education"),
+    ("trung hoc pho thong", "high school"),
+    ("trung hoc co so", "secondary school"),
+    ("tieu hoc", "elementary school"),
+    ("cao dang", "college"),
+    ("dai hoc", "university"),
+    ("truong", "school"),
+    ("trung tam", "center"),
+    ("giao duc", "education"),
+    ("thuong xuyen", "continuing"),
+    ("cong lap", "public"),
+    ("dan lap", "private"),
+    ("tu thuc", "private"),
+)
+
+
+def _translate_place_school_vocab(accent_stripped_lower_text: str) -> str:
+    text = accent_stripped_lower_text
+    for vi, en in _PLACE_SCHOOL_VOCAB_VI_TO_EN:
+        text = re.sub(rf"\b{re.escape(vi)}\b", en, text)
+    return text
+
+
+_PLACE_SCHOOL_STOPWORDS = frozenset({"the", "and", "of", "a", "an", "in", "at"})
+
+
+def place_or_school_identity_tokens(text: str) -> set[str]:
+    """Token hoá địa danh/tên trường để so khớp mờ, xuyên ngôn ngữ (dịch từ vựng VN→EN trước khi
+    tách từ — xem _PLACE_SCHOOL_VOCAB_VI_TO_EN) — dùng cho Conflict, không dùng để hiển thị."""
+    plain = _translate_place_school_vocab(_strip_accents((text or "").strip().lower()))
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", plain)
+    return {t.upper() for t in cleaned.split() if len(t) >= 2 and t not in _PLACE_SCHOOL_STOPWORDS}
 
 
 @lru_cache(maxsize=1)
@@ -173,9 +267,14 @@ def _match_country_alias(segment: str) -> str:
     if norm in alias_to_country:
         return alias_to_country[norm]
     for alias, country in sorted(alias_to_country.items(), key=lambda x: -len(x[0])):
-        if len(alias) >= 3 and (norm == alias or alias in norm or norm in alias):
+        if len(alias) >= 3 and (norm == alias or norm in alias or _words_contain(norm, alias)):
             return country
     return ""
+
+
+def _words_contain(text: str, word: str) -> bool:
+    """True when word appears as a complete word in text (word-boundary match)."""
+    return bool(__import__("re").search(r"\b" + __import__("re").escape(word) + r"\b", text))
 
 
 def _match_location(segment: str) -> str:
@@ -186,7 +285,7 @@ def _match_location(segment: str) -> str:
     if norm in location_to_country:
         return location_to_country[norm]
     for loc, country in sorted(location_to_country.items(), key=lambda x: -len(x[0])):
-        if len(loc) >= 3 and (loc in norm or norm in loc):
+        if len(loc) >= 3 and (norm == loc or loc in norm or _words_contain(norm, loc)):
             return country
     return ""
 
@@ -391,7 +490,10 @@ def derive_city_from_place(place_of_birth: str) -> str:
     if not raw:
         return ""
     parts = [p.strip() for p in raw.split(",") if p.strip()]
-    candidate = parts[-1] if parts else raw
+    if len(parts) > 1 and parts[-1].lower() in {"vietnam", "viet nam", "vn", "vietnamese", "usa", "us", "united states"}:
+        candidate = parts[-2]
+    else:
+        candidate = parts[-1] if parts else raw
     candidate = re.sub(r"(?i)^thành phố\s+", "", candidate).strip()
     candidate = re.sub(r"(?i)^city\s+", "", candidate).strip()
     return candidate

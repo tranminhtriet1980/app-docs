@@ -14,7 +14,11 @@ from app.services.ds260_conflicts import (
     norm_conflict_value,
     parse_ds260_conflict_key,
     worksheet_conflict_field_key,
+    _json_values_if_json_like,
     _norm_value,
+    _place_or_school_values_match,
+    _sync_document_exception_conflicts,
+    _work_values_match,
 )
 
 
@@ -64,13 +68,61 @@ def test_worksheet_compare_keys_cover_user_fields():
     assert "email" in WORKSHEET_COMPARE_KEYS
 
 
+def test_worksheet_compare_keys_cover_all_section_a_personal_passport_fields():
+    """DS-260 A.1 — Personal Information: TOÀN BỘ field nguồn passport phải đối chiếu với DS-260
+    khách khai, không chỉ vài field (khách yêu cầu 2026-08-14)."""
+    for key in (
+        "applicant_name",
+        "applicant_name_native",
+        "family_name",
+        "given_names",
+        "date_of_birth",
+        "gender",
+        "nationality",
+        "place_of_birth",
+        "birth_city",
+        "birth_state",
+        "birth_country",
+        "id_card_number",
+    ):
+        assert key in WORKSHEET_COMPARE_KEYS, key
+
+
+def test_build_worksheet_conflict_not_created_when_passport_birth_country_is_city_only():
+    """Báo lỗi thực tế 2026-08-14: passport chỉ ghi "Da Nang" (không kèm "Vietnam") ở
+    place_of_birth — so nguyên văn với worksheet khai thẳng "Vietnam" sẽ luôn khác nhau dù đúng
+    dữ liệu. birth_country phải được TÁCH quốc gia thật (derive_country_from_place) trước khi so
+    sánh, không so chuỗi thô."""
+    passport = _rec({"place_of_birth": "Da Nang"}, "passport")
+    ds260 = _rec({"birth_country": "Vietnam"}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([passport, ds260], {})
+    assert worksheet_conflict_field_key("birth_country") not in {r["field_key"] for r in rows}
+
+
+def test_build_worksheet_conflict_still_created_for_genuinely_different_birth_country():
+    passport = _rec({"place_of_birth": "Da Nang, Vietnam"}, "passport")
+    ds260 = _rec({"birth_country": "United States"}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([passport, ds260], {})
+    assert worksheet_conflict_field_key("birth_country") in {r["field_key"] for r in rows}
+
+
+def test_build_worksheet_conflict_created_for_mismatched_given_names_in_personal_section():
+    passport = _rec({"family_name": "NGUYEN", "given_names": "VAN A"}, "passport")
+    ds260 = _rec({"family_name": "NGUYEN", "given_names": "VAN B"}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([passport, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("given_names") in keys
+    assert worksheet_conflict_field_key("family_name") not in keys
+
+
 def test_worksheet_compare_keys_include_section_d_work_education():
-    """Job Application (application_form) Section D — trừ narrative tự do work_prior_jobs_history."""
+    """Job Application (application_form) Section D — gồm cả narrative work_prior_jobs_history
+    (khách yêu cầu 2026-08-13: DS-260 trống mà Job App có dữ liệu vẫn phải tạo Conflict)."""
     assert "work_primary_occupation" in WORKSHEET_COMPARE_KEYS
     assert "work_present_employer" in WORKSHEET_COMPARE_KEYS
     assert "work_job_title" in WORKSHEET_COMPARE_KEYS
     assert "edu_college_name" in WORKSHEET_COMPARE_KEYS
-    assert "work_prior_jobs_history" not in WORKSHEET_COMPARE_KEYS
+    assert "work_prior_jobs_history" in WORKSHEET_COMPARE_KEYS
     # Không lẫn field nguồn ds260_customer_form (so worksheet với chính nó là vô nghĩa)
     assert "work_other_occupation_used" not in WORKSHEET_COMPARE_KEYS
 
@@ -84,6 +136,31 @@ def test_norm_conflict_value_dates_and_gender():
     assert norm_conflict_value("gender", "F") == "FEMALE"
     assert norm_conflict_value("date_of_birth", "1990-01-15") == "1990-01-15"
     assert norm_conflict_value("date_of_birth", "15/01/1990") == "1990-01-15"
+
+
+def test_norm_conflict_value_phone_local_vs_international():
+    """Số VN dạng nội địa (0398333484) và quốc tế (+84 398333484) là CÙNG 1 số (khách yêu cầu
+    2026-08-14)."""
+    a = norm_conflict_value("primary_phone", "0398333484")
+    b = norm_conflict_value("primary_phone", "+84 398333484")
+    assert a == b == "398333484"
+    assert norm_conflict_value("primary_phone", "0398333484") == norm_conflict_value(
+        "primary_phone", "84398333484"
+    )
+
+
+def test_norm_conflict_value_phone_rejects_genuinely_different_number():
+    assert norm_conflict_value("primary_phone", "0398333484") != norm_conflict_value(
+        "primary_phone", "0912345678"
+    )
+
+
+def test_build_worksheet_conflict_not_created_for_local_vs_international_phone():
+    application = _rec({"primary_phone_number": "+84 398333484"}, "application_form")
+    ds260 = _rec({"primary_phone_number": "0398333484"}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("primary_phone") not in keys
 
 
 def _rec(raw: dict, doc_type: str, *, variant: str = "standard") -> SimpleNamespace:
@@ -112,6 +189,22 @@ def test_build_worksheet_conflict_when_values_differ():
     keys = {r["field_key"] for r in rows}
     assert worksheet_conflict_field_key("applicant_name") in keys
     assert worksheet_conflict_field_key("date_of_birth") not in keys
+
+
+def test_build_worksheet_conflict_date_of_birth_displays_dd_mm_yyyy():
+    """Conflict value_a/value_b cho người dùng CHỌN phải luôn dd/mm/yyyy — không phải chuỗi ISO
+    thô từ OCR (yyyy-mm-dd), dễ đọc nhầm/khó chọn khi 2 nguồn hiển thị khác định dạng nhau."""
+    passport_std = _rec({"full_name": "NGUYEN VAN A", "date_of_birth": "1990-01-15"}, "passport")
+    ds260 = _rec(
+        {"applicant_name": "NGUYEN VAN A", "date_of_birth": "1991-02-20"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([passport_std, ds260], {})
+    fk = worksheet_conflict_field_key("date_of_birth")
+    row = next(r for r in rows if r["field_key"] == fk)
+    assert row["value_a"] == "15/01/1990"
+    assert row["value_b"] == "20/02/1991"
 
 
 def test_build_worksheet_conflict_skips_when_normalized_equal():
@@ -230,8 +323,13 @@ def test_build_worksheet_conflict_address_city_state_postal_from_real_case():
     assert worksheet_conflict_field_key("postal_code") in keys
     # Country khớp nhau (ANGOLA cả hai) → không tạo conflict thừa.
     assert worksheet_conflict_field_key("current_country") not in keys
-    # City: worksheet để trống (không ghi) → không đủ dữ liệu để so, không tạo conflict.
-    assert worksheet_conflict_field_key("current_city") not in keys
+    # City: worksheet để trống nhưng Job App có "LUANDA" — ADDRESS không còn tự động fill từ
+    # Job App khi trống (khách yêu cầu), nhưng vẫn phải tạo Conflict để người dùng tự chọn có
+    # lấy vào hay không (khác với auto-fill; xem _ADDRESS_COMPARE_KEYS).
+    assert worksheet_conflict_field_key("current_city") in keys
+    city_row = next(r for r in rows if r["field_key"] == worksheet_conflict_field_key("current_city"))
+    assert city_row["value_a"] == "LUANDA"
+    assert city_row["value_b"] == ""
 
 
 def test_build_worksheet_conflict_job_title_and_employer():
@@ -249,6 +347,76 @@ def test_build_worksheet_conflict_job_title_and_employer():
     assert worksheet_conflict_field_key("work_primary_occupation") in keys
     assert worksheet_conflict_field_key("work_present_employer") in keys
     assert worksheet_conflict_field_key("work_job_title") in keys
+
+
+def test_build_worksheet_conflict_created_when_ds260_empty_but_job_app_has_data():
+    """Section D (khách yêu cầu 2026-08-13): DS-260 khách khai KHÔNG khai present_employer,
+    nhưng Job Application có — vẫn phải tạo Conflict (trống vs có dữ liệu) để người dùng chọn
+    điền, KHÔNG được âm thầm bỏ qua như các field khác (hành vi mặc định vẫn giữ nguyên: field
+    ngoài Section D mà 1 bên trống thì bỏ qua, không tạo Conflict)."""
+    application = _rec(
+        {"primary_occupation": "Sales Staff", "present_employer": "ABC Co"},
+        "application_form",
+    )
+    ds260 = _rec({}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_primary_occupation") in keys
+    assert worksheet_conflict_field_key("work_present_employer") in keys
+    row = next(r for r in rows if r["field_key"] == worksheet_conflict_field_key("work_present_employer"))
+    assert row["value_a"] == "ABC Co"
+    assert row["value_b"] == ""
+
+
+def test_build_worksheet_conflict_not_created_when_both_empty_outside_work_section():
+    """Field NGOÀI Section D/Address — cả 2 bên trống vẫn phải bỏ qua như cũ."""
+    application = _rec({}, "application_form")
+    ds260 = _rec({}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    assert rows == []
+
+
+def test_address_conflict_created_when_worksheet_empty_but_job_app_has_data():
+    """ADDRESS không còn tự động fill từ Job App khi worksheet trống (khách yêu cầu), nhưng
+    KHÔNG được lặng lẽ bỏ qua luôn — DS-260 trống mà Job App có dữ liệu vẫn phải tạo Conflict để
+    người dùng tự chọn có lấy vào hay không, cùng nguyên tắc với Section D (khách phản hồi: bỏ
+    auto-fill không có nghĩa là bỏ luôn cả Conflict)."""
+    application = _rec(
+        {
+            "current_address": "123 LE LOI",
+            "address_city": "DA NANG",
+            "address_state": "DA NANG",
+            "postal_code": "550000",
+            "address_country": "VIETNAM",
+        },
+        "application_form",
+    )
+    ds260 = _rec({}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    for key in ("current_address", "current_city", "current_state", "postal_code", "current_country"):
+        fk = worksheet_conflict_field_key(key)
+        assert fk in keys, f"expected conflict for {key}"
+        row = next(r for r in rows if r["field_key"] == fk)
+        assert row["value_b"] == ""  # worksheet trống — giá trị B để trống, không bị auto-fill
+
+
+def test_build_worksheet_conflict_bilingual_job_text_not_flagged_as_conflict():
+    """Cùng 1 công ty/nghề nghiệp nhưng viết 2 ngôn ngữ khác nhau (Job Application tiếng Anh,
+    DS-260 khách khai tiếng Việt) KHÔNG được coi là xung đột (khách yêu cầu 2026-08-13)."""
+    application = _rec(
+        {"primary_occupation": "Staff", "present_employer": "Private business of Mr. Tan Nguyen"},
+        "application_form",
+    )
+    ds260 = _rec(
+        {"primary_occupation": "Nhan vien", "present_employer": "Cong ty tu nhan cua ong Tan Nguyen"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_present_employer") not in keys
+    assert worksheet_conflict_field_key("work_primary_occupation") not in keys
 
 
 def test_build_worksheet_conflict_skipped_when_application_form_job_confirmed_as_prior():
@@ -404,3 +572,319 @@ def test_child_parent_info_no_conflict_when_only_birth_cert_child_present_and_ma
     rows = build_worksheet_conflict_rows([child_bc, child_ws], {})
     keys = {r["field_key"] for r in rows}
     assert worksheet_conflict_field_key("father_full_name") not in keys
+
+
+def test_json_values_if_json_like_extracts_values_drops_keys():
+    """Model OCR đôi khi trả prior_jobs_history dạng JSON (báo lỗi thực tế 2026-08-13) — tên
+    khoá JSON (employer_name, end_date...) không được lẫn vào token so khớp như nội dung thật."""
+    raw = '[{"employer_name": "Greentech Headgear Co. Ltd", "end_date": "2020-09-11"}]'
+    out = _json_values_if_json_like(raw)
+    assert "Greentech" in out
+    assert "employer_name" not in out
+    assert "end_date" not in out
+
+
+def test_json_values_if_json_like_passthrough_for_plain_text():
+    text = "Xuan Vu garment private enterprise - quan ly - 01/01/2009 den 8/8/2018"
+    assert _json_values_if_json_like(text) == text
+
+
+def test_build_worksheet_conflict_not_created_when_ds260_already_covers_json_job_application():
+    """Báo lỗi thực tế 2026-08-13: Application form's prior_jobs_history OCR ra dạng JSON thô
+    (lỗi model, xem ocr_pipeline.py), nhưng nội dung mô tả ĐÚNG 1 công việc đã có sẵn đầy đủ
+    trong work_prior_jobs_history của DS-260 (đã format lại 3 dòng/entry) — không được tạo
+    Conflict "giả" chỉ vì 2 bên viết khác định dạng (JSON thô vs câu văn thường)."""
+    application = _rec(
+        {
+            "prior_jobs_history": (
+                '[{"employer_name": "Greentech Headgear Co. Ltd", "employer_address": '
+                '"D02 Street, Nghia Thanh, Chau Duc Dist.", "occupation_other_specify": '
+                '"Hat production", "job_title": "Staff", "employment_start_date": '
+                '"2019-02-06", "end_date": "2020-09-11"}]'
+            )
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "prior_jobs_history": (
+                "1. Bat Dau Lam Tu Ngay 06/02/2019 Ket Thuc Vao Ngay 11/09/2020\n"
+                "Ten Cong Ty: Greentech Headgear Co. Ltd, Vi Tri Lam Viec: Nhan Vien\n"
+                "Ten Nguoi Quan Ly: Mai Quoc Thai, Sdt: +84 251 3685 868."
+            )
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_prior_jobs_history") not in keys
+
+
+def test_work_values_match_still_flags_genuinely_different_prior_job():
+    official = "ABC Trading Company, Sales Manager, 2015-2017"
+    worksheet = (
+        "1. Bat Dau Lam Tu Ngay 06/02/2019 Ket Thuc Vao Ngay 11/09/2020\n"
+        "Ten Cong Ty: Greentech Headgear Co. Ltd, Vi Tri Lam Viec: Nhan Vien\n"
+        "Ten Nguoi Quan Ly: Mai Quoc Thai, Sdt: +84 251 3685 868."
+    )
+    assert _work_values_match("work_prior_jobs_history", official, worksheet) is False
+
+
+def test_place_school_values_match_state_accent_and_dash_variants():
+    """Ảnh thực tế 2026-08-14: 'Ba Ria – Vung Tau' (Application form) vs 'BÀ RỊA– VŨNG TÀU'
+    (DS-260) — cùng 1 tỉnh, chỉ khác dấu/khoảng trắng quanh dấu gạch ngang."""
+    assert _place_or_school_values_match("Ba Ria – Vung Tau", "BÀ RỊA– VŨNG TÀU")
+
+
+def test_place_school_values_match_address_different_detail_level():
+    """1 bên có thêm tên tỉnh, bên kia không — vẫn là cùng 1 địa chỉ (containment, không cần
+    khớp tuyệt đối kích thước 2 bên)."""
+    assert _place_or_school_values_match(
+        "Song Cau Village, Nghia Thanh Commune, Chau Duc Dist.",
+        "THÔN SỐNG CẦU, NGHĨA THÀNH, CHÂU ĐỨC, BÀ RỊA– VŨNG TÀU",
+    )
+
+
+def test_place_school_values_match_school_name_translation():
+    """Tên trường dịch tiếng Anh ↔ tiếng Việt — cùng 1 trường (khách yêu cầu 2026-08-14)."""
+    assert _place_or_school_values_match(
+        "CONTINUING EDUCATION CENTER OF CHAU DUC DISTRICT",
+        "TRUNG TÂM GIÁO DỤC THƯỜNG XUYÊN HUYỆN CHÂU ĐỨC",
+    )
+
+
+def test_place_school_values_match_rejects_genuinely_different_place():
+    assert not _place_or_school_values_match("Dong Nai", "Ba Ria - Vung Tau")
+
+
+def test_build_worksheet_conflict_not_created_for_bilingual_address_state_school():
+    """End-to-end qua build_worksheet_conflict_rows — cả 3 field trong ảnh thực tế 2026-08-14
+    (current_address, current_state, edu_high_school_name) không được tạo Conflict."""
+    application = _rec(
+        {
+            "current_address": "Song Cau Village, Nghia Thanh Commune, Chau Duc Dist.",
+            "address_state": "Ba Ria – Vung Tau",
+            "high_school_name": "CONTINUING EDUCATION CENTER OF CHAU DUC DISTRICT",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "current_address": "THÔN SỐNG CẦU, NGHĨA THÀNH, CHÂU ĐỨC, BÀ RỊA– VŨNG TÀU",
+            "address_state": "BÀ RỊA– VŨNG TÀU",
+            "high_school_name": "TRUNG TÂM GIÁO DỤC THƯỜNG XUYÊN HUYỆN CHÂU ĐỨC",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("current_address") not in keys
+    assert worksheet_conflict_field_key("current_state") not in keys
+    assert worksheet_conflict_field_key("edu_high_school_name") not in keys
+
+
+def test_build_worksheet_conflict_still_created_for_genuinely_different_state():
+    application = _rec({"address_state": "Dong Nai"}, "application_form")
+    ds260 = _rec({"address_state": "Ba Ria - Vung Tau"}, "ds260_customer_form", variant="exception")
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("current_state") in keys
+
+
+# --- address_from_date vs date_signed plausibility (WP4) ---------------------------------
+
+
+def test_address_from_date_after_date_signed_creates_conflict():
+    application = _rec(
+        {"current_address": "123 LE LOI", "date_signed": "01/06/2020"}, "application_form"
+    )
+    ds260 = _rec(
+        {"current_address": "123 LE LOI", "address_from_date": "01/2021"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    fk = worksheet_conflict_field_key("address_from_date")
+    assert fk in keys
+    row = next(r for r in rows if r["field_key"] == fk)
+    assert row["value_a"] == "01/06/2020"
+    assert row["value_b"] == "01/2021"
+
+
+def test_address_from_date_before_date_signed_no_conflict():
+    application = _rec(
+        {"current_address": "123 LE LOI", "date_signed": "01/06/2020"}, "application_form"
+    )
+    ds260 = _rec(
+        {"current_address": "123 LE LOI", "address_from_date": "01/2019"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("address_from_date") not in keys
+
+
+def test_address_from_date_same_month_as_date_signed_no_conflict():
+    # mm/yyyy partial dates, same month/year as date_signed — month-granularity compare,
+    # not "strictly after", so this must not fire.
+    application = _rec(
+        {"current_address": "123 LE LOI", "date_signed": "15/06/2020"}, "application_form"
+    )
+    ds260 = _rec(
+        {"current_address": "123 LE LOI", "address_from_date": "06/2020"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("address_from_date") not in keys
+
+
+def test_address_from_date_skipped_when_address_differs():
+    application = _rec(
+        {"current_address": "123 LE LOI", "date_signed": "01/06/2020"}, "application_form"
+    )
+    ds260 = _rec(
+        {"current_address": "456 TRAN PHU", "address_from_date": "01/2021"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("address_from_date") not in keys
+
+
+def test_address_from_date_skipped_when_already_resolved():
+    application = _rec(
+        {"current_address": "123 LE LOI", "date_signed": "01/06/2020"}, "application_form"
+    )
+    ds260 = _rec(
+        {"current_address": "123 LE LOI", "address_from_date": "01/2021"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fk = worksheet_conflict_field_key("address_from_date")
+    rows = build_worksheet_conflict_rows([application, ds260], {fk: "01/2021"})
+    keys = {r["field_key"] for r in rows}
+    assert fk not in keys
+
+
+# --- work_start_date plausibility when employer confirmed to match (WP4) ---------------------
+
+
+def test_work_start_date_mismatch_when_employer_matches_creates_conflict():
+    application = _rec(
+        {
+            "primary_occupation": "Sales Staff",
+            "present_employer": "ABC Co",
+            "employment_start_date": "01/06/2020",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "primary_occupation": "sales staff",
+            "present_employer": "abc co",
+            "employment_start_date": "01/01/2021",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    fk = worksheet_conflict_field_key("work_start_date")
+    assert fk in keys
+    row = next(r for r in rows if r["field_key"] == fk)
+    assert row["value_a"] == "01/06/2020"
+    assert row["value_b"] == "01/01/2021"
+
+
+def test_work_start_date_same_period_no_conflict():
+    application = _rec(
+        {
+            "primary_occupation": "Sales Staff",
+            "present_employer": "ABC Co",
+            "employment_start_date": "01/06/2020",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "primary_occupation": "sales staff",
+            "present_employer": "abc co",
+            "employment_start_date": "01/06/2020",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_start_date") not in keys
+
+
+def test_work_start_date_skipped_when_employer_does_not_match():
+    # Application form job is confirmed PRIOR (its employer shows up in the worksheet's own
+    # prior_jobs_history narrative) — the generic loop already suppresses occupation/employer/
+    # start_date comparison for this case (_application_form_job_confirmed_as_prior). The two
+    # jobs are genuinely different (no employer-token overlap), so this rule must not manufacture
+    # a work_start_date conflict between two unrelated jobs' dates.
+    application = _rec(
+        {
+            "primary_occupation": "Accountant",
+            "present_employer": "XYZ Financial Group",
+            "employment_start_date": "01/06/2020",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "primary_occupation": "sales staff",
+            "present_employer": "abc co",
+            "employment_start_date": "01/01/2021",
+            "prior_jobs_history": "Accountant at XYZ Financial Group, 2018 - 2020",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([application, ds260], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("work_start_date") not in keys
+
+
+def test_work_start_date_skipped_when_already_resolved():
+    application = _rec(
+        {
+            "primary_occupation": "Sales Staff",
+            "present_employer": "ABC Co",
+            "employment_start_date": "01/06/2020",
+        },
+        "application_form",
+    )
+    ds260 = _rec(
+        {
+            "primary_occupation": "sales staff",
+            "present_employer": "abc co",
+            "employment_start_date": "01/01/2021",
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    fk = worksheet_conflict_field_key("work_start_date")
+    rows = build_worksheet_conflict_rows([application, ds260], {fk: "01/01/2021"})
+    keys = {r["field_key"] for r in rows}
+    assert fk not in keys
+
+
+def test_document_exception_conflict_date_displays_dd_mm_yyyy():
+    """document_vs_exception (Luồng 1 chuẩn vs đối chiếu _new) — ngày cũng phải hiển thị
+    dd/mm/yyyy cho người dùng chọn, không phải chuỗi ISO thô."""
+    standard = _rec({"issue_date": "2020-01-01"}, "passport")
+    exception = _rec({"issue_date": "01/03/2020"}, "passport", variant="exception")
+    rows = _sync_document_exception_conflicts([standard, exception], {})
+    row = next(r for r in rows if r["field_key"] == ds260_conflict_field_key("passport", "issue_date"))
+    assert row["value_a"] == "01/01/2020"
+    assert row["value_b"] == "01/03/2020"

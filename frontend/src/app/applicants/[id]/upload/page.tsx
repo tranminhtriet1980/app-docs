@@ -9,6 +9,7 @@ import { memberColorByNumber } from "@/lib/memberColors";
 import {
   buildExtraNamingExamples,
   buildFullNamingTableRows,
+  EXTRA_FILE_SLOTS,
   FAMILY_NAMING_EXAMPLE,
   slotsForRole,
   suggestedUploadFilename,
@@ -378,7 +379,6 @@ export default function UploadPage() {
                     <th className="py-2 pr-4">File</th>
                     <th className="py-2 pr-4">Loại</th>
                     <th className="py-2 pr-4">Trạng thái</th>
-                    <th className="py-2">Confidence</th>
                     <th className="py-2 text-right">Thao tác</th>
                   </tr>
                 </thead>
@@ -430,11 +430,6 @@ export default function UploadPage() {
                           </p>
                         )}
                       </td>
-                      <td className="py-3">
-                        {doc.classification_confidence != null
-                          ? `${Math.round(doc.classification_confidence * 100)}%`
-                          : "—"}
-                      </td>
                       <td className="py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
@@ -484,7 +479,7 @@ export default function UploadPage() {
                   <span className="font-medium text-slate-900">{m.display_name}</span>
                   <span className="ml-2 text-xs text-slate-500">({memberRoleShort(m.role)})</span>
                   <p className="mt-2 text-xs text-slate-600">
-                    {slotsForRole(m.role).map((slot) => (
+                    {[...slotsForRole(m.role), ...EXTRA_FILE_SLOTS].map((slot) => (
                       <span key={slot.seq} className="mr-2 inline-block">
                         <code className="rounded bg-white/90 px-1 font-mono text-[11px]">
                           {suggestedUploadFilename(

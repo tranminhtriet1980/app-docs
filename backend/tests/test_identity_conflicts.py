@@ -75,7 +75,8 @@ def test_date_of_birth_normalized_across_formats():
     ]
     rows = build_identity_outlier_conflict_rows_from_documents(docs, {})
     assert len(rows) == 1
-    assert rows[0]["value_b"] == "1991-02-20"
+    # Hiển thị dd/mm/yyyy cho người dùng chọn — không phải chuỗi ISO thô (khách yêu cầu).
+    assert rows[0]["value_b"] == "20/02/1991"
 
 
 def test_ex_spouse_name_on_divorce_decree_not_counted_as_applicant():

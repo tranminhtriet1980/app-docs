@@ -15,6 +15,7 @@ import {
   DocumentTypeGuide,
   Ds260Form,
   Ds260Validation,
+  Ds260ValidationIssue,
   FormTemplate,
   getToken,
   User,
@@ -80,6 +81,13 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
   "section_children",
 ]);
 
+// Các section này chỉ dùng nội bộ để điền DS-260/export, không hiển thị trên Review UI.
+const ALWAYS_HIDDEN_DS260_SECTIONS = new Set([
+  "section_birth_certificate",
+  "section_judicial",
+  "section_divorce",
+]);
+
 function memberPanelClass(role: CaseMember["role"]) {
   if (role === "principal") return "border-brand-300 bg-brand-50/30 ring-brand-100";
   if (role === "spouse") return "border-violet-300 bg-violet-50/30 ring-violet-100";
@@ -89,42 +97,154 @@ function memberPanelClass(role: CaseMember["role"]) {
 }
 
 function visibleDs260Sections(sections: Ds260Form["sections"], role: CaseMember["role"]) {
-  if (role !== "child" && role !== "grandchild") return sections;
-  return sections.filter((sec) => !CHILD_SKIP_DS260_SECTIONS.has(sec.id));
+  let visible = sections.filter((sec) => !ALWAYS_HIDDEN_DS260_SECTIONS.has(sec.id));
+  if (role === "child" || role === "grandchild") {
+    visible = visible.filter((sec) => !CHILD_SKIP_DS260_SECTIONS.has(sec.id));
+  }
+  return visible;
+}
+
+type ConflictResolveModalState = {
+  phase: "processing" | "done";
+  returnScrollY: number | null;
+};
+
+function ConflictResolveModal({
+  state,
+  onScrollUp,
+  onDismiss,
+}: {
+  state: ConflictResolveModalState;
+  onScrollUp: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-5 text-center shadow-xl">
+        {state.phase === "processing" ? (
+          <>
+            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+            <p className="text-sm font-medium text-slate-800">Đang xử lý xung đột…</p>
+          </>
+        ) : (
+          <>
+            <div className="mx-auto mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-green-600">
+              ✓
+            </div>
+            <p className="text-sm font-semibold text-slate-900">Đã xử lý xung đột</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Dữ liệu đã được cập nhật vào bảng DS-260.
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {state.returnScrollY !== null && (
+                <button type="button" className="btn-secondary flex-1 text-sm" onClick={onScrollUp}>
+                  Cuộn lên vị trí cũ
+                </button>
+              )}
+              <button type="button" className="btn-primary flex-1 text-sm" onClick={onDismiss}>
+                Đã biết
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Ds260ConflictPanel({
   conflicts,
+  warnings,
   onResolve,
   busyId,
 }: {
   conflicts: Conflict[];
-  onResolve: (conflictId: string, value: string) => void;
+  warnings: Ds260ValidationIssue[];
+  onResolve: (conflictId: string, value: string) => Promise<boolean>;
   busyId: string;
 }) {
   const [customById, setCustomById] = useState<Record<string, string>>({});
+  // Đánh dấu nút vừa bấm (a/b/custom) để tô sáng ngay lập tức, không đợi API trả về.
+  const [pickedById, setPickedById] = useState<Record<string, "a" | "b" | "custom">>({});
+  const [resolveModal, setResolveModal] = useState<ConflictResolveModalState | null>(null);
 
-  if (conflicts.length === 0) return null;
+  const handlePick = async (c: Conflict, choice: "a" | "b" | "custom", value: string) => {
+    setPickedById((prev) => ({ ...prev, [c.id]: choice }));
+    // Ghi lại vị trí cuộn hiện tại (thường là vị trí field bị xung đột mà người dùng đã bấm
+    // "cuộn xuống đây") để sau khi xử lý xong có thể đưa họ quay lại đúng chỗ.
+    setResolveModal({ phase: "processing", returnScrollY: pendingConflictReturnScrollY });
+    const ok = await onResolve(c.id, value);
+    if (ok) {
+      pendingConflictReturnScrollY = null;
+      setResolveModal((prev) => (prev ? { ...prev, phase: "done" } : prev));
+    } else {
+      // Thất bại — lỗi đã báo qua alert(), đóng modal và bỏ trạng thái "đã chọn".
+      setResolveModal(null);
+      setPickedById((prev) => {
+        const next = { ...prev };
+        delete next[c.id];
+        return next;
+      });
+    }
+  };
+
+  // Khi resolve xong xung đột cuối cùng, `conflicts` sẽ rỗng ngay — nhưng modal "Đã xử lý"
+  // vẫn phải hiện, nên không được return null sớm trong lúc modal đang mở.
+  if (conflicts.length === 0 && warnings.length === 0 && !resolveModal) return null;
+
+  const modal = resolveModal && (
+    <ConflictResolveModal
+      state={resolveModal}
+      onScrollUp={() => {
+        if (resolveModal.returnScrollY !== null) {
+          window.scrollTo({ top: resolveModal.returnScrollY, behavior: "smooth" });
+        }
+        setResolveModal(null);
+      }}
+      onDismiss={() => setResolveModal(null)}
+    />
+  );
+
+  if (conflicts.length === 0 && warnings.length === 0) return modal;
+
   return (
     <div id="ds260-conflicts-section" className="card mb-6 border-amber-300 bg-amber-50/50 scroll-mt-24">
+      {modal}
       <h2 className="text-lg font-semibold text-slate-900">
-        Xung đột dữ liệu DS-260 ({conflicts.length})
+        Cảnh báo DS-260
+        {conflicts.length > 0 && <span className="ml-2 text-sm font-normal text-amber-700">({conflicts.length} xung đột{typeof window !== "undefined" && warnings.length > 0 ? ` · ${warnings.length} cảnh báo` : ""})</span>}
+        {conflicts.length === 0 && warnings.length > 0 && <span className="ml-2 text-sm font-normal text-amber-700">({warnings.length} cảnh báo)</span>}
       </h2>
-      <p className="mt-1 text-sm text-slate-600">
-        Chọn <strong>nguồn A</strong> (Luồng 1 / giấy tờ chính) hoặc <strong>nguồn B</strong> (đối chiếu{" "}
-        <code className="text-xs">_new</code> / worksheet). Giá trị đã chọn sẽ{" "}
-        <strong>tự điền</strong> vào bảng DS-260 bên dưới và file Word khi xuất.
-      </p>
+      {conflicts.length > 0 && (
+        <p className="mt-1 text-sm text-slate-600">
+          Chọn <strong>nguồn A</strong> (Luồng 1 / giấy tờ chính) hoặc <strong>nguồn B</strong> (đối chiếu{" "}
+          <code className="text-xs">_new</code> / worksheet). Giá trị đã chọn sẽ{" "}
+          <strong>tự điền</strong> vào bảng DS-260 bên dưới và file Word khi xuất.
+        </p>
+      )}
+      {warnings.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {warnings.map((w, i) => (
+            <li key={`warn-${i}`} className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>{w.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mt-4 space-y-3">
         {conflicts.map((c) => {
           const isWorksheet = c.conflict_type === "document_vs_worksheet";
           const isOutlier = c.conflict_type === "identity_outlier";
           const title = c.field_label || c.field_key.replace(/^ds260\./, "");
           const custom = customById[c.id] ?? "";
+          const isBusy = busyId === c.id;
+          const picked = pickedById[c.id];
           return (
             <div
               key={c.id}
-              className={`rounded-lg border bg-white p-3 ${
+              id={`ds260-conflict-${c.id}`}
+              className={`relative overflow-hidden rounded-lg border bg-white p-3 transition-colors scroll-mt-24 ${
                 isOutlier ? "border-rose-300" : "border-amber-200"
               }`}
             >
@@ -141,11 +261,16 @@ function Ds260ConflictPanel({
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  disabled={busyId === c.id}
-                  className="flex-1 rounded border border-green-200 bg-green-50/50 px-3 py-2 text-left text-sm hover:bg-green-50"
-                  onClick={() => onResolve(c.id, c.value_a || "")}
+                  disabled={isBusy}
+                  className={`flex-1 rounded border px-3 py-2 text-left text-sm transition ${
+                    picked === "a"
+                      ? "border-green-500 bg-green-100 ring-2 ring-green-300"
+                      : "border-green-200 bg-green-50/50 hover:bg-green-50"
+                  }`}
+                  onClick={() => handlePick(c, "a", c.value_a || "")}
                 >
-                  <span className="block text-xs font-medium text-green-700">
+                  <span className="flex items-center gap-1 text-xs font-medium text-green-700">
+                    {picked === "a" && <span>✓</span>}
                     {isOutlier
                       ? `Đa số tài liệu (${c.majority_count ?? "?"}/${c.total_count ?? "?"})`
                       : isWorksheet
@@ -159,17 +284,22 @@ function Ds260ConflictPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busyId === c.id}
-                  className={`flex-1 rounded border px-3 py-2 text-left text-sm ${
-                    isOutlier
-                      ? "border-rose-200 bg-rose-50/50 hover:bg-rose-50"
-                      : "border-amber-200 bg-amber-50/50 hover:bg-amber-50"
+                  disabled={isBusy}
+                  className={`flex-1 rounded border px-3 py-2 text-left text-sm transition ${
+                    picked === "b"
+                      ? isOutlier
+                        ? "border-rose-500 bg-rose-100 ring-2 ring-rose-300"
+                        : "border-amber-500 bg-amber-100 ring-2 ring-amber-300"
+                      : isOutlier
+                        ? "border-rose-200 bg-rose-50/50 hover:bg-rose-50"
+                        : "border-amber-200 bg-amber-50/50 hover:bg-amber-50"
                   }`}
-                  onClick={() => onResolve(c.id, c.value_b || "")}
+                  onClick={() => handlePick(c, "b", c.value_b || "")}
                 >
                   <span
-                    className={`block text-xs font-medium ${isOutlier ? "text-rose-700" : "text-amber-700"}`}
+                    className={`flex items-center gap-1 text-xs font-medium ${isOutlier ? "text-rose-700" : "text-amber-700"}`}
                   >
+                    {picked === "b" && <span>✓</span>}
                     {isOutlier
                       ? `${c.document_b_filename || "Tài liệu này"} — khác biệt`
                       : isWorksheet
@@ -188,18 +318,18 @@ function Ds260ConflictPanel({
                   <input
                     className="input mt-0.5 min-h-0 py-1.5 font-mono text-sm"
                     value={custom}
-                    disabled={busyId === c.id}
+                    disabled={isBusy}
                     placeholder="Giá trị tùy chỉnh…"
                     onChange={(e) => setCustomById((prev) => ({ ...prev, [c.id]: e.target.value }))}
                   />
                 </div>
                 <button
                   type="button"
-                  className="btn-secondary shrink-0 text-sm"
-                  disabled={busyId === c.id || !custom.trim()}
-                  onClick={() => onResolve(c.id, custom.trim())}
+                  className={`btn-secondary shrink-0 text-sm ${picked === "custom" ? "ring-2 ring-brand-300" : ""}`}
+                  disabled={isBusy || !custom.trim()}
+                  onClick={() => handlePick(c, "custom", custom.trim())}
                 >
-                  Dùng giá trị này
+                  {picked === "custom" && "✓ "}Dùng giá trị này
                 </button>
               </div>
             </div>
@@ -231,15 +361,15 @@ function deriveSourceHint(derived: string | undefined, sourceField: string): str
   return "";
 }
 
-function isFieldConflicted(
+function findConflictForField(
   f: Ds260Form["sections"][0]["fields"][0],
   conflicts: Conflict[],
   memberNumber: string | undefined,
   isFamilyCase: boolean
-): boolean {
-  if (!conflicts || conflicts.length === 0) return false;
+): Conflict | undefined {
+  if (!conflicts || conflicts.length === 0) return undefined;
 
-  return conflicts.some((c) => {
+  return conflicts.find((c) => {
     let cleanKey = c.field_key;
     let suffixMember: string | null = null;
 
@@ -278,6 +408,88 @@ function isFieldConflicted(
 
     return false;
   });
+}
+
+// Vị trí cuộn trước khi nhảy tới 1 conflict card cụ thể — dùng để đưa người dùng quay lại
+// đúng chỗ (field) sau khi họ đã xử lý xong xung đột đó. Biến module-level vì nút "quay lại"
+// nằm trong modal xử lý xung đột, một component khác với field đã kích hoạt việc cuộn.
+let pendingConflictReturnScrollY: number | null = null;
+
+function scrollToConflictCard(conflictId: string) {
+  const el = document.getElementById(`ds260-conflict-${conflictId}`);
+  if (!el) return;
+  pendingConflictReturnScrollY = window.scrollY;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("ring-4", "ring-blue-400");
+  window.setTimeout(() => {
+    el.classList.remove("ring-4", "ring-blue-400");
+  }, 1600);
+}
+
+function scrollToField(fieldKey: string) {
+  const el = document.getElementById(`field-${fieldKey}`);
+  if (!el) return;
+  pendingConflictReturnScrollY = window.scrollY;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("ring-4", "ring-amber-400");
+  window.setTimeout(() => {
+    el.classList.remove("ring-4", "ring-amber-400");
+  }, 2000);
+}
+
+function AddressWarningModal({
+  warnings,
+  onDismiss,
+}: {
+  warnings: Ds260ValidationIssue[];
+  onDismiss: () => void;
+}) {
+  const missingBefore16 = warnings.find((w) => w.code === "missing_address_before_16");
+  const contradiction = warnings.find((w) => w.code === "address_contradiction");
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 text-center shadow-2xl">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+          ⚠
+        </div>
+        <h3 className="text-base font-semibold text-slate-900">Cảnh báo DS-260</h3>
+
+        {missingBefore16 && (
+          <p className="mt-3 text-sm text-slate-700">{missingBefore16.message}</p>
+        )}
+        {contradiction && (
+          <p className="mt-3 text-sm text-slate-700">{contradiction.message}</p>
+        )}
+
+        <div className="mt-5 flex flex-col gap-2">
+          {(missingBefore16 || contradiction) && (
+            <button
+              type="button"
+              className="w-full rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 transition"
+              onClick={() => {
+                if (missingBefore16) {
+                  scrollToField("other_addresses_used");
+                } else if (contradiction) {
+                  scrollToField("other_addresses_used");
+                }
+                onDismiss();
+              }}
+            >
+              Điền ngay
+            </button>
+          )}
+          <button
+            type="button"
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+            onClick={onDismiss}
+          >
+            Đã biết
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function InputTooltip({ value }: { value: string }) {
@@ -368,11 +580,13 @@ function Ds260FieldGrid({
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {fields.filter((f) => !f.review_hidden).map((f) => {
         const isManual = f.source.derived === "manual_override";
-        const isConflicted = isFieldConflicted(f, ds260Conflicts, memberNumber, isFamilyCase);
+        const matchedConflict = findConflictForField(f, ds260Conflicts, memberNumber, isFamilyCase);
+        const isConflicted = !!matchedConflict;
         const busy = savingKey === f.key;
         return (
           <div
             key={f.key}
+            id={`field-${f.key}`}
             className={`rounded-md border p-2 ${
               isConflicted
                 ? "border-red-400 bg-rose-50/30 ring-1 ring-red-100"
@@ -399,6 +613,14 @@ function Ds260FieldGrid({
                     onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveField(f.key, e.currentTarget.value, f.value);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Tự lưu khi rời khỏi ô — tránh trường hợp người dùng gõ xong rồi
+                      // click sang chỗ khác mà quên bấm "Lưu", làm mất thay đổi vừa nhập.
+                      if (drafts[f.key] !== undefined) {
                         void saveField(f.key, e.currentTarget.value, f.value);
                       }
                     }}
@@ -436,10 +658,14 @@ function Ds260FieldGrid({
                 <InputTooltip value={f.value || ""} />
               </div>
             )}
-            {isConflicted && (
-              <p className="mt-1 text-xs font-semibold text-red-600 flex items-center gap-1">
-                <span>⚠️ Cần chọn trong xung đột</span>
-              </p>
+            {isConflicted && matchedConflict && (
+              <button
+                type="button"
+                className="mt-1 flex items-center gap-1 text-xs font-semibold text-red-600 underline decoration-dotted hover:text-red-700"
+                onClick={() => scrollToConflictCard(matchedConflict.id)}
+              >
+                <span>⚠️ Cần chọn trong xung đột — bấm để đến phần xử lý</span>
+              </button>
             )}
             {isManual && (
               <p className="mt-1 text-xs font-medium text-amber-800">Đã chỉnh tay trước export</p>
@@ -496,7 +722,10 @@ function Ds260MemberMappingBlock({
   isFamilyCase: boolean;
 }) {
   const sections = visibleDs260Sections(form.sections, member.role);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // Thành viên chưa có dữ liệu gì (chưa upload/chưa điền field nào) → mặc định thu nhỏ, tránh
+  // hiện 1 khối rỗng chiếm chỗ làm rối màn hình Review khi hồ sơ có nhiều thành viên.
+  const hasAnyData = (form.applicable_filled_count ?? form.filled_count) > 0;
+  const [isCollapsed, setIsCollapsed] = useState(!hasAnyData);
 
   return (
     <section
@@ -752,6 +981,14 @@ function DocumentTablePanel({
                               }
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  void saveField(rec.id, k, e.currentTarget.value, original);
+                                }
+                              }}
+                              onBlur={(e) => {
+                                // Tự lưu khi rời khỏi ô — tránh mất thay đổi nếu người dùng
+                                // quên bấm "Lưu" sau khi gõ xong.
+                                if (drafts[draftId] !== undefined) {
                                   void saveField(rec.id, k, e.currentTarget.value, original);
                                 }
                               }}
@@ -818,6 +1055,7 @@ export default function ReviewPage() {
     message: "",
     onConfirm: () => {},
   });
+  const [hasShownAddressWarningModal, setHasShownAddressWarningModal] = useState(false);
   const [conflictBusy, setConflictBusy] = useState("");
   const [busy, setBusy] = useState("");
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -858,7 +1096,7 @@ export default function ReviewPage() {
     }
   }, [id]);
 
-  const load = useCallback(async () => {
+  const loadInner = useCallback(async () => {
     const members = await api.listCaseMembers(id).catch(() => [] as CaseMember[]);
     setCaseMembers(members);
     if (members.length > 0) {
@@ -912,6 +1150,9 @@ export default function ReviewPage() {
       }
       return prev;
     });
+    if (validation?.warnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction")) {
+      setHasShownAddressWarningModal(true);
+    }
     setDocTables(tables);
     setReferenceTables(refTables);
 
@@ -938,6 +1179,19 @@ export default function ReviewPage() {
     });
     setReferenceRecordsByType(refByType);
   }, [id]);
+
+  const load = useCallback(async () => {
+    // Refresh sau khi resolve conflict / lưu field làm re-render toàn trang, khiến trình duyệt
+    // cuộn ngược lên đầu. Ghi lại vị trí cuộn trước khi load rồi khôi phục sau khi DOM đã vẽ lại.
+    const scrollY = window.scrollY;
+    try {
+      await loadInner();
+    } finally {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.scrollTo(0, scrollY));
+      });
+    }
+  }, [loadInner]);
 
   useEffect(() => {
     reloadMembers().catch(() => undefined);
@@ -982,13 +1236,15 @@ export default function ReviewPage() {
     load().catch(() => router.replace("/dashboard"));
   }, [load, router]);
 
-  const resolveDs260Conflict = async (conflictId: string, value: string) => {
+  const resolveDs260Conflict = async (conflictId: string, value: string): Promise<boolean> => {
     setConflictBusy(conflictId);
     try {
       await api.resolveConflict(id, conflictId, value);
       await load();
+      return true;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Không thể giải quyết xung đột");
+      return false;
     } finally {
       setConflictBusy("");
     }
@@ -1414,12 +1670,12 @@ export default function ReviewPage() {
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="label">Chủ hồ sơ / Chồng</label>
+                <label className="label">Chủ hồ sơ (người đứng đơn chính)</label>
                 <input
                   className="input"
                   value={setupPrincipalName}
                   onChange={(e) => setSetupPrincipalName(e.target.value)}
-                  placeholder="DANG VAN HUNG"
+                  placeholder="DANG VAN HUNG hoặc MAI THI HUONG"
                 />
               </div>
               <div>
@@ -1731,6 +1987,7 @@ export default function ReviewPage() {
 
             <Ds260ConflictPanel
               conflicts={ds260Conflicts}
+              warnings={ds260Validation?.warnings ?? []}
               onResolve={resolveDs260Conflict}
               busyId={conflictBusy}
             />
@@ -1753,22 +2010,10 @@ export default function ReviewPage() {
                 </span>
               )}
             </h2>
-            {ds260Validation.warning_count > 0 && (
-              <p className="mt-1 text-sm text-amber-800">
-                {ds260Validation.warning_count} cảnh báo — nên kiểm tra trước khi nộp
-              </p>
-            )}
             {ds260Validation.errors.length > 0 && (
               <ul className="mt-3 space-y-1 text-sm text-red-800">
                 {ds260Validation.errors.map((e, i) => (
                   <li key={`err-${i}`}>• {e.message}</li>
-                ))}
-              </ul>
-            )}
-            {ds260Validation.warnings.length > 0 && (
-              <ul className="mt-3 space-y-1 text-sm text-amber-900">
-                {ds260Validation.warnings.map((w, i) => (
-                  <li key={`warn-${i}`}>⚠ {w.message}</li>
                 ))}
               </ul>
             )}
@@ -2069,6 +2314,13 @@ export default function ReviewPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {hasShownAddressWarningModal && ds260Validation && (
+          <AddressWarningModal
+            warnings={ds260Validation.warnings}
+            onDismiss={() => setHasShownAddressWarningModal(false)}
+          />
         )}
 
         {confirmModal.isOpen && (

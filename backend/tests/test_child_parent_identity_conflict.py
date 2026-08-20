@@ -134,7 +134,7 @@ def test_child_worksheet_mother_dob_conflicts_with_mother_own_passport(tmp_path)
             assert "mother" in c.field_key
             assert "date_of_birth" in c.field_key
             values = {c.value_a, c.value_b}
-            assert values == {"1977-08-26", "1990-01-01"}
+            assert values == {"26/08/1977", "01/01/1990"}
         await engine.dispose()
 
     _run(scenario())
