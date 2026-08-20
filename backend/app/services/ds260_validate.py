@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import ApplicantDocRecord, Document, DocumentStatus
 from app.services.document_registry import REGISTRY_BY_CODE
 from app.services.ds260_conflicts import count_open_ds260_conflicts
+from app.services.family_case import _is_member_female, load_case_members
 from app.services.ds260_mapping import (
     _child_excluded_section_ids,
+    _split_vn_person_name,
     flatten_ds260_mappings,
     load_ds260_mapping,
     load_ds260_sections,
@@ -150,10 +152,88 @@ def missing_address_before_16(
     covers_before_16 = other_addresses_used == "yes" and bool(other_addresses_history)
     if covers_before_16:
         return False
+    # Nếu history có content → contradiction warning sẽ handle riêng, không warn ở đây
+    if not other_addresses_used and bool(other_addresses_history):
+        return False
     if address_from_parsed is None:
         return True
     address_from_date, _granularity = address_from_parsed
     return (address_from_date.year, address_from_date.month) > (age16_date.year, age16_date.month)
+
+
+def _names_differ(name1: str, name2: str) -> bool:
+    """So sánh hai tên: khác nhau nếu cả họ và tên đều khác (tránh lẫn 1 ký tự OCR)."""
+    if not name1 or not name2:
+        return False
+    s1, g1 = _split_vn_person_name(name1.strip())
+    s2, g2 = _split_vn_person_name(name2.strip())
+    # Cả họ và tên đều khác → khả năng cao là sai
+    return s1.lower() != s2.lower() and g1.lower() != g2.lower()
+
+
+async def _check_parent_name_consistency(
+    db: AsyncSession,
+    applicant_id,
+    records: list[ApplicantDocRecord],
+    child_flat: dict[str, str],
+) -> list[dict[str, str]]:
+    """So sánh tên cha/mẹ trong hồ sơ con với hồ sơ cha/mẹ thật. Chỉ chạy cho member là con."""
+    from app.services.family_case import _is_member_female, load_case_members
+
+    members = await load_case_members(db, applicant_id)
+    principal = next((m for m in members if m.role == "principal"), None)
+    spouse = next((m for m in members if m.role == "spouse"), None)
+    if not principal:
+        return []
+
+    principal_is_female = _is_member_female(principal, records) if principal else False
+    spouse_is_female = _is_member_female(spouse, records) if spouse else False
+
+    father_member = None
+    mother_member = None
+    if principal_is_female:
+        mother_member = principal
+        father_member = spouse
+    elif spouse_is_female:
+        father_member = principal
+        mother_member = spouse
+    else:
+        father_member = principal
+        mother_member = spouse
+
+    issues: list[dict[str, str]] = []
+
+    async def check_parent(parent_key: str, parent_member, parent_role_label: str):
+        if not parent_member:
+            return
+        parent_form = await resolve_ds260_form(
+            db, applicant_id, member_id=parent_member.id
+        )
+        pflat = flatten_ds260_values(parent_form)
+        child_surname = (child_flat.get(f"{parent_key}_surname") or "").strip()
+        child_given = (child_flat.get(f"{parent_key}_given_names") or "").strip()
+        child_full = f"{child_surname} {child_given}".strip()
+
+        parent_surname = (pflat.get(f"{parent_key}_surname") or "").strip()
+        parent_given = (pflat.get(f"{parent_key}_given_names") or "").strip()
+        parent_full = f"{parent_surname} {parent_given}".strip()
+
+        if child_full and parent_full and _names_differ(child_full, parent_full):
+            issues.append(
+                _issue(
+                    code="parent_name_inconsistent",
+                    message=(
+                        f"Tên {parent_role_label} trong hồ sơ con ({child_full}) "
+                        f"khác với tên trong hồ sơ {parent_role_label} thật ({parent_full})"
+                    ),
+                    field_key=f"{parent_key}_surname",
+                    document_type="ds260_customer_form",
+                )
+            )
+
+    await check_parent("father", father_member, "cha")
+    await check_parent("mother", mother_member, "mẹ")
+    return issues
 
 
 async def validate_ds260(
@@ -177,6 +257,14 @@ async def validate_ds260(
     from app.services.doc_record_sync import list_doc_records
 
     records = await list_doc_records(db, applicant_id)
+
+    # Chỉ so sánh cha/mẹ khi hồ sơ này là con — kiểm tra tên cha/mẹ trong hồ sơ con
+    # có khớp với hồ sơ cha/mẹ thật không.
+    if member_role == "child":
+        parent_warnings = await _check_parent_name_consistency(
+            db, applicant_id, records, flat
+        )
+        warnings.extend(parent_warnings)
 
     member_has_passport_doc = "passport" in form.get("documents", {})
     if member_id and person_name:
@@ -377,6 +465,25 @@ async def validate_ds260(
             )
         )
 
+    # Cảnh báo mâu thuẫn: câu "Lived elsewhere since age 16?" trả lời "No"
+    # nhưng phần "Prior address history" lại có dữ liệu.
+    if has_ds260_worksheet:
+        addr_used = flat.get("other_addresses_used", "").strip().lower()
+        addr_history = flat.get("other_addresses_history", "").strip()
+        if addr_used == "no" and addr_history:
+            warnings.append(
+                _issue(
+                    code="address_contradiction",
+                    message=(
+                        f"Người {person_name} mâu thuẫn: "
+                        '"Have you lived anywhere other than this address since the age of sixteen?" '
+                        "trả lời No nhưng phần chi tiết địa chỉ trước đây có nội dung"
+                    ),
+                    field_key="other_addresses_used",
+                    document_type="ds260_customer_form",
+                )
+            )
+
     # Cảnh báo khi không có địa chỉ trước 16 tuổi — DS-260 yêu cầu khai đủ nơi ở kể từ năm 16
     # tuổi (other_addresses_since_16). Nếu địa chỉ hiện tại chỉ có từ sau mốc 16 tuổi và khách
     # không khai "có ở nơi khác từ năm 16 tuổi" (other_addresses_used != Yes), khả năng cao đang
@@ -391,9 +498,8 @@ async def validate_ds260(
             _issue(
                 code="missing_address_before_16",
                 message=(
-                    "Không có địa chỉ nào trước năm 16 tuổi — kiểm tra lại worksheet "
-                    "(current_address chỉ có từ sau mốc 16 tuổi và other_addresses_used "
-                    "chưa khai Yes/lịch sử nơi ở trước đó)"
+                    f"Người {person_name} thiếu phần địa chỉ sau năm 16 tuổi "
+                    '"Have you lived anywhere other than this address since the age of sixteen?"'
                 ),
                 field_key="other_addresses_history",
                 document_type="ds260_customer_form",

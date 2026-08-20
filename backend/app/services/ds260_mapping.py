@@ -2690,27 +2690,6 @@ _PARENT_BIRTH_KEYS: frozenset[str] = frozenset({
     "mother_birth_state",
     "mother_birth_country",
 })
-_BC_MIN_CONFIDENCE = 0.5
-
-
-def _bc_field_confidence(record: ApplicantDocRecord, field_key: str) -> float | None:
-    """Lấy confidence của field từ birth certificate raw_data, hoặc None nếu không tìm thấy."""
-    if record.doc_type != "birth_certificate":
-        return None
-    raw = json.loads(record.raw_data or "{}")
-    # raw chứa cấu trúc {"field_name": {"value": ..., "confidence": ...}}
-    field_data = raw.get(field_key, {})
-    if isinstance(field_data, dict):
-        conf = field_data.get("confidence")
-        if conf is not None:
-            return float(conf)
-    return None
-
-
-def _bc_field_low_confidence(record: ApplicantDocRecord, field_key: str) -> bool:
-    """True nếu field từ birth certificate có confidence < _BC_MIN_CONFIDENCE."""
-    conf = _bc_field_confidence(record, field_key)
-    return conf is not None and conf < _BC_MIN_CONFIDENCE
 
 
 def _person_name_on_record(rec: ApplicantDocRecord) -> str:
@@ -3380,16 +3359,9 @@ def enrich_empty_fields_from_all_doc_records(
             if not primary_ok and section_id in _SECTIONS_BLOCK_WORKSHEET_WITHOUT_PRIMARY:
                 eligible = [r for r in eligible if r.doc_type != "ds260_customer_form"]
 
-            # Cha/mẹ nơi sinh từ birth certificate: skip nếu confidence < 0.5 (BC OCR chữ viết tay hay sai).
-            # Worksheet DS-260 có conf 1.0 nên được ưu tiên tự nhiên qua _record_fill_priority.
-            if field_key in _PARENT_BIRTH_KEYS:
-                eligible = [r for r in eligible if not _bc_field_low_confidence(r, field_key)]
-                if not eligible:
-                    continue
-
-            # Cha/mẹ tên: ưu tiên DS-260 worksheet (conf 1.0) trước birth certificate.
-            # BC chỉ để đối chiếu, không phải nguồn chính.
-            if field_key in _PARENT_NAME_KEYS:
+            # Cha/mẹ: ưu tiên DS-260 worksheet (conf 1.0) trước birth certificate.
+            # BC chỉ để đối chiếu, không phải nguồn chính. Áp dụng cho cả tên lẫn nơi sinh.
+            if field_key in _PARENT_NAME_KEYS | _PARENT_BIRTH_KEYS:
                 ws_rec = next((r for r in eligible if r.doc_type == "ds260_customer_form"), None)
                 if ws_rec:
                     val, source_field = _resolve_field_from_record(ws_rec, mapping)
@@ -4066,7 +4038,9 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
 _YESNO_QUESTION_EVIDENCE: dict[str, tuple[str, ...]] = {
     "other_name_used": ("other_names",),
     "other_nationality_used": ("other_nationality_history",),
-    "other_addresses_used": ("other_addresses_history",),
+    # "other_addresses_used" KHÔNG có ở đây — DS-260 yêu cầu người khai báo tự trả lời câu
+    # hỏi này. Nếu để trống, KHÔNG tự fill "No" (bởi vì nếu prior_address_history có dữ
+    # liệu thì user có thể muốn sửa từ "No" → "Yes" nhưng bị che mất).
     "other_phones_used": ("other_phones_history",),
     "other_emails_used": ("other_emails_history",),
     "other_social_media_used": ("other_social_history",),

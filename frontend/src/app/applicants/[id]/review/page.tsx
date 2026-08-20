@@ -15,6 +15,7 @@ import {
   DocumentTypeGuide,
   Ds260Form,
   Ds260Validation,
+  Ds260ValidationIssue,
   FormTemplate,
   getToken,
   User,
@@ -153,10 +154,12 @@ function ConflictResolveModal({
 
 function Ds260ConflictPanel({
   conflicts,
+  warnings,
   onResolve,
   busyId,
 }: {
   conflicts: Conflict[];
+  warnings: Ds260ValidationIssue[];
   onResolve: (conflictId: string, value: string) => Promise<boolean>;
   busyId: string;
 }) {
@@ -187,7 +190,7 @@ function Ds260ConflictPanel({
 
   // Khi resolve xong xung đột cuối cùng, `conflicts` sẽ rỗng ngay — nhưng modal "Đã xử lý"
   // vẫn phải hiện, nên không được return null sớm trong lúc modal đang mở.
-  if (conflicts.length === 0 && !resolveModal) return null;
+  if (conflicts.length === 0 && warnings.length === 0 && !resolveModal) return null;
 
   const modal = resolveModal && (
     <ConflictResolveModal
@@ -202,19 +205,33 @@ function Ds260ConflictPanel({
     />
   );
 
-  if (conflicts.length === 0) return modal;
+  if (conflicts.length === 0 && warnings.length === 0) return modal;
 
   return (
     <div id="ds260-conflicts-section" className="card mb-6 border-amber-300 bg-amber-50/50 scroll-mt-24">
       {modal}
       <h2 className="text-lg font-semibold text-slate-900">
-        Xung đột dữ liệu DS-260 ({conflicts.length})
+        Cảnh báo DS-260
+        {conflicts.length > 0 && <span className="ml-2 text-sm font-normal text-amber-700">({conflicts.length} xung đột{typeof window !== "undefined" && warnings.length > 0 ? ` · ${warnings.length} cảnh báo` : ""})</span>}
+        {conflicts.length === 0 && warnings.length > 0 && <span className="ml-2 text-sm font-normal text-amber-700">({warnings.length} cảnh báo)</span>}
       </h2>
-      <p className="mt-1 text-sm text-slate-600">
-        Chọn <strong>nguồn A</strong> (Luồng 1 / giấy tờ chính) hoặc <strong>nguồn B</strong> (đối chiếu{" "}
-        <code className="text-xs">_new</code> / worksheet). Giá trị đã chọn sẽ{" "}
-        <strong>tự điền</strong> vào bảng DS-260 bên dưới và file Word khi xuất.
-      </p>
+      {conflicts.length > 0 && (
+        <p className="mt-1 text-sm text-slate-600">
+          Chọn <strong>nguồn A</strong> (Luồng 1 / giấy tờ chính) hoặc <strong>nguồn B</strong> (đối chiếu{" "}
+          <code className="text-xs">_new</code> / worksheet). Giá trị đã chọn sẽ{" "}
+          <strong>tự điền</strong> vào bảng DS-260 bên dưới và file Word khi xuất.
+        </p>
+      )}
+      {warnings.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {warnings.map((w, i) => (
+            <li key={`warn-${i}`} className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>{w.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mt-4 space-y-3">
         {conflicts.map((c) => {
           const isWorksheet = c.conflict_type === "document_vs_worksheet";
@@ -409,6 +426,72 @@ function scrollToConflictCard(conflictId: string) {
   }, 1600);
 }
 
+function scrollToField(fieldKey: string) {
+  const el = document.getElementById(`field-${fieldKey}`);
+  if (!el) return;
+  pendingConflictReturnScrollY = window.scrollY;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("ring-4", "ring-amber-400");
+  window.setTimeout(() => {
+    el.classList.remove("ring-4", "ring-amber-400");
+  }, 2000);
+}
+
+function AddressWarningModal({
+  warnings,
+  onDismiss,
+}: {
+  warnings: Ds260ValidationIssue[];
+  onDismiss: () => void;
+}) {
+  const missingBefore16 = warnings.find((w) => w.code === "missing_address_before_16");
+  const contradiction = warnings.find((w) => w.code === "address_contradiction");
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 text-center shadow-2xl">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+          ⚠
+        </div>
+        <h3 className="text-base font-semibold text-slate-900">Cảnh báo DS-260</h3>
+
+        {missingBefore16 && (
+          <p className="mt-3 text-sm text-slate-700">{missingBefore16.message}</p>
+        )}
+        {contradiction && (
+          <p className="mt-3 text-sm text-slate-700">{contradiction.message}</p>
+        )}
+
+        <div className="mt-5 flex flex-col gap-2">
+          {(missingBefore16 || contradiction) && (
+            <button
+              type="button"
+              className="w-full rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 transition"
+              onClick={() => {
+                if (missingBefore16) {
+                  scrollToField("other_addresses_used");
+                } else if (contradiction) {
+                  scrollToField("other_addresses_used");
+                }
+                onDismiss();
+              }}
+            >
+              Điền ngay
+            </button>
+          )}
+          <button
+            type="button"
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+            onClick={onDismiss}
+          >
+            Đã biết
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InputTooltip({ value }: { value: string }) {
   if (!value || value.length <= 18) return null;
   return (
@@ -503,6 +586,7 @@ function Ds260FieldGrid({
         return (
           <div
             key={f.key}
+            id={`field-${f.key}`}
             className={`rounded-md border p-2 ${
               isConflicted
                 ? "border-red-400 bg-rose-50/30 ring-1 ring-red-100"
@@ -971,6 +1055,7 @@ export default function ReviewPage() {
     message: "",
     onConfirm: () => {},
   });
+  const [hasShownAddressWarningModal, setHasShownAddressWarningModal] = useState(false);
   const [conflictBusy, setConflictBusy] = useState("");
   const [busy, setBusy] = useState("");
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -1065,6 +1150,9 @@ export default function ReviewPage() {
       }
       return prev;
     });
+    if (validation?.warnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction")) {
+      setHasShownAddressWarningModal(true);
+    }
     setDocTables(tables);
     setReferenceTables(refTables);
 
@@ -1899,6 +1987,7 @@ export default function ReviewPage() {
 
             <Ds260ConflictPanel
               conflicts={ds260Conflicts}
+              warnings={ds260Validation?.warnings ?? []}
               onResolve={resolveDs260Conflict}
               busyId={conflictBusy}
             />
@@ -1921,22 +2010,10 @@ export default function ReviewPage() {
                 </span>
               )}
             </h2>
-            {ds260Validation.warning_count > 0 && (
-              <p className="mt-1 text-sm text-amber-800">
-                {ds260Validation.warning_count} cảnh báo — nên kiểm tra trước khi nộp
-              </p>
-            )}
             {ds260Validation.errors.length > 0 && (
               <ul className="mt-3 space-y-1 text-sm text-red-800">
                 {ds260Validation.errors.map((e, i) => (
                   <li key={`err-${i}`}>• {e.message}</li>
-                ))}
-              </ul>
-            )}
-            {ds260Validation.warnings.length > 0 && (
-              <ul className="mt-3 space-y-1 text-sm text-amber-900">
-                {ds260Validation.warnings.map((w, i) => (
-                  <li key={`warn-${i}`}>⚠ {w.message}</li>
                 ))}
               </ul>
             )}
@@ -2237,6 +2314,13 @@ export default function ReviewPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {hasShownAddressWarningModal && ds260Validation && (
+          <AddressWarningModal
+            warnings={ds260Validation.warnings}
+            onDismiss={() => setHasShownAddressWarningModal(false)}
+          />
         )}
 
         {confirmModal.isOpen && (

@@ -62,3 +62,14 @@ def test_no_dob_no_warning():
         other_addresses_used="",
         other_addresses_history="",
     ) is False
+
+
+def test_no_answer_with_history_no_warning():
+    # Empty answer with history should NOT trigger the missing-address-before-16 warning
+    # (it's a contradiction case, not a missing-data case).
+    assert missing_address_before_16(
+        dob_val="01/01/1990",
+        address_from_val="06/2006",
+        other_addresses_used="",
+        other_addresses_history="12 Le Loi, District 1, HCMC",
+    ) is False

@@ -96,7 +96,7 @@
     {
       "id": "section_father",
       "title": "DS-260 — Father Information",
-      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
+      "subtitle": "Nguồn: DS-260 (khách khai) → bổ sung từ GKS (Luồng 1) nếu thiếu",
       "fields": [
         {"key": "father_surname", "label": "Father's Surnames / Họ cha", "document": "birth_certificate", "field": "father_surname", "aliases": ["father_family_name", "father_last_name"]},
         {"key": "father_given_names", "label": "Father's Given Names / Tên cha", "document": "birth_certificate", "field": "father_given_names", "aliases": ["father_first_name", "father_given_name"]},
@@ -117,7 +117,7 @@
     {
       "id": "section_mother",
       "title": "DS-260 — Mother Information",
-      "subtitle": "Nguồn: GKS (Luồng 1) → bổ sung từ DS-260 khách khai (01_6) nếu thiếu",
+      "subtitle": "Nguồn: DS-260 (khách khai) → bổ sung từ GKS (Luồng 1) nếu thiếu",
       "fields": [
         {"key": "mother_surname", "label": "Mother's Surnames / Họ mẹ", "document": "birth_certificate", "field": "mother_surname", "aliases": ["mother_family_name", "mother_last_name"]},
         {"key": "mother_given_names", "label": "Mother's Given Names / Tên mẹ", "document": "birth_certificate", "field": "mother_given_names", "aliases": ["mother_first_name", "mother_given_name"]},
