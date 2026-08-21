@@ -1047,8 +1047,8 @@ def _fill_bare_colon_continuation(paras: list, question_idx: int, value: str) ->
     blank_text = blank_para.text
     if blank_text.strip() == "" or not _CONTINUATION_BLANK_RE.match(blank_text):
         return False
-    prefix = ":" if blank_text.lstrip().startswith(":") else ""
-    blank_para.text = f"{prefix} {value}".strip()
+    # KHÔNG giữ prefix ':' từ template — đó chỉ là placeholder trống, không phải data
+    blank_para.text = value.strip()
     return True
 
 

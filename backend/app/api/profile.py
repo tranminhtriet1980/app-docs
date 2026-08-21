@@ -382,6 +382,34 @@ async def update_ds260_form_field(
                 is_manual=True,
             )
         )
+
+    # Khi *_used = "No", tự động xóa field history tương ứng để export đúng "No" thay vì "Yes - <data cũ>"
+    # Ánh xạ cờ Yes/No → field chi tiết (đồng bộ với _YESNO_QUESTION_EVIDENCE trong ds260_mapping.py)
+    _USED_TO_HISTORY: dict[str, str] = {
+        "other_name_used": "other_names",
+        "other_nationality_used": "other_nationality_history",
+        "other_phones_used": "other_phones_history",
+        "other_emails_used": "other_emails_history",
+        "other_social_media_used": "other_social_history",
+        "work_other_occupation_used": "work_other_occupation_detail",
+        "work_prior_jobs_used": "work_prior_jobs_history",
+        "traveled_countries_5yr_used": "traveled_countries_history",
+        "previous_spouses_used": "previous_spouse_full_name",
+    }
+    _NEGATIVE_TOKENS = frozenset({"no", "n", "khong", "không", "false", "0"})
+    if field_key in _USED_TO_HISTORY and value.lower() in _NEGATIVE_TOKENS:
+        history_field = _USED_TO_HISTORY[field_key]
+        history_storage_key = ds260_manual_field_key(history_field, str(member_id) if member_id else None)
+        history_result = await db.execute(
+            select(ProfileField).where(
+                ProfileField.applicant_id == applicant.id,
+                ProfileField.field_key == history_storage_key,
+            )
+        )
+        history_pf = history_result.scalar_one_or_none()
+        if history_pf:
+            await db.delete(history_pf)
+
     await db.commit()
 
     records = await list_doc_records(db, applicant.id)
