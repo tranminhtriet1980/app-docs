@@ -17,7 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.entities import Applicant, ApplicantStatus, Export, FormTemplate
 from app.services.ds260_mapping import flatten_ds260_mappings, resolve_ds260_form
-from app.services.ds260_dates import format_ds260_export_date, is_date_field_key
+from app.services.ds260_dates import (
+    format_ds260_display_date_range,
+    format_ds260_export_date,
+    format_ds260_export_date_range,
+    is_date_field_key,
+    is_date_range_field_key,
+)
 from app.services.ds260_normalize import normalize_gender
 from app.services.ds260_validate import flatten_ds260_values, validate_ds260
 from app.services.postal_code import derive_postal_code_from_location
@@ -849,17 +855,23 @@ _PERIOD_FROM_TO_RE = re.compile(r"(?i)(from\s*\(t[uừ]\))(.*?)(to\s*\(đ[eế]n
 
 
 def _fill_period_from_to(text: str, value: str) -> str | None:
-    """Tách 'Period: from (từ) ... to (đến):' thành 2 mốc ngày (vd. '05/09/1991 - 30/05/1994')."""
-    if not _PERIOD_FROM_TO_RE.search(text):
+    """Tách 'Period: from (từ) ... to (đến):' thành 2 mốc ngày (vd. '05 Sep 1991 - 30 May 1994')."""
+    match = _PERIOD_FROM_TO_RE.search(text)
+    if not match:
         return None
-    parts = re.split(r"\s+[-–—]\s+|\s+to\s+|\s+đến\s+|\s*->\s*|\s*→\s*", value, maxsplit=1, flags=re.I)
+    # Tách theo: " - ", " to ", " đến ", HOẶC dấu -/–/— (với hoặc không có khoảng trắng)
+    parts = re.split(r"\s*[-–—]\s*|\s+to\s+|\s+đến\s+|\s*->\s*|\s*→\s*", value, maxsplit=1, flags=re.I)
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) < 2:
         return None
     d_from = format_ds260_export_date(parts[0]) or parts[0]
     d_to = format_ds260_export_date(parts[1]) or parts[1]
+    # Nếu template không có ':' sau "from (từ)" thì thêm vào
+    from_part = match.group(1)
+    if not from_part.rstrip().endswith(":"):
+        from_part = from_part.rstrip() + ":"
     return _PERIOD_FROM_TO_RE.sub(
-        lambda m: f"{m.group(1)} {d_from}   {m.group(3)} {d_to}", text, count=1
+        lambda m: f"{from_part} {d_from}   {m.group(3)} {d_to}", text, count=1
     )
 
 
@@ -897,6 +909,8 @@ _SECURITY_AND_SSN_SIMPLE_YES_NO_KEYS = frozenset({
     "departed_us_evade_military", "polygamy", "exchange_visitor_j_unfulfilled",
     "frivolous_asylum", "public_charge",
     "applied_ssn_before", "want_ssn_issued", "authorize_ssn_disclosure",
+    # A.3 Personal - Previous Spouses
+    "previous_spouses_used",
 })
 
 _APPEND_NO_COLON_KEYS = frozenset({"social_media_identifier", "military_served", "children_used"}) | (
@@ -1123,7 +1137,12 @@ def _smart_fill_ds260_line(
 def _build_replacements(values: dict[str, str], mapping: dict[str, str]) -> dict[str, str]:
     reps: dict[str, str] = {}
     for key, val in values.items():
-        reps[f"{{{{{key}}}}}"] = val or ""
+        if is_date_range_field_key(key):
+            # Format date range (edu_*_period, work_prior_jobs_period...) → "dd Mon yyyy - dd Mon yyyy"
+            formatted = format_ds260_export_date_range(val) if val else ""
+            reps[f"{{{{{key}}}}}"] = formatted
+        else:
+            reps[f"{{{{{key}}}}}"] = val or ""
     for label, field_key in mapping.items():
         reps[f"{{{{{label}}}}}"] = values.get(field_key, "")
     return reps

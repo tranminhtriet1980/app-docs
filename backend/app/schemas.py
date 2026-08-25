@@ -312,6 +312,7 @@ class Ds260SectionOut(BaseModel):
     applicable_count: int = 0
     applicable_filled_count: int = 0
     document_missing: bool = False
+    warnings: list[str] = []
 
 
 class Ds260DocumentSnapshotOut(BaseModel):

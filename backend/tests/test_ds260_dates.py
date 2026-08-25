@@ -200,3 +200,20 @@ def test_birth_date_rejects_partial_value():
 def test_valid_dates_never_flagged_as_unparsed():
     for good in ("2020-03-01", "01 Mar 2020", "May 2023", "1963", "03/2023"):
         assert not looks_like_date_but_unparsed(good)
+
+
+def test_export_date_range_english_month_format():
+    """format_ds260_export_date_range: khoảng thời gian học export Word → 'dd Mon yyyy - dd Mon yyyy'."""
+    from app.services.ds260_dates import format_ds260_export_date_range
+
+    # dd/mm/yyyy → "dd Mon yyyy"
+    assert format_ds260_export_date_range("05/09/2007 - 30/05/2011") == "05 Sep 2007 - 30 May 2011"
+    # Tháng viết đầy đủ
+    assert format_ds260_export_date_range("15 August 2004 - 01 June 2008") == "15 Aug 2004 - 01 Jun 2008"
+    # Present
+    assert format_ds260_export_date_range("Sep 2008 to Present") == "Sep 2008 - Present"
+    # 1 giá trị (không phải khoảng)
+    assert format_ds260_export_date_range("2015") == "2015"
+    # Empty
+    assert format_ds260_export_date_range("") == ""
+

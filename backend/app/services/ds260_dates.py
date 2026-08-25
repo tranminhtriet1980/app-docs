@@ -200,7 +200,7 @@ def format_ds260_export_date(val: str) -> str:
         return val or ""
     d, granularity = parsed
     if granularity == "day":
-        return f"{d.day} {d.strftime('%b')} {d.year}"
+        return f"{d.day:02d} {d.strftime('%b')} {d.year}"
     if granularity == "month":
         return f"{d.strftime('%b')} {d.year}"
     return f"{d.year}"
@@ -231,6 +231,20 @@ def _format_range_endpoint(token: str) -> str:
     return format_ds260_display_date(t) or t
 
 
+def _format_range_endpoint_export(token: str) -> str:
+    """Format một đầu mốc của khoảng thời gian cho Word export — định dạng 'dd Mon yyyy'."""
+    t = (token or "").strip()
+    if not t:
+        return ""
+    if t.lower() in _OPEN_ENDED:
+        return "Present"
+    # Parse và format thành "dd Mon yyyy"
+    d = parse_full_date(t)
+    if d:
+        return f"{d.day:02d} {d.strftime('%b')} {d.year}"
+    return t  # giữ nguyên nếu không parse được
+
+
 def format_ds260_display_date_range(val: str) -> str:
     """Chuẩn hoá khoảng thời gian → 'dd/mm/yyyy - dd/mm/yyyy' (mỗi đầu theo format_ds260_display_date).
 
@@ -245,6 +259,25 @@ def format_ds260_display_date_range(val: str) -> str:
     if len(parts) != 2:
         return format_ds260_display_date(v) or v
     return f"{_format_range_endpoint(parts[0])} - {_format_range_endpoint(parts[1])}"
+
+
+def format_ds260_export_date_range(val: str) -> str:
+    """Format khoảng thời gian cho Word export — 'dd Mon yyyy - dd Mon yyyy'.
+
+    '05/09/2007 - 30/05/2011' → '05 Sep 2007 - 30 May 2011'; giữ 'Present' cho đầu mở.
+    """
+    v = (val or "").strip()
+    if not v:
+        return ""
+    v = re.sub(r"^\s*(?:from|từ|tu)\s+", "", v, flags=re.IGNORECASE)
+    parts = _RANGE_SEP_RE.split(v, maxsplit=1)
+    if len(parts) != 2:
+        # Không tách được → thử format như 1 ngày đầy đủ
+        d = parse_full_date(v)
+        if d:
+            return f"{d.day} {d.strftime('%b')} {d.year}"
+        return v
+    return f"{_format_range_endpoint_export(parts[0])} - {_format_range_endpoint_export(parts[1])}"
 
 
 def format_sections_date_display(sections_out: list) -> None:

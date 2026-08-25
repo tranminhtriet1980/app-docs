@@ -42,6 +42,7 @@ DS260_MANUAL_SEGMENT = "manual"
 IDENTITY_OUTLIER_SEGMENT = "identity_outlier"
 CHILD_IDENTITY_SEGMENT = "child_identity"
 CHILD_PARENT_IDENTITY_SEGMENT = "child_parent_identity"
+SPOUSE_WORKSHEET_SEGMENT = "spouse_worksheet"
 
 def _application_form_worksheet_keys() -> frozenset[str]:
     """Section D (công việc/học vấn) — mọi field nguồn application_form, gồm cả narrative tự do
@@ -229,6 +230,12 @@ def child_parent_identity_conflict_field_key(child_name: str, parent: str, field
     return f"{DS260_CONFLICT_PREFIX}{CHILD_PARENT_IDENTITY_SEGMENT}.{slug}.{parent}.{field}"
 
 
+def spouse_worksheet_conflict_field_key(mapping_key: str, spouse_applicant_id: str) -> str:
+    """Khoá so sánh work/education của phối ngẫu giữa marriage certificate và
+    DS-260 worksheet của phối ngẫu (khi phối ngẫu CŨNG là applicant trong case)."""
+    return f"{DS260_CONFLICT_PREFIX}{SPOUSE_WORKSHEET_SEGMENT}.{spouse_applicant_id}.{mapping_key}"
+
+
 def ds260_manual_field_key(mapping_key: str, member_id: str | None = None) -> str:
     if member_id:
         return f"{DS260_CONFLICT_PREFIX}{DS260_MANUAL_SEGMENT}.{member_id}.{mapping_key}"
@@ -252,6 +259,8 @@ def conflict_type_from_field_key(field_key: str) -> str:
         return "child_parent_identity"
     if f".{CHILD_IDENTITY_SEGMENT}." in field_key:
         return "child_identity"
+    if f".{SPOUSE_WORKSHEET_SEGMENT}." in field_key:
+        return "spouse_worksheet"
     return "document_vs_exception"
 
 
@@ -267,6 +276,8 @@ def parse_ds260_conflict_key(field_key: str) -> tuple[str, str] | None:
         return CHILD_PARENT_IDENTITY_SEGMENT, rest[len(CHILD_PARENT_IDENTITY_SEGMENT) + 1 :]
     if rest.startswith(f"{CHILD_IDENTITY_SEGMENT}."):
         return CHILD_IDENTITY_SEGMENT, rest[len(CHILD_IDENTITY_SEGMENT) + 1 :]
+    if rest.startswith(f"{SPOUSE_WORKSHEET_SEGMENT}."):
+        return SPOUSE_WORKSHEET_SEGMENT, rest[len(SPOUSE_WORKSHEET_SEGMENT) + 1 :]
     doc_type, _, source_field = rest.partition(".")
     if doc_type and source_field:
         return doc_type, source_field
@@ -569,6 +580,21 @@ def _strict_field_value(
             if derived:
                 return derived, mapping.field
         return val, mapping.field
+    # Áp dụng fallback cho birth_certificate: split father_name/mother_name gộp
+    # thành father_surname/father_given_names hoặc mother_surname/mother_given_names.
+    # Bug fix 2026-08-21: trước đây father_surname/mother_surname từ BC luôn rỗng khi OCR
+    # chỉ trả father_name gộp → không bao giờ tạo conflict với worksheet dù BC có đầy đủ.
+    if rec.doc_type == "birth_certificate":
+        for parent in ("father", "mother"):
+            if mapping_key in (f"{parent}_surname", f"{parent}_given_names"):
+                from app.services.ds260_mapping import _resolve_parent_birth_cert_fallback
+
+                fallback_val, fallback_sf = _resolve_parent_birth_cert_fallback(
+                    mapping, rec, "", mapping.field, parent
+                )
+                if fallback_val.strip():
+                    return fallback_val, fallback_sf
+
     return "", mapping.field
 
 
@@ -1057,6 +1083,171 @@ def _sync_document_exception_conflicts(
     return rows
 
 
+# Field work/education của phối ngẫu cần so sánh khi phối ngẫu là applicant trong case.
+# spouse_occupation/spouse_occupation_other: marriage certificate → spouse's work_*
+# Khi phối ngẫu CÓ hồ sơ DS-260 riêng (applicant trong case), thông tin công việc trên
+# giấy kết hôn phải được so với phần work/education của phối ngẫu trên chính DS-260 của họ.
+_SPOUSE_WORK_COMPARE_KEYS = frozenset(
+    {
+        "spouse_occupation",  # marriage cert occupation → spouse's work_primary_occupation
+        "spouse_occupation_other",  # marriage cert occupation_other → spouse's work_occupation_other_specify
+    }
+)
+
+# Mapping từ spouse_* field (marriage cert) sang work_* field (spouse's DS-260 worksheet).
+_SPOUSE_TO_WORK_KEY_MAP = {
+    "spouse_occupation": "work_primary_occupation",
+    "spouse_occupation_other": "work_occupation_other_specify",
+}
+
+
+async def build_spouse_work_conflict_rows(
+    db: AsyncSession,
+    applicant_id: int,
+    records: list[ApplicantDocRecord],
+    resolutions: dict[str, str],
+) -> list[dict[str, Any]]:
+    """So sánh work/education của phối ngẫu giữa marriage certificate và spouse's DS-260 worksheet.
+
+    Khi phối ngẫu của đương đơn cũng là applicant trong cùng case:
+    - Marriage certificate có thể ghi nghề nghiệp (spouse_occupation)
+    - DS-260 worksheet của phối ngẫu có work_primary_occupation riêng
+    - Nếu 2 giá trị khác nhau → tạo Conflict để người dùng xem xét
+
+    Ví dụ thực tế: Hồ sơ NGUYEN HOANG YEN (đương đơn) có phối ngẫu là NGUYEN DANG DANG.
+    Giấy kết hôn ghi Dang Dang là "Công nhân, sản xuất".
+    Nhưng DS-260 của Dang Dang tự khai là "Nhân viên, cung cấp xe tự lái".
+    → Phải tạo Conflict để hiển thị sự khác biệt này.
+    """
+    from sqlalchemy import select
+
+    from app.models.entities import Applicant
+    from app.services.ds260_mapping import (
+        _spouse_field_from_marriage,
+        find_spouse_applicant,
+        pick_latest_record,
+    )
+
+    # Tìm applicant hiện tại
+    result = await db.execute(select(Applicant).where(Applicant.id == applicant_id))
+    current = result.scalar_one_or_none()
+    if not current:
+        return []
+
+    # Lấy marriage certificate và passport của đương đơn
+    marriage_rec, marriage_ref = _pick_luong1_pair(records, "marriage_certificate")
+    passport_rec = pick_latest_record(records, "passport")
+
+    # Tìm spouse applicant (phối ngẫu là applicant trong case)
+    spouse_app = await find_spouse_applicant(db, current, marriage_rec, passport_rec)
+    if not spouse_app:
+        return []
+
+    spouse_name = _get_spouse_name_from_marriage(marriage_rec, passport_rec)
+    if not spouse_name:
+        return []
+
+    # Lấy records của spouse applicant
+    spouse_records = await list_doc_records(db, spouse_app.id)
+    spouse_ds260 = _pick_latest_ds260_form(spouse_records)
+
+    rows: list[dict[str, Any]] = []
+
+    for spouse_key in _SPOUSE_WORK_COMPARE_KEYS:
+        # Marriage certificate value: spouse_occupation từ _spouse_field_from_marriage
+        # (đây là cách enrich_spouse_section_from_marriage sử dụng)
+        if spouse_key == "spouse_occupation":
+            marriage_val = _spouse_field_from_marriage(
+                marriage_rec, passport_rec, "occupation",
+                marriage_ref=marriage_ref, passport_ref=None
+            )
+        elif spouse_key == "spouse_occupation_other":
+            marriage_val = _spouse_field_from_marriage(
+                marriage_rec, passport_rec, "occupation_other_specify",
+                marriage_ref=marriage_ref, passport_ref=None
+            )
+        else:
+            marriage_val = ""
+        marriage_val = (marriage_val or "").strip()
+
+        if not marriage_val:
+            continue
+
+        # Mapping sang work_* key của spouse's DS-260
+        work_key = _SPOUSE_TO_WORK_KEY_MAP.get(spouse_key)
+        if not work_key:
+            continue
+
+        # Lấy work_* value từ spouse's DS-260 worksheet
+        spouse_work_val, spouse_rec = _worksheet_value(spouse_records, work_key)
+        spouse_work_val = (spouse_work_val or "").strip()
+
+        # Nếu spouse's DS-260 cũng trống → không có gì để so sánh
+        if not spouse_work_val:
+            continue
+
+        fk = spouse_worksheet_conflict_field_key(spouse_key, str(spouse_app.id))
+        if fk in resolutions:
+            continue
+
+        # So sánh 2 giá trị (dùng _work_values_match cho cross-language matching)
+        if _work_values_match(work_key, marriage_val, spouse_work_val):
+            continue
+
+        # Tạo conflict row
+        rows.append(
+            {
+                "field_key": fk,
+                "value_a": marriage_val,  # Giá trị từ marriage certificate
+                "document_a_id": (marriage_rec or marriage_ref).source_document_id
+                if marriage_rec or marriage_ref
+                else None,
+                "value_b": spouse_work_val,  # Giá trị từ spouse's DS-260 worksheet
+                "document_b_id": spouse_rec.source_document_id if spouse_rec else None,
+            }
+        )
+
+    return rows
+
+
+def _pick_luong1_pair(
+    records: list[ApplicantDocRecord], doc_type: str
+) -> tuple[ApplicantDocRecord | None, ApplicantDocRecord | None]:
+    """Lấy cặp standard + exception cho một doc_type."""
+    standard = pick_latest_by_variant(records, doc_type, "standard")
+    reference = pick_latest_by_variant(records, doc_type, "exception")
+    return standard, reference
+
+
+def _pick_latest_ds260_form(records: list[ApplicantDocRecord]) -> ApplicantDocRecord | None:
+    """Lấy DS-260 worksheet mới nhất từ records."""
+    return pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_by_variant(
+        records, "ds260_customer_form", "standard"
+    )
+
+
+def _get_spouse_name_from_marriage(
+    marriage_rec: ApplicantDocRecord | None, passport_rec: ApplicantDocRecord | None
+) -> str:
+    """Lấy tên phối ngẫu từ marriage certificate."""
+    if not marriage_rec:
+        return ""
+    from app.services.ds260_mapping import (
+        _pick_spouse_side_from_marriage,
+        _resolve_from_record,
+    )
+
+    side = _pick_spouse_side_from_marriage(marriage_rec, passport_rec)
+    if not side:
+        return ""
+    spouse_name = _resolve_from_record(
+        marriage_rec,
+        f"{side}_full_name",
+        (f"{side}_name", "spouse_full_name", "spouse_name"),
+    )
+    return spouse_name.strip()
+
+
 async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     """
     So sánh:
@@ -1068,6 +1259,8 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     5) Ngày sinh/quốc gia sinh cha-mẹ khai trên worksheet CỦA CHÍNH NGƯỜI CON vs hồ sơ thật của
        cha/mẹ đó (khi cha/mẹ CŨNG là case member) — child_parent_identity (xem
        build_child_parent_identity_conflict_rows trong ds260_mapping.py)
+    6) Work/education của phối ngẫu: marriage certificate vs spouse's DS-260 worksheet —
+       spouse_worksheet (khi phối ngẫu CŨNG là applicant trong case)
 
     Upsert theo field_key (KHÔNG xoá-hết-rồi-tạo-lại): sync chạy lại sau MỖI lần OCR xong
     một file, kể cả khi nội dung không đổi — xoá/tạo lại toàn bộ sẽ cấp UUID mới cho conflict
@@ -1089,6 +1282,11 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     )
     from app.services.family_case import group_doc_records_by_member
     from app.services.identity_conflicts import build_identity_outlier_conflict_rows
+
+    # So sánh work/education của phối ngẫu: marriage certificate vs spouse's DS-260 worksheet
+    # (khi phối ngẫu CŨNG là applicant trong case).
+    for row in await build_spouse_work_conflict_rows(db, applicant_id, records, resolutions):
+        desired[row["field_key"]] = row
 
     member_groups = await group_doc_records_by_member(db, applicant_id, records)
     multi_member = len(member_groups) > 1
@@ -1227,6 +1425,21 @@ def conflict_label_vi(field_key: str, *, person_hint: str | None = None) -> str:
             f"⚠️ Con {display_name} · {parent_vi} — {field_label} khai trên worksheet khác với "
             f"hồ sơ thật của {parent_vi.lower()} trong bộ hồ sơ"
         )
+    if kind == SPOUSE_WORKSHEET_SEGMENT:
+        # Format: spouse_worksheet.{spouse_applicant_id}.{mapping_key}
+        # name contains: spouse_applicant_id.mapping_key
+        parts = name.split(".", 1)
+        spouse_id = parts[0] if len(parts) > 0 else ""
+        field_key = parts[1] if len(parts) > 1 else ""
+        spouse_field_labels = {
+            "spouse_occupation": "Nghề nghiệp",
+            "spouse_occupation_other": "Nghề khác (ghi rõ)",
+            "work_primary_occupation": "Nghề nghiệp chính",
+            "work_present_employer": "Công ty/nơi làm việc",
+            "work_job_title": "Chức danh",
+        }
+        field_label = spouse_field_labels.get(field_key, field_key)
+        return f"⚠️ Phối ngẫu · {field_label} — khác với DS-260 của phối ngẫu"
     if kind == WORKSHEET_CONFLICT_SEGMENT:
         labels = {
             "applicant_name": "Họ và tên",

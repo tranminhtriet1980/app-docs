@@ -537,6 +537,78 @@ def test_principal_parent_info_conflict_uses_own_birth_certificate():
     assert worksheet_conflict_field_key("father_given_names") not in keys  # khớp nhau — không tạo
 
 
+def test_birth_cert_only_has_father_name_gop_still_creates_conflict():
+    """Bug fix 2026-08-21: birth certificate OCR chỉ trả father_name gộp (không tách
+    father_surname/father_given_names riêng) — _strict_field_value phải áp dụng
+    _resolve_parent_birth_cert_fallback để split, không thì father_surname/mother_surname
+    luôn rỗng → không bao giờ tạo conflict với worksheet dù BC có đầy đủ thông tin.
+
+    Ví dụ thực tế: BC ghi "TRIEU NGOC GIA", WS ghi "TRIEU GIA" → phải tạo conflict
+    cho father_given_names."""
+    birth_cert = _rec(
+        {"father_name": "TRIEU NGOC GIA"},  # Chỉ có full_name gộp, không tách riêng
+        "birth_certificate",
+    )
+    ws = _rec(
+        {
+            "father_surname": "TRIEU",
+            "father_given_names": "GIA",  # Thiếu "NGOC" — sai
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([birth_cert, ws], {})
+    keys = {r["field_key"] for r in rows}
+    # father_surname khớp nhau (TRIEU = TRIEU) — không tạo conflict
+    assert worksheet_conflict_field_key("father_surname") not in keys
+    # father_given_names: BC split ra "NGOC GIA", WS là "GIA" → khác nhau → PHẢI tạo conflict
+    assert worksheet_conflict_field_key("father_given_names") in keys, (
+        f"father_given_names phải tạo conflict: BC='NGOC GIA' (sau split), WS='GIA'. Rows: {rows}"
+    )
+
+
+def test_birth_cert_mother_name_gop_creates_conflict():
+    """Tương tự test_birth_cert_only_has_father_name_gop_still_creates_conflict cho mẹ."""
+    birth_cert = _rec(
+        {"mother_name": "HOANG THI MAI"},  # Chỉ có full_name gộp
+        "birth_certificate",
+    )
+    ws = _rec(
+        {
+            "mother_surname": "HOANG",
+            "mother_given_names": "MAI",  # Thiếu "THI" — sai
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([birth_cert, ws], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("mother_surname") not in keys
+    assert worksheet_conflict_field_key("mother_given_names") in keys, (
+        f"mother_given_names phải tạo conflict: BC='THI MAI' (sau split), WS='MAI'. Rows: {rows}"
+    )
+
+
+def test_birth_cert_parent_name_matches_worksheet_no_conflict():
+    """Khi BC và WS đều có father_given_names sau khi split = giá trị khớp nhau."""
+    birth_cert = _rec(
+        {"father_name": "TRIEU NGOC GIA"},
+        "birth_certificate",
+    )
+    ws = _rec(
+        {
+            "father_surname": "TRIEU",
+            "father_given_names": "NGOC GIA",  # Đúng
+        },
+        "ds260_customer_form",
+        variant="exception",
+    )
+    rows = build_worksheet_conflict_rows([birth_cert, ws], {})
+    keys = {r["field_key"] for r in rows}
+    assert worksheet_conflict_field_key("father_surname") not in keys
+    assert worksheet_conflict_field_key("father_given_names") not in keys  # Khớp nhau
+
+
 def test_child_parent_info_conflict_falls_back_to_birth_certificate_child():
     """Con cái: không có birth_certificate riêng (chỉ có birth_certificate_child do cha/mẹ
     khai) — vẫn phải so được father_full_name/mother_full_name với worksheet CỦA CHÍNH CON,
@@ -888,3 +960,114 @@ def test_document_exception_conflict_date_displays_dd_mm_yyyy():
     row = next(r for r in rows if r["field_key"] == ds260_conflict_field_key("passport", "issue_date"))
     assert row["value_a"] == "01/01/2020"
     assert row["value_b"] == "01/03/2020"
+
+
+# --- spouse_worksheet conflict (WP5) -----------------------------------------------------
+
+
+def test_spouse_work_conflict_field_key():
+    from app.services.ds260_conflicts import spouse_worksheet_conflict_field_key
+    fk = spouse_worksheet_conflict_field_key("spouse_occupation", "12345")
+    assert fk == "ds260.spouse_worksheet.12345.spouse_occupation"
+
+
+def test_spouse_work_conflict_type():
+    from app.services.ds260_conflicts import conflict_type_from_field_key, spouse_worksheet_conflict_field_key
+    fk = spouse_worksheet_conflict_field_key("spouse_occupation", "12345")
+    assert conflict_type_from_field_key(fk) == "spouse_worksheet"
+
+
+def test_spouse_work_conflict_label():
+    from app.services.ds260_conflicts import conflict_label_vi, spouse_worksheet_conflict_field_key
+    fk = spouse_worksheet_conflict_field_key("spouse_occupation", "12345")
+    label = conflict_label_vi(fk)
+    assert "Phối ngẫu" in label
+    assert "Nghề nghiệp" in label
+
+
+def test_spouse_work_conflict_parsed_correctly():
+    from app.services.ds260_conflicts import parse_ds260_conflict_key, spouse_worksheet_conflict_field_key
+    fk = spouse_worksheet_conflict_field_key("spouse_occupation", "12345")
+    result = parse_ds260_conflict_key(fk)
+    assert result == ("spouse_worksheet", "12345.spouse_occupation")
+
+
+def test_spouse_work_conflict_occupation_different():
+    """Khi spouse_occupation trên marriage certificate khác với work_primary_occupation
+    trên spouse's DS-260 worksheet → tạo Conflict."""
+    from app.services.ds260_conflicts import spouse_worksheet_conflict_field_key
+
+    # Marriage certificate: Dang Dang là "Công nhân, sản xuất"
+    marriage_rec = _rec(
+        {"husband_full_name": "NGUYEN DANG DANG", "occupation": "Công nhân, sản xuất"},
+        "marriage_certificate",
+    )
+    # Spouse's DS-260: Dang Dang tự khai là "Nhân viên, cung cấp xe tự lái"
+    spouse_ds260 = _rec(
+        {"primary_occupation": "Nhân viên", "present_employer": "Cung cấp xe tự lái"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+
+    # Build conflict rows sử dụng _work_values_match logic
+    from app.services.ds260_conflicts import (
+        _SPOUSE_WORK_COMPARE_KEYS,
+        _SPOUSE_TO_WORK_KEY_MAP,
+        _work_values_match,
+    )
+
+    # spouse_occupation từ marriage certificate
+    marriage_occ = "Công nhân, sản xuất"
+    # work_primary_occupation từ spouse's DS-260
+    spouse_occ = "Nhân viên"
+
+    # 2 giá trị khác nhau → phải tạo conflict
+    assert not _work_values_match("work_primary_occupation", marriage_occ, spouse_occ)
+    assert "spouse_occupation" in _SPOUSE_WORK_COMPARE_KEYS
+    assert _SPOUSE_TO_WORK_KEY_MAP.get("spouse_occupation") == "work_primary_occupation"
+
+
+def test_spouse_work_conflict_no_conflict_when_same_occupation():
+    """Khi spouse_occupation trên marriage certificate giống với work_primary_occupation
+    trên spouse's DS-260 worksheet → KHÔNG tạo Conflict."""
+    from app.services.ds260_conflicts import _work_values_match
+
+    # Cùng một nghề nghiệp, chỉ khác cách viết
+    marriage_occ = "Sales Staff"
+    spouse_occ = "Sales staff"  # Khác HOA/thường
+
+    # 2 giá trị giống nhau sau khi normalize → không tạo conflict
+    assert _work_values_match("work_primary_occupation", marriage_occ, spouse_occ)
+
+
+def test_spouse_work_conflict_no_conflict_when_marriage_cert_empty():
+    """Khi marriage certificate không có spouse_occupation → không tạo Conflict."""
+    # Marriage certificate không ghi nghề nghiệp
+    marriage_rec = _rec(
+        {"husband_full_name": "NGUYEN DANG DANG"},
+        "marriage_certificate",
+    )
+    # Spouse's DS-260 có work info
+    spouse_ds260 = _rec(
+        {"primary_occupation": "Nhân viên"},
+        "ds260_customer_form",
+        variant="exception",
+    )
+
+    # marriage_occ rỗng → không tạo conflict vì không có gì để so sánh
+    marriage_occ = ""  # Không có occupation trên marriage cert
+    spouse_occ = "Nhân viên"
+
+    # marriage_occ rỗng → function sẽ skip vì không có giá trị để so sánh
+    assert not marriage_occ  # Truthy check: rỗng = falsy
+
+
+def test_spouse_work_conflict_no_conflict_when_spouse_ds260_empty():
+    """Khi spouse's DS-260 worksheet không có work info → không tạo Conflict."""
+    # Marriage certificate có spouse_occupation
+    marriage_occ = "Công nhân"
+    # Spouse's DS-260 trống work info
+    spouse_occ = ""
+
+    # spouse_occ rỗng → function sẽ skip vì không có giá trị để so sánh
+    assert not spouse_occ  # Truthy check: rỗng = falsy

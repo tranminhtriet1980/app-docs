@@ -195,3 +195,152 @@ def test_death_year_full_date_reduced_to_year():
     got = {f["key"]: f["value"] for f in sections[0]["fields"]}
     assert got["father_death_year"] == "2006"
     assert got["mother_death_year"] == "2013"
+
+
+def test_other_name_used_defaults_to_no_without_checking_evidence():
+    """Other Names (details): luôn điền 'No' khi trống, không cần kiểm tra other_names.
+    Nếu người dùng thực sự có tên khác, họ sẽ tự sửa thành 'Yes' trên worksheet."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_a_personal",
+            "fields": [
+                _mk("other_name_used", ""),       # trống
+                _mk("other_names", "NGUYEN VAN B"),  # có dữ liệu nhưng không cần check
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["other_name_used"] == "No"  # vẫn điền No dù có evidence
+
+
+def test_other_name_used_na_becomes_no():
+    """Other Name Used = 'N/A' → 'No'."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_a_personal",
+            "fields": [
+                _mk("other_name_used", "N/A"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["other_name_used"] == "No"
+
+
+def test_other_name_used_yes_preserved():
+    """Other Name Used = 'Yes' → giữ nguyên (không đè thành No)."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_a_personal",
+            "fields": [
+                _mk("other_name_used", "Yes"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["other_name_used"] == "Yes"
+
+
+def test_been_in_us_yes_when_us_visa_document_present():
+    """Có US Visa document (visa dán trong passport, entry stamp) → been_in_us = Yes."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_c_travel",
+            "fields": [
+                _mk("been_in_us", ""),
+                _mk("issued_us_visa", ""),
+                _mk("visa_type", "B1/B2"),
+                _mk("entry_stamp", "US ENTRY"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["been_in_us"] == "Yes"
+    assert got["issued_us_visa"] == "Yes"
+
+
+def test_been_in_us_no_when_no_us_visa_document():
+    """Không có US Visa document và been_in_us trống → No."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_c_travel",
+            "fields": [
+                _mk("been_in_us", ""),
+                _mk("issued_us_visa", ""),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["been_in_us"] == "No"
+    assert got["issued_us_visa"] == "No"
+
+
+def test_been_in_us_preserved_when_already_answered():
+    """been_in_us đã có giá trị Yes/No → giữ nguyên, không bị ghi đè."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_c_travel",
+            "fields": [
+                _mk("been_in_us", "Yes"),
+                _mk("issued_us_visa", "Yes"),
+                _mk("visa_type", "F1"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["been_in_us"] == "Yes"
+    assert got["issued_us_visa"] == "Yes"
+
+
+def test_been_in_us_na_becomes_yes_with_visa():
+    """been_in_us = N/A nhưng có US Visa → Yes."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_c_travel",
+            "fields": [
+                _mk("been_in_us", "N/A"),
+                _mk("visa_number", "AA1234567"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["been_in_us"] == "Yes"
+
+
+def test_been_in_us_na_becomes_no_without_visa():
+    """been_in_us = N/A và không có US Visa → No."""
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_c_travel",
+            "fields": [
+                _mk("been_in_us", "N/A"),
+            ],
+        }
+    ]
+    reconcile_ds260_yesno_and_death_year(sections)
+    got = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert got["been_in_us"] == "No"
+

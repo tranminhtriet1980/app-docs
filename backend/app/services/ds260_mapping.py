@@ -3639,6 +3639,20 @@ SECTION_PRIMARY_DOC: dict[str, str] = {
 }
 
 
+def _attach_section_warnings(sections_out: list[dict[str, Any]]) -> None:
+    """Thêm warnings vào section khi có vấn đề cần lưu ý."""
+    for sec in sections_out:
+        warnings: list[str] = []
+        if sec["id"] == "section_address":
+            from_date_field = next(
+                (f for f in sec["fields"] if f.get("key") == "address_from_date"), None
+            )
+            if from_date_field and not (from_date_field.get("value") or "").strip():
+                warnings.append("⚠️ Thiếu From Date cho người dùng điền vào nhé")
+        if warnings:
+            sec["warnings"] = warnings
+
+
 def _attach_section_fill_stats(
     sections_out: list[dict[str, Any]],
     records: list[ApplicantDocRecord],
@@ -4036,7 +4050,6 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
 # KHÔNG gồm *_is_living (N/A ở đó KHÔNG được suy thành "No" = đã mất) và children_count
 # (định dạng riêng "No, 0").
 _YESNO_QUESTION_EVIDENCE: dict[str, tuple[str, ...]] = {
-    "other_name_used": ("other_names",),
     "other_nationality_used": ("other_nationality_history",),
     # "other_addresses_used" KHÔNG có ở đây — DS-260 yêu cầu người khai báo tự trả lời câu
     # hỏi này. Nếu để trống, KHÔNG tự fill "No" (bởi vì nếu prior_address_history có dữ
@@ -4089,6 +4102,57 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
             **empty_ds260_field_source(),
             "derived": "yesno_default_no",
         }
+
+    # other_name_used: luôn điền "No" khi trống, không cần kiểm tra other_names.
+    # Nếu người dùng thực sự có tên khác, họ sẽ tự sửa thành "Yes" trên worksheet.
+    other_name_field = index.get("other_name_used")
+    if other_name_field:
+        cur = (other_name_field.get("value") or "").strip()
+        if not cur or _is_na_value(cur):
+            other_name_field["value"] = "No"
+            other_name_field["source"] = {
+                **empty_ds260_field_source(),
+                "derived": "yesno_default_no",
+            }
+
+    # other_names (Other Names details): luôn điền "No" khi trống.
+    # Người dùng tự điền chi tiết tên khác nếu có.
+    other_names_field = index.get("other_names")
+    if other_names_field:
+        cur = (other_names_field.get("value") or "").strip()
+        if not cur or _is_na_value(cur):
+            other_names_field["value"] = "No"
+            other_names_field["source"] = {
+                **empty_ds260_field_source(),
+                "derived": "yesno_default_no",
+            }
+
+    # been_in_us / issued_us_visa: nếu có US Visa document (visa dán trong passport,
+    # entry stamp Mỹ) → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type, entry_stamp...
+    for field_key in ("been_in_us", "issued_us_visa"):
+        field = index.get(field_key)
+        if not field:
+            continue
+        cur = (field.get("value") or "").strip()
+        if cur and not _is_na_value(cur):
+            continue  # đã có giá trị Yes/No hợp lệ → giữ nguyên
+        # Kiểm tra evidence từ US Visa (visa_type, entry_stamp, visa_number...)
+        has_us_visa_evidence = any(
+            _val(e) for e in ("visa_type", "entry_stamp", "visa_number", "entry_date")
+        )
+        if has_us_visa_evidence:
+            field["value"] = "Yes"
+            field["source"] = {
+                **empty_ds260_field_source(),
+                "derived": "yesno_from_us_visa_document",
+            }
+        elif not cur or _is_na_value(cur):
+            # Không có US Visa document → mặc định "No" (khách chưa từng đến Mỹ)
+            field["value"] = "No"
+            field["source"] = {
+                **empty_ds260_field_source(),
+                "derived": "yesno_default_no",
+            }
 
     for key, field in index.items():
         if not key.endswith("_death_year"):
@@ -4740,6 +4804,9 @@ async def resolve_ds260_form(
         case_members = await load_case_members(db, applicant_id)
         nums = member_number_map(case_members)
         member_number = nums.get(member_ctx.id)
+
+    # Thêm warnings vào section nếu có vấn đề cần lưu ý.
+    _attach_section_warnings(sections_out)
 
     return {
         "version": load_ds260_mapping().get("version", 1),
