@@ -15,6 +15,7 @@ _CHILD = "birth_certificate_child"
 _APP = "application_form"
 _MIL = "military_discharge"
 _ADDR = "address_document"
+_USVISA = "us_visa"
 
 # Field-level overrides. Key không có → default (mapping.document + ds260_customer_form).
 _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
@@ -214,13 +215,19 @@ _FIELD_ALLOWED_DOCS: dict[str, tuple[str, ...]] = {
     "military_service_start": (_MIL, _WS),
     "military_service_end": (_MIL, _WS),
     "military_document_number": (_MIL, _WS),
-    # --- C. Previous U.S Travel (I-94 / VISA chưa có doc type → worksheet khách khai) ---
-    "been_in_us": (_WS,),
+    # --- C. Previous U.S Travel (I-94 / VISA / US Visa dán trong passport) ---
+    "been_in_us": (_WS, _USVISA),
     "us_travel_history": (_WS,),
-    "issued_us_visa": (_WS,),
-    "us_visa_history": (_WS,),
+    "issued_us_visa": (_WS, _USVISA),
+    "us_visa_history": (_WS, _USVISA),
     "refused_us_visa": (_WS,),
     "us_visa_refusal_history": (_WS,),
+    # US Visa document fields (entry stamp, visa info)
+    "visa_type": (_USVISA,),
+    "visa_number": (_USVISA,),
+    "visa_issue_date": (_USVISA,),
+    "entry_date": (_USVISA,),
+    "entry_stamp": (_USVISA,),
     # --- E.2 Additional info (ngôn ngữ, du lịch 5 năm) ---
     "other_languages_used": (_WS,),
     "other_languages": (_WS,),

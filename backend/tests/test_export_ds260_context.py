@@ -97,6 +97,14 @@ def test_military_section_maps_bilingual_labels():
     assert _smart_fill_ds260_line(served, {"military_served": "Yes"}, "military").rstrip().endswith("Yes")
 
 
+def test_previous_spouses_used_fills_yes_no():
+    """Do you have any previous spouses?: Yes/No phải được điền vào file export."""
+    line = "Do you have any Previous Spouses? (Bạn có vợ/chồng trước hay không?):"
+    assert _match_ds260_key(line, "marital") == "previous_spouses_used"
+    assert _smart_fill_ds260_line(line, {"previous_spouses_used": "Yes"}, "marital").rstrip().endswith("Yes")
+    assert _smart_fill_ds260_line(line, {"previous_spouses_used": "No"}, "marital").rstrip().endswith("No")
+
+
 def test_military_context_switches_to_applicant_at_e2():
     """Header chuyển context: MILITARY → military; THÔNG TIN KHÁC → applicant."""
     assert _update_section_context("MILITARY SERVICE – NGHĨA VỤ QUÂN SỰ", "work") == "military"

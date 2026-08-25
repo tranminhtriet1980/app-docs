@@ -274,6 +274,23 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         ),
         profile_keys=(),
     ),
+    # US Visa — dán trong passport, có entry stamp Mỹ → been_in_us = Yes
+    DocTypeDef(
+        code="us_visa",
+        display_name="US Visa",
+        filename_tokens=("us visa", "visa my", "visa usa", "visa mỹ", "entry stamp"),
+        form_section="DS-260 C — Lịch sử đến Mỹ",
+        extract_keys=(
+            "visa_type",
+            "visa_number",
+            "visa_issue_date",
+            "visa_expiration_date",
+            "entry_date",
+            "entry_stamp",
+            "us_address",
+        ),
+        profile_keys=(),
+    ),
 )
 
 RECORDABLE_REGISTRY_BY_CODE: dict[str, DocTypeDef] = {
@@ -281,7 +298,7 @@ RECORDABLE_REGISTRY_BY_CODE: dict[str, DocTypeDef] = {
     **{d.code: d for d in SUPPLEMENTAL_DOCUMENT_REGISTRY},
 }
 # OCR types without full DocTypeDef — vẫn lưu doc record (form_data từ FIELD_MAP)
-RECORDABLE_EXTRA_DOC_TYPES: frozenset[str] = frozenset({"address_document"})
+RECORDABLE_EXTRA_DOC_TYPES: frozenset[str] = frozenset({"address_document", "us_visa"})
 RECORDABLE_DOC_TYPES: frozenset[str] = frozenset(RECORDABLE_REGISTRY_BY_CODE) | RECORDABLE_EXTRA_DOC_TYPES
 
 # Canonical upload filename examples (standard vs exception)
@@ -299,6 +316,10 @@ CANONICAL_FILENAME_EXAMPLES["ds260_customer_form"] = {
 CANONICAL_FILENAME_EXAMPLES["application_form"] = {
     "standard": "Application form",
     "exception": f"Application form{EXCEPTION_SUFFIX}",
+}
+CANONICAL_FILENAME_EXAMPLES["us_visa"] = {
+    "standard": "US Visa",
+    "exception": f"US Visa{EXCEPTION_SUFFIX}",
 }
 
 
@@ -333,6 +354,12 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
         return "application_form", is_exception
     if re.search(r"\bdon\s+(nop|xin)\b", stem) and "ds" not in stem.replace(" ", ""):
         return "application_form", is_exception
+
+    # US Visa (dán trong passport, có entry stamp Mỹ) — standard + _new
+    if re.search(r"\bus\s+visa\b", stem) or "visa my" in stem or "visa usa" in stem or "visa mỹ" in stem:
+        return "us_visa", is_exception
+    if re.search(r"\bentry\s+stamp\b", stem) or "entry stamp" in stem:
+        return "us_visa", is_exception
 
     # Longer tokens first (birth certificate child before birth certificate)
     # Quét cả SUPPLEMENTAL registry để bắt token "application" từ application_form
