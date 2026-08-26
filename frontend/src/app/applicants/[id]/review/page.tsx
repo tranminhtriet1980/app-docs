@@ -1074,7 +1074,7 @@ export default function ReviewPage() {
   // Warning modal chỉ hiện LẦN ĐẦU trong session — dùng sessionStorage để không hiện lại khi refresh
   const [hasShownAddressWarningModal, setHasShownAddressWarningModal] = useState(() => {
     if (typeof window !== "undefined") {
-      return sessionStorage.getItem(`ds260_address_warning_shown_${applicantId}`) === "true";
+      return sessionStorage.getItem(`ds260_address_warning_shown_${id}`) === "true";
     }
     return false;
   });
@@ -1174,8 +1174,8 @@ export default function ReviewPage() {
     });
     if (validation?.warnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction")) {
       // Chỉ hiện modal warning LẦN ĐẦU trong session — đánh dấu vào sessionStorage
-      if (typeof window !== "undefined" && sessionStorage.getItem(`ds260_address_warning_shown_${applicantId}`) !== "true") {
-        sessionStorage.setItem(`ds260_address_warning_shown_${applicantId}`, "true");
+      if (typeof window !== "undefined" && sessionStorage.getItem(`ds260_address_warning_shown_${id}`) !== "true") {
+        sessionStorage.setItem(`ds260_address_warning_shown_${id}`, "true");
         setHasShownAddressWarningModal(true);
       }
     }
