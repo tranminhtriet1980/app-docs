@@ -512,6 +512,7 @@ function Ds260FieldGrid({
   fields,
   canEdit,
   onFieldSaved,
+  addressWarnings,
 }: {
   applicantId: string;
   memberId?: string;
@@ -521,6 +522,7 @@ function Ds260FieldGrid({
   fields: Ds260Form["sections"][0]["fields"];
   canEdit: boolean;
   onFieldSaved: () => void;
+  addressWarnings?: Ds260ValidationIssue[];
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState("");
@@ -583,6 +585,10 @@ function Ds260FieldGrid({
         const matchedConflict = findConflictForField(f, ds260Conflicts, memberNumber, isFamilyCase);
         const isConflicted = !!matchedConflict;
         const busy = savingKey === f.key;
+        // Warning cho other_addresses_used: highlight đỏ nếu có warning và chưa được điền
+        const hasAddressWarning = f.key === "other_addresses_used" &&
+          addressWarnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction");
+        const needsWarningHighlight = hasAddressWarning && !f.value;
         return (
           <div
             key={f.key}
@@ -590,11 +596,13 @@ function Ds260FieldGrid({
             className={`rounded-md border p-2 ${
               isConflicted
                 ? "border-red-400 bg-rose-50/30 ring-1 ring-red-100"
-                : isManual
-                  ? "border-amber-300 bg-amber-50/40"
-                  : canEdit
-                    ? "border-slate-200 bg-slate-50/80"
-                    : "border-transparent"
+                : needsWarningHighlight
+                  ? "border-red-400 bg-red-50/50 ring-2 ring-red-200"
+                  : isManual
+                    ? "border-amber-300 bg-amber-50/40"
+                    : canEdit
+                      ? "border-slate-200 bg-slate-50/80"
+                      : "border-transparent"
             }`}
           >
             <p className="text-xs font-medium text-slate-500">
@@ -667,6 +675,11 @@ function Ds260FieldGrid({
                 <span>⚠️ Cần chọn trong xung đột — bấm để đến phần xử lý</span>
               </button>
             )}
+            {needsWarningHighlight && (
+              <p className="mt-1 flex items-center gap-1 text-xs font-medium text-red-600">
+                ⚠️ Cần điền thông tin này
+              </p>
+            )}
             {isManual && (
               <p className="mt-1 text-xs font-medium text-amber-800">Đã chỉnh tay trước export</p>
             )}
@@ -710,6 +723,7 @@ function Ds260MemberMappingBlock({
   exportBusy,
   ds260Conflicts,
   isFamilyCase,
+  ds260Validation,
 }: {
   applicantId: string;
   member: CaseMember;
@@ -720,6 +734,7 @@ function Ds260MemberMappingBlock({
   exportBusy: boolean;
   ds260Conflicts: Conflict[];
   isFamilyCase: boolean;
+  ds260Validation?: Ds260Validation | null;
 }) {
   const sections = visibleDs260Sections(form.sections, member.role);
   // Thành viên chưa có dữ liệu gì (chưa upload/chưa điền field nào) → mặc định thu nhỏ, tránh
@@ -838,6 +853,7 @@ function Ds260MemberMappingBlock({
                     fields={sec.fields}
                     canEdit={canEdit}
                     onFieldSaved={onFieldSaved}
+                    addressWarnings={ds260Validation?.warnings}
                   />
                 </div>
               </div>
@@ -1055,7 +1071,13 @@ export default function ReviewPage() {
     message: "",
     onConfirm: () => {},
   });
-  const [hasShownAddressWarningModal, setHasShownAddressWarningModal] = useState(false);
+  // Warning modal chỉ hiện LẦN ĐẦU trong session — dùng sessionStorage để không hiện lại khi refresh
+  const [hasShownAddressWarningModal, setHasShownAddressWarningModal] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem(`ds260_address_warning_shown_${applicantId}`) === "true";
+    }
+    return false;
+  });
   const [conflictBusy, setConflictBusy] = useState("");
   const [busy, setBusy] = useState("");
   const [caseMembers, setCaseMembers] = useState<CaseMember[]>([]);
@@ -1151,7 +1173,11 @@ export default function ReviewPage() {
       return prev;
     });
     if (validation?.warnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction")) {
-      setHasShownAddressWarningModal(true);
+      // Chỉ hiện modal warning LẦN ĐẦU trong session — đánh dấu vào sessionStorage
+      if (typeof window !== "undefined" && sessionStorage.getItem(`ds260_address_warning_shown_${applicantId}`) !== "true") {
+        sessionStorage.setItem(`ds260_address_warning_shown_${applicantId}`, "true");
+        setHasShownAddressWarningModal(true);
+      }
     }
     setDocTables(tables);
     setReferenceTables(refTables);
@@ -1976,6 +2002,7 @@ export default function ReviewPage() {
                         }
                         ds260Conflicts={ds260Conflicts}
                         isFamilyCase={caseMembers.length > 1}
+                        ds260Validation={m.id === PRINCIPAL_ONLY_ID ? ds260Validation : undefined}
                       />
                     );
                   })}

@@ -366,9 +366,21 @@ async def update_ds260_form_field(
         if formatted:
             value = formatted
 
+    # Lưu giá trị rỗng thay vì xóa để ngăn enrich tự động fill lại dữ liệu
     if not value:
         if pf:
-            await db.delete(pf)
+            pf.field_value = ""
+            pf.is_manual = True
+            pf.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(
+                ProfileField(
+                    applicant_id=applicant.id,
+                    field_key=storage_key,
+                    field_value="",
+                    is_manual=True,
+                )
+            )
     elif pf:
         pf.field_value = value
         pf.is_manual = True
