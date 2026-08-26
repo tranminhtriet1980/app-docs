@@ -283,7 +283,7 @@
         {"key": "work_employer_postal_code", "label": "Employer Postal Code / Mã bưu điện", "document": "application_form", "field": "employer_postal_code", "aliases": ["employer_zip"]},
         {"key": "work_employer_country", "label": "Employer Country / Quốc gia", "document": "application_form", "field": "employer_country", "aliases": []},
         {"key": "work_job_title", "label": "Job Title / Chức danh", "document": "application_form", "field": "job_title", "aliases": ["position", "title"], "review_hidden": true},
-        {"key": "work_start_date", "label": "Employment Start Date / Ngày bắt đầu làm việc", "document": "application_form", "field": "employment_start_date", "aliases": ["start_date", "employment_start"]},
+        {"key": "work_start_date", "label": "Employment Start Date / Ngày bắt đầu làm việc", "document": "application_form", "field": "employment_start_date", "aliases": ["start_date", "employment_start"], "review_hidden": true},
         {"key": "work_other_occupation_used", "label": "Other occupation in last 5 years? (Yes/No)", "document": "ds260_customer_form", "field": "other_occupation_used", "aliases": ["other_occupation_in_last_5_years"]},
         {"key": "work_other_occupation_detail", "label": "Other occupation details / Chi tiết nghề khác", "document": "ds260_customer_form", "field": "other_occupation_detail", "aliases": []},
         {"key": "work_prior_jobs_used", "label": "Employed elsewhere in last 10 years? (Yes/No)", "document": "ds260_customer_form", "field": "prior_jobs_10_years_used", "aliases": ["prior_employment_used"]},

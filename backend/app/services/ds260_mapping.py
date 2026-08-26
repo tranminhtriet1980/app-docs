@@ -2244,6 +2244,7 @@ async def build_child_parent_identity_conflict_rows(
             if not parent_name:
                 continue
 
+            # Tìm case member khác có tên khớp với parent_name
             other = next(
                 (
                     m
@@ -2260,6 +2261,16 @@ async def build_child_parent_identity_conflict_rows(
             )
             official_rec = passport_std or passport_ref
             if not official_rec:
+                continue
+
+            # Kiểm tra gender phù hợp với father/mother:
+            # - father phải là Male/Nam
+            # - mother phải là Female/Nữ
+            # Nếu gender không phù hợp → bỏ qua, có thể là nhầm lẫn với người cùng tên
+            official_gender = _resolve_from_record(official_rec, "gender", ("sex",)).upper()
+            expected_genders = {"M", "MALE", "NAM"} if parent == "father" else {"F", "FEMALE", "NU", "NỮ"}
+            if official_gender and official_gender not in expected_genders:
+                # Gender không phù hợp → bỏ qua, không so sánh
                 continue
 
             official_dob = _resolve_from_record(official_rec, "date_of_birth", ("dob",))
@@ -4034,6 +4045,9 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
             default = defaults.get(key)
             if not default or (field.get("value") or "").strip():
                 continue
+            # Không ghi đè manual override (user đã xóa field)
+            if field.get("source", {}).get("derived") == "manual_override":
+                continue
             cm = re.match(r"^(child_\d+)_immigrating_future$", key)
             if cm and cm.group(1) not in present_children:
                 continue
@@ -4092,6 +4106,9 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
         field = index.get(qkey)
         if field is None:
             continue
+        # Không ghi đè manual override (user đã xóa field)
+        if field.get("source", {}).get("derived") == "manual_override":
+            continue
         cur = (field.get("value") or "").strip()
         if cur and not _is_na_value(cur):
             continue  # đã có Yes/No (hoặc giá trị khác) hợp lệ → giữ nguyên
@@ -4107,31 +4124,38 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
     # Nếu người dùng thực sự có tên khác, họ sẽ tự sửa thành "Yes" trên worksheet.
     other_name_field = index.get("other_name_used")
     if other_name_field:
-        cur = (other_name_field.get("value") or "").strip()
-        if not cur or _is_na_value(cur):
-            other_name_field["value"] = "No"
-            other_name_field["source"] = {
-                **empty_ds260_field_source(),
-                "derived": "yesno_default_no",
-            }
+        # Không ghi đè manual override
+        if other_name_field.get("source", {}).get("derived") != "manual_override":
+            cur = (other_name_field.get("value") or "").strip()
+            if not cur or _is_na_value(cur):
+                other_name_field["value"] = "No"
+                other_name_field["source"] = {
+                    **empty_ds260_field_source(),
+                    "derived": "yesno_default_no",
+                }
 
     # other_names (Other Names details): luôn điền "No" khi trống.
     # Người dùng tự điền chi tiết tên khác nếu có.
     other_names_field = index.get("other_names")
     if other_names_field:
-        cur = (other_names_field.get("value") or "").strip()
-        if not cur or _is_na_value(cur):
-            other_names_field["value"] = "No"
-            other_names_field["source"] = {
-                **empty_ds260_field_source(),
-                "derived": "yesno_default_no",
-            }
+        # Không ghi đè manual override
+        if other_names_field.get("source", {}).get("derived") != "manual_override":
+            cur = (other_names_field.get("value") or "").strip()
+            if not cur or _is_na_value(cur):
+                other_names_field["value"] = "No"
+                other_names_field["source"] = {
+                    **empty_ds260_field_source(),
+                    "derived": "yesno_default_no",
+                }
 
-    # been_in_us / issued_us_visa: nếu có US Visa document (visa dán trong passport,
-    # entry stamp Mỹ) → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type, entry_stamp...
-    for field_key in ("been_in_us", "issued_us_visa"):
+    # been_in_us / issued_us_visa / refused_us_visa: nếu có US Visa document (visa dán trong
+    # passport, entry stamp Mỹ) → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type...
+    for field_key in ("been_in_us", "issued_us_visa", "refused_us_visa"):
         field = index.get(field_key)
         if not field:
+            continue
+        # Không ghi đè manual override
+        if field.get("source", {}).get("derived") == "manual_override":
             continue
         cur = (field.get("value") or "").strip()
         if cur and not _is_na_value(cur):
