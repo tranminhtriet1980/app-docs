@@ -88,14 +88,50 @@ def test_boilerplate_defaults_present_in_schema():
     mappings = flatten_ds260_mappings()
     # Câu hỏi cố định phải có default để không bị bỏ trống khi AI đọc sót.
     assert mappings["been_in_us"].default == "No"
-    assert mappings["issued_us_visa"].default == "No"
-    assert mappings["other_languages_used"].default == "No"
+    assert mappings["issued_us_visa"].default is None
+    assert mappings["refused_us_visa"].default is None
+    assert mappings["other_languages_used"].default is None
+    assert mappings["traveled_countries_5yr_used"].default is None
     assert mappings["arrested_convicted"].default == "No"
     assert mappings["public_charge"].default == "No"
     assert mappings["applied_ssn_before"].default == "No"
     assert mappings["want_ssn_issued"].default == "Yes"
     assert mappings["authorize_ssn_disclosure"].default == "Yes"
     assert mappings["has_vaccination_docs"].default == "Yes"
+
+
+def test_unanswered_questions_stay_empty_when_not_declared():
+    """other_languages_used, traveled_countries_5yr_used, issued_us_visa, refused_us_visa:
+    nếu khách để trống không khai thì hệ thống cũng để trống, không tự động khai No.
+    """
+    from app.services.ds260_mapping import (
+        apply_ds260_default_values,
+        reconcile_ds260_yesno_and_death_year,
+    )
+
+    sections = [
+        {
+            "id": "section_test",
+            "fields": [
+                {"key": "other_languages_used", "value": "", "source": {}},
+                {"key": "traveled_countries_5yr_used", "value": "", "source": {}},
+                {"key": "issued_us_visa", "value": "", "source": {}},
+                {"key": "refused_us_visa", "value": "", "source": {}},
+                {"key": "been_in_us", "value": "", "source": {}},
+            ],
+        }
+    ]
+
+    apply_ds260_default_values(sections)
+    reconcile_ds260_yesno_and_death_year(sections)
+
+    by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
+    assert by_key["other_languages_used"] == ""
+    assert by_key["traveled_countries_5yr_used"] == ""
+    assert by_key["issued_us_visa"] == ""
+    assert by_key["refused_us_visa"] == ""
+    assert by_key["been_in_us"] == "No"
+
 
 
 def test_date_format_dd_mm_yyyy():
@@ -123,3 +159,46 @@ def test_all_security_questions_default_no():
     for key in ("communicable_disease", "money_laundering", "terrorist_activities",
                 "genocide", "visa_fraud", "removed_deported", "polygamy", "frivolous_asylum"):
         assert mappings[key].default == "No", key
+
+
+def test_has_vaccination_docs_always_defaults_to_yes():
+    """Câu hỏi Have vaccination documentation per U.S law? luôn luôn chọn Yes dù khách có khai No."""
+    from app.services.ds260_mapping import apply_ds260_default_values
+
+    # Trường hợp 1: Khách khai No -> vẫn ép thành Yes (default_value)
+    sec_declared_no = [
+        {
+            "id": "section_security",
+            "fields": [
+                {"key": "has_vaccination_docs", "value": "No", "source": {"document_type": "ds260_customer_form"}},
+            ],
+        }
+    ]
+    apply_ds260_default_values(sec_declared_no)
+    assert sec_declared_no[0]["fields"][0]["value"] == "Yes"
+    assert sec_declared_no[0]["fields"][0]["source"]["derived"] == "default_value"
+
+    # Trường hợp 2: Để trống -> thành Yes
+    sec_empty = [
+        {
+            "id": "section_security",
+            "fields": [
+                {"key": "has_vaccination_docs", "value": "", "source": {}},
+            ],
+        }
+    ]
+    apply_ds260_default_values(sec_empty)
+    assert sec_empty[0]["fields"][0]["value"] == "Yes"
+
+    # Trường hợp 3: Manual override của user -> giữ nguyên
+    sec_manual = [
+        {
+            "id": "section_security",
+            "fields": [
+                {"key": "has_vaccination_docs", "value": "No", "source": {"derived": "manual_override"}},
+            ],
+        }
+    ]
+    apply_ds260_default_values(sec_manual)
+    assert sec_manual[0]["fields"][0]["value"] == "No"
+

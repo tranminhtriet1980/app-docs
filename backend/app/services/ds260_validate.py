@@ -149,11 +149,10 @@ def missing_address_before_16(
         age16_date = dob_date.replace(year=dob_date.year + 16)
     except ValueError:
         age16_date = dob_date.replace(month=2, day=28, year=dob_date.year + 16)
-    covers_before_16 = other_addresses_used == "yes" and bool(other_addresses_history)
-    if covers_before_16:
+    used_norm = (other_addresses_used or "").strip().lower()
+    if used_norm in ("yes", "y", "true", "1", "có", "co"):
         return False
-    # Nếu history có content → contradiction warning sẽ handle riêng, không warn ở đây
-    if not other_addresses_used and bool(other_addresses_history):
+    if bool((other_addresses_history or "").strip()):
         return False
     if address_from_parsed is None:
         return True

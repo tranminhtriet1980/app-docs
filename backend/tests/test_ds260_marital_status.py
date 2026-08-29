@@ -197,3 +197,34 @@ def test_reconcile_keeps_previous_spouse_when_final_status_is_widowed():
     prev = {f["key"]: f["value"] for f in sections[1]["fields"]}
     assert prev["previous_spouses_used"] == "Yes"
     assert prev["previous_spouse_full_name"] == "NGUYEN THI B"
+
+
+def test_marital_status_married_when_same_person_remarried_after_divorce():
+    """Tái hôn lại cùng người sau khi ly hôn (marriage_date > divorce_date) -> status = Married."""
+    passport = _rec({"full_name": "NGUYEN VAN BA TU"}, doc_type="passport")
+    divorce = _rec(
+        {
+            "husband_full_name": "NGUYEN VAN BA TU",
+            "wife_full_name": "NGO THI NGOC HAN",
+            "divorce_date": "15 tháng 11 năm 2021",
+        },
+        doc_type="divorce",
+    )
+    marriage = _rec(
+        {
+            "husband_full_name": "NGUYEN VAN BA TU",
+            "wife_full_name": "NGO THI NGOC HAN",
+            "marriage_date": "2026-03-02",
+        },
+        doc_type="marriage_certificate",
+    )
+    fields = [{"key": "current_marital_status", "value": "", "source": {}}]
+    enrich_marital_status_from_documents(
+        fields,
+        divorce,
+        marriage_rec=marriage,
+        passport_rec=passport,
+    )
+    assert fields[0]["value"] == "Married"
+    assert fields[0]["source"]["document_type"] == "marriage_certificate"
+

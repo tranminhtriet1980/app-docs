@@ -55,18 +55,21 @@ def test_clear_child_adult_only_ds260_sections():
         {
             "id": "section_children",
             "fields": [
+                {"key": "children_used", "value": "Yes", "source": {"derived": "x"}},
                 {"key": "child_1_full_name", "value": "SIBLING NAME", "source": {"derived": "x"}},
             ],
         },
     ]
     clear_child_adult_only_ds260_sections(sections)
     personal = {f["key"]: f["value"] for f in sections[0]["fields"]}
-    assert personal["current_marital_status"] == ""
+    assert personal["current_marital_status"] == "Single"
     assert personal["applicant_name"] == "DANG MAI PHUONG THAO"
     assert sections[1]["fields"][0]["value"] == ""
     assert sections[2]["fields"][0]["value"] == ""
     assert sections[3]["fields"][0]["value"] == ""
-    assert sections[4]["fields"][0]["value"] == ""
+    children_fields = {f["key"]: f["value"] for f in sections[4]["fields"]}
+    assert children_fields["children_used"] == "No"
+    assert children_fields["child_1_full_name"] == ""
 
 
 def test_clear_child_adult_only_sections_keeps_work_education():

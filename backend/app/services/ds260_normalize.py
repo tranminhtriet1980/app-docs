@@ -64,46 +64,44 @@ def normalize_phone(value: str) -> str:
 
 
 def format_vn_phone_display(value: str) -> str:
-    """Chỉ chuẩn hoá số điện thoại VIỆT NAM (10 số, đầu 09/08/03/05) về +84.
+    """Chỉ chuẩn hoá số điện thoại VIỆT NAM (đầu 09/08/07/05/03) về +84 XXX XXX XXX.
     Các số khác (không phải VN mobile) → giữ nguyên."""
     if not value:
         return value
-    digits = re.sub(r"\D", "", value)
+    raw = value.strip()
+    digits = re.sub(r"\D", "", raw)
 
-    # Xác định mobile prefix VN
-    def _to_international(d: str) -> str:
-        # d = chuỗi 10 số, đầu 09/08/03/05 → format +84 XXX XXX XXX
-        return f"+84 {d[1:4]} {d[4:7]} {d[7:]}"
+    def _to_international(d10: str) -> str:
+        # d10 = chuỗi 10 số dạng 09XXXXXXXX -> format +84 XXX XXX XXX
+        return f"+84 {d10[1:4]} {d10[4:7]} {d10[7:]}"
 
-    # +84 9XXXXXXXX → đúng 10 số sau mã nước
-    if value.startswith("+84"):
-        num = digits[2:]
-        if len(num) == 10 and num[0] in ("9", "8", "3", "5"):
-            return _to_international(num)
-        return value  # không phải VN mobile → giữ nguyên
+    vn_prefixes = ("9", "8", "7", "5", "3")
 
-    # 00849XXXXXXXX → đúng 12 số
-    if digits.startswith("0084"):
-        num = digits[4:]
-        if len(num) == 10 and num[0] in ("9", "8", "3", "5"):
-            return _to_international(num)
-        return value
+    # 1. 0084 + 9 số (13 số)
+    if digits.startswith("0084") and len(digits) == 13 and digits[4] in vn_prefixes:
+        return _to_international("0" + digits[4:])
 
-    # 009XXXXXXXX → đúng 11 số (ít gặp)
-    if digits.startswith("009"):
-        num = digits[3:]
-        if len(num) == 10 and num[0] in ("9", "8", "3", "5"):
-            return _to_international(num)
-        return value
+    # 2. 84 + 9 số (11 số) hoặc +84
+    if digits.startswith("84") and len(digits) == 11 and digits[2] in vn_prefixes:
+        return _to_international("0" + digits[2:])
 
-    # 0XXXXXXXXXX → đúng 10 số
-    if len(digits) == 10 and digits[0] in ("9", "8", "3", "5"):
+    # 3. 0 + 9 số (10 số) dạng 09xxxxxxxx
+    if len(digits) == 10 and digits.startswith("0") and digits[1] in vn_prefixes:
         return _to_international(digits)
 
-    # 84XXXXXXXX → đúng 11 số (ít gặp)
-    if digits.startswith("84") and len(digits) == 11 and digits[2] in ("9", "8", "3", "5"):
-        num = "0" + digits[2:]
-        return _to_international(num)
+    # 4. Đúng 9 số dạng 9xxxxxxxx (thiếu số 0 hoặc +84)
+    if len(digits) == 9 and digits[0] in vn_prefixes:
+        return _to_international("0" + digits)
 
-    # Không phải VN mobile → giữ nguyên
-    return value
+    return raw
+
+
+def normalize_email(value: str) -> str:
+    """Chuẩn hoá email về chữ thường (lowercase) toàn bộ."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if v.upper() == "N/A":
+        return "N/A"
+    return v.lower()
+

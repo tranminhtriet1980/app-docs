@@ -463,7 +463,7 @@ def split_birthplace_city_state(*blobs: str) -> tuple[str, str] | None:
     return None
 
 
-def extract_city_token(raw: str) -> str:
+def extract_city_token(raw: str | None) -> str:
     """Lấy tên thành phố từ chuỗi nơi đăng ký/kết hôn (vd. 'UBND Phường X, Thành Phố Huế' → 'Hue')."""
     segments = [s.strip() for s in (raw or "").split(",") if s.strip()]
     for seg in segments:
@@ -473,18 +473,18 @@ def extract_city_token(raw: str) -> str:
             token = re.sub(r"\s+", " ", token).strip(" ,.-")
             if token:
                 return format_place_name_title(token)
-    muni = find_vn_locality(raw, only_municipality=True)
+    muni = find_vn_locality(raw or "", only_municipality=True)
     if muni:
         return muni
     return ""
 
 
-def derive_birth_state_from_place(place_of_birth: str) -> str:
+def derive_birth_state_from_place(place_of_birth: str | None) -> str:
     """State/Province of Birth = copy PlaceOfBirth directly."""
     return (place_of_birth or "").strip()
 
 
-def derive_city_from_place(place_of_birth: str) -> str:
+def derive_city_from_place(place_of_birth: str | None) -> str:
     """City of Birth — thường là phần cuối trong chuỗi nơi sinh (ward, district, city)."""
     raw = (place_of_birth or "").strip()
     if not raw:
@@ -499,7 +499,7 @@ def derive_city_from_place(place_of_birth: str) -> str:
     return candidate
 
 
-def derive_country_from_place(place_of_birth: str) -> str:
+def derive_country_from_place(place_of_birth: str | None) -> str:
     """
     Country of Birth from place_of_birth via location-to-country mapping.
     Never uses nationality.

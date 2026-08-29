@@ -1101,12 +1101,8 @@ The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietname
 Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
 address → current_address (Street), address_city (City), address_state (State/Province),
 address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
-block on its own line in other_addresses_history as "MMM YYYY–MMM YYYY: Street, City, State, Country"
-(date range FIRST, then a colon, then the address — e.g. "Sep 1996–Present: Dong 21, Su Ngu Commune,
-Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
-when choosing the current block. other_addresses_history is an ENGLISH-ONLY field: write the open
-end of a still-ongoing period as "Present" — NEVER "Hiện tại"/"Hien Tai"/"đến nay"/"Nay" (street/
-ward/district names stay as printed, only the date marker must be English).
+block on its own line in other_addresses_history (e.g. "Từ nhỏ đến 18/09/2011 ở số 144/5 ấp 5 xã Lạc tấn, huyện tân trụ, tỉnh long An" or "Sep 1996–Present: Dong 21, Su Ngu Commune, Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes.
+other_addresses_history must preserve the EXACT text as written by customer on the worksheet without retranslating or altering phrasing.
 
 CONTACT (section 4): primary_phone_number, secondary_phone_number, work_phone_number,
 other_phones_used (Yes/No), other_phones_history,
@@ -1295,12 +1291,8 @@ The legacy/old-version worksheet prints A.3 as repeated labeled blocks (Vietname
 Read EVERY block. The block whose To date is the most recent / blank / "present" is the CURRENT
 address → current_address (Street), address_city (City), address_state (State/Province),
 address_country (Country), postal_code, address_from_date (that block's From). Put each earlier
-block on its own line in other_addresses_history as "MMM YYYY–MMM YYYY: Street, City, State, Country"
-(date range FIRST, then a colon, then the address — e.g. "Sep 1996–Present: Dong 21, Su Ngu Commune,
-Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes. Disregard impossible To dates (To before From — OCR/typo)
-when choosing the current block. other_addresses_history is an ENGLISH-ONLY field: write the open
-end of a still-ongoing period as "Present" — NEVER "Hiện tại"/"Hien Tai"/"đến nay"/"Nay" (street/
-ward/district names stay as printed, only the date marker must be English).
+block on its own line in other_addresses_history (e.g. "Từ nhỏ đến 18/09/2011 ở số 144/5 ấp 5 xã Lạc tấn, huyện tân trụ, tỉnh long An" or "Sep 1996–Present: Dong 21, Su Ngu Commune, Chau Duc, Br-Vt") and set other_addresses_since_16 = Yes.
+other_addresses_history must preserve the EXACT text as written by customer on the worksheet without retranslating or altering phrasing.
 RESIDENCE-HISTORY rules (the form's "Lưu ý") add ADDRESS entries to other_addresses_history — they
 are NOT child/birth data: time studying/working in another locality → that real address; (male)
 military service → the address while serving; (female) gave birth in another locality → that

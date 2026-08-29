@@ -62,3 +62,34 @@ def test_normalize_phone_local_and_international_match():
 
 def test_normalize_phone_rejects_different_number():
     assert normalize_phone("0398333484") != normalize_phone("0912345678")
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("923 618 711", "+84 923 618 711"),
+        ("0923 618 711", "+84 923 618 711"),
+        ("+84 923 618 711", "+84 923 618 711"),
+        ("0084 923 618 711", "+84 923 618 711"),
+        ("84923618711", "+84 923 618 711"),
+        ("0398333484", "+84 398 333 484"),
+        ("0701234567", "+84 701 234 567"),
+        ("12345", "12345"),
+        ("", ""),
+        (None, None),
+    ],
+)
+def test_format_vn_phone_display(raw, expected):
+    from app.services.ds260_normalize import format_vn_phone_display
+
+    assert format_vn_phone_display(raw) == expected
+
+
+def test_pick_fuller_phone_selection():
+    from app.services.ds260_mapping import _pick_fuller_phone
+
+    assert _pick_fuller_phone("923 618 711", "+84 923 618 711") == "+84 923 618 711"
+    assert _pick_fuller_phone("923 618 711", "0923 618 711") == "0923 618 711"
+    assert _pick_fuller_phone("+84 923 618 711", "923 618 711") == "+84 923 618 711"
+    assert _pick_fuller_phone("0923 618 711", "923 618 711") == "0923 618 711"
+    assert _pick_fuller_phone("0923 618 711", "+84 923 618 711") == "+84 923 618 711"

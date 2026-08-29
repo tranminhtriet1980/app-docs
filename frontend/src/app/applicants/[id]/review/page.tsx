@@ -78,7 +78,6 @@ const CHILD_SKIP_DS260_SECTIONS = new Set([
   "section_spouse",
   "section_divorce",
   "section_previous_spouse",
-  "section_children",
 ]);
 
 // Các section này chỉ dùng nội bộ để điền DS-260/export, không hiển thị trên Review UI.
@@ -536,7 +535,10 @@ function Ds260FieldGrid({
   };
 
   const saveField = async (key: string, value: string, original: string) => {
-    const trimmed = value.trim();
+    let trimmed = value.trim();
+    if (key.toLowerCase().includes("email") && trimmed.toUpperCase() !== "N/A") {
+      trimmed = trimmed.toLowerCase();
+    }
     if (trimmed === (original || "").trim()) {
       setDrafts((d) => {
         const next = { ...d };
@@ -585,10 +587,10 @@ function Ds260FieldGrid({
         const matchedConflict = findConflictForField(f, ds260Conflicts, memberNumber, isFamilyCase);
         const isConflicted = !!matchedConflict;
         const busy = savingKey === f.key;
-        // Warning cho other_addresses_used: highlight đỏ nếu có warning và chưa được điền
+        // Warning / trống cho other_addresses_used: highlight đỏ nếu khách chưa khai (để trống) hoặc có warning
         const hasAddressWarning = f.key === "other_addresses_used" &&
           addressWarnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction");
-        const needsWarningHighlight = hasAddressWarning && !f.value;
+        const needsWarningHighlight = (f.key === "other_addresses_used" && !displayValue(f).trim()) || (hasAddressWarning && !f.value);
         return (
           <div
             key={f.key}
@@ -618,7 +620,12 @@ function Ds260FieldGrid({
                     className="input min-h-0 w-full border-brand-200 bg-white py-1.5 font-mono text-sm shadow-sm ring-1 ring-brand-100 focus:ring-brand-400"
                     value={displayValue(f)}
                     disabled={busy}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                    onChange={(e) => {
+                      const val = f.key.toLowerCase().includes("email") && e.target.value.toUpperCase() !== "N/A"
+                        ? e.target.value.toLowerCase()
+                        : e.target.value;
+                      setDrafts((d) => ({ ...d, [f.key]: val }));
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -916,7 +923,10 @@ function DocumentTablePanel({
     value: string,
     original: string
   ) => {
-    const trimmed = value.trim();
+    let trimmed = value.trim();
+    if (fieldKey.toLowerCase().includes("email") && trimmed.toUpperCase() !== "N/A") {
+      trimmed = trimmed.toLowerCase();
+    }
     const draftId = `${recordId}:${fieldKey}`;
     if (trimmed === (original || "").trim()) {
       setDrafts((d) => {
@@ -982,6 +992,7 @@ function DocumentTablePanel({
                       drafts[draftId] !== undefined &&
                       drafts[draftId].trim() !== (original || "").trim();
                     const fieldLabel = fieldLabels[k] || k.replace(/_/g, " ");
+                    const isEmail = k.toLowerCase().includes("email");
                     return (
                       <div key={k}>
                         <p className="text-xs text-slate-500">{fieldLabel}</p>
@@ -992,9 +1003,13 @@ function DocumentTablePanel({
                               className="input min-h-0 w-full flex-1 py-1.5 font-mono text-sm"
                               value={display}
                               disabled={busy}
-                              onChange={(e) =>
-                                setDrafts((d) => ({ ...d, [draftId]: e.target.value }))
-                              }
+                              onChange={(e) => {
+                                const val =
+                                  isEmail && e.target.value.toUpperCase() !== "N/A"
+                                    ? e.target.value.toLowerCase()
+                                    : e.target.value;
+                                setDrafts((d) => ({ ...d, [draftId]: val }));
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();

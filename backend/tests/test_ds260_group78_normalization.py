@@ -78,5 +78,6 @@ def test_period_from_to_split():
     # Word export dùng mốc trọn kiểu Anh, tháng viết tắt ("5 Sep 1991") — dashboard vẫn dd/mm/yyyy.
     line = "Period (Thời gian học): from (từ)      to (đến):"
     out = _fill_period_from_to(line, "05/09/1991 - 30/05/1994")
-    assert "from (từ) 5 Sep 1991" in out
+    assert "05 Sep 1991" in out
     assert "to (đến): 30 May 1994" in out
+

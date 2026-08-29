@@ -575,3 +575,56 @@ def test_child_birth_city_fallback_from_place_of_birth():
     by_key = {f["key"]: f["value"] for f in fields}
     assert by_key["child_1_birth_city"] == "Da Nang"
 
+
+def test_parent_worksheet_scoped_in_family_case_with_child_worksheet():
+    """Hồ sơ gia đình: worksheet của con khai 'no children' không được đè mất 2 con trên worksheet của mẹ."""
+    parent_ws = _rec(
+        {
+            "applicant_name": "TRIEU THI DUYEN",
+            "children_used": "Yes",
+            "children_count": "2",
+            "child_1_full_name": "NGUYEN MINH HON",
+            "child_1_date_of_birth": "1997-09-02",
+            "child_2_full_name": "NGUYEN MINH PHUONG",
+            "child_2_date_of_birth": "2007-01-29",
+        },
+        "ds260_customer_form",
+        variant="exception",
+        rec_id="parent-ws",
+    )
+    child_ws = _rec(
+        {
+            "applicant_name": "NGUYEN MINH PHUONG",
+            "children_used": "No",
+        },
+        "ds260_customer_form",
+        variant="exception",
+        rec_id="child-ws",
+    )
+    child_bc = _rec(
+        {
+            "child_full_name": "NGUYEN MINH PHUONG",
+            "child_date_of_birth": "2007-01-29",
+        },
+        "birth_certificate_child",
+        rec_id="child-bc",
+    )
+    fields = [
+        {"key": "children_used", "value": "", "source": {}},
+        {"key": "children_count", "value": "", "source": {}},
+        {"key": "child_1_full_name", "value": "", "source": {}},
+        {"key": "child_2_full_name", "value": "", "source": {}},
+    ]
+    enrich_children_section_from_birth_certs(
+        fields,
+        [child_bc],
+        all_records=[parent_ws, child_ws, child_bc],
+        applicant_name="TRIEU THI DUYEN",
+        member_role="principal",
+    )
+    by_key = {f["key"]: f["value"] for f in fields}
+    assert by_key["children_count"] == "2"
+    assert by_key["child_1_full_name"] == "NGUYEN MINH HON"
+    assert by_key["child_2_full_name"] == "NGUYEN MINH PHUONG"
+
+

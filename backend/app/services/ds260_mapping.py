@@ -21,6 +21,7 @@ from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,7 @@ from app.services.document_registry import (
     REGISTRY_BY_CODE,
     normalize_birth_certificate_raw,
 )
+from app.services.ds260_customer_keys import normalize_ds260_customer_raw
 
 MAPPING_PATH = Path(__file__).resolve().parents[2] / "data" / "doc_schemas" / "ds260_mapping.json"
 
@@ -129,6 +131,28 @@ def flatten_ds260_mappings() -> dict[str, Ds260FieldMapping]:
             out[f.key] = f
     return out
 
+
+def pick_latest_record(
+    records: list[ApplicantDocRecord],
+    doc_type: str,
+) -> ApplicantDocRecord | None:
+    """Một doc_type có thể có nhiều file — lấy bản mới nhất (không phân biệt Luồng 1 / đối chiếu)."""
+    typed = [r for r in records if r.doc_type == doc_type]
+    if not typed:
+        return None
+    return max(typed, key=lambda r: (r.updated_at or r.id, str(r.id)))
+
+
+def pick_latest_by_variant(
+    records: list[ApplicantDocRecord],
+    doc_type: str,
+    variant: str,
+) -> ApplicantDocRecord | None:
+    """Lấy bản ghi mới nhất theo doc_type và variant (standard / exception)."""
+    typed = [r for r in records if r.doc_type == doc_type and r.variant == variant]
+    if not typed:
+        return None
+    return max(typed, key=lambda r: (r.updated_at or r.id, str(r.id)))
 
 
 def _allow_ambiguous_worksheet_key(mapping: "Ds260FieldMapping", raw: dict[str, str], alias: str) -> bool:
@@ -644,7 +668,7 @@ def _names_same_person(a: str, b: str) -> bool:
 
 
 def _pick_spouse_side_from_marriage(
-    marriage_rec: ApplicantDocRecord,
+    marriage_rec: ApplicantDocRecord | None,
     passport_rec: ApplicantDocRecord | None,
     passport_ref: ApplicantDocRecord | None = None,
 ) -> str:
@@ -654,6 +678,8 @@ def _pick_spouse_side_from_marriage(
     họ, CẢ HAI bên đều "khớp" và trước đây luôn chọn nhầm bên husband trước (thứ tự if) bất kể
     đúng sai. Dùng giới tính hộ chiếu làm trọng tài khi rơi vào trường hợp mơ hồ này — không đoán
     mò khi giới tính cũng không xác định được (giữ hành vi an toàn cũ: trả rỗng)."""
+    if not marriage_rec:
+        return ""
     husband = _resolve_from_record(
         marriage_rec, "husband_full_name", ("husband_name", "husband_full_name")
     )
@@ -742,14 +768,13 @@ def _marriage_is_the_divorced_one(
     passport_ref: ApplicantDocRecord | None = None,
 ) -> bool:
     """True nếu vợ/chồng trên giấy kết hôn đang xét TRÙNG với người đã ly hôn trên quyết định ly
-    hôn — tức đây chính là cuộc hôn nhân đã chấm dứt, KHÔNG phải vợ/chồng hiện tại.
+    hôn VÀ ngày kết hôn KHÔNG sau ngày ly hôn — tức đây chính là cuộc hôn nhân đã chấm dứt.
 
-    False nghĩa là chủ hồ sơ đã tái hôn với người khác sau ly hôn cũ: giấy kết hôn đang xét là
+    False nghĩa là:
+    1) Chủ hồ sơ đã tái hôn với người khác sau ly hôn cũ: giấy kết hôn đang xét là
     hôn nhân hiện tại (Married), giấy ly hôn chỉ mô tả cuộc hôn nhân trước (Previous Spouse).
-
-    Không xác định được tên 1 trong 2 bên (OCR thiếu) → mặc định coi là CÙNG một cuộc hôn nhân
-    (True) — tránh suy đoán "đã tái hôn" khi không có bằng chứng, giữ nguyên hành vi an toàn cũ
-    (marital_status = Single khi có giấy ly hôn)."""
+    2) Hoặc chủ hồ sơ tái hôn lại với cùng người đó sau khi đã ly hôn (marriage_date > divorce_date).
+    """
     if not divorce_rec:
         return False
     primary = marriage_rec or marriage_ref
@@ -763,7 +788,27 @@ def _marriage_is_the_divorced_one(
     )
     if not current_spouse_full:
         return True
-    return _names_same_person(ex_full, current_spouse_full)
+    if not _names_same_person(ex_full, current_spouse_full):
+        return False
+
+    # Nếu cùng tên người, kiểm tra ngày: Nếu ngày kết hôn SAU ngày ly hôn (tái hôn lại cùng người)
+    # thì giấy kết hôn này là cuộc hôn nhân hiện tại (False - không phải cuộc hôn nhân đã ly hôn trước đó).
+    from app.services.ds260_dates import parse_date_lenient
+
+    m_date_raw = _resolve_from_record(primary, "marriage_date", ("date_of_marriage", "date"))
+    d_date_raw = _resolve_from_record(
+        divorce_rec, "divorce_date", ("date_of_divorce", "decision_date", "effective_date", "issue_date", "date")
+    )
+    if m_date_raw and d_date_raw:
+        m_parsed = parse_date_lenient(m_date_raw)
+        d_parsed = parse_date_lenient(d_date_raw)
+        if m_parsed and d_parsed:
+            m_dt, _ = m_parsed
+            d_dt, _ = d_parsed
+            if m_dt > d_dt:
+                return False
+
+    return True
 
 
 @lru_cache(maxsize=1)
@@ -831,20 +876,15 @@ def reconcile_previous_spouse_with_marital_status(sections_out: list[dict[str, A
 
 @lru_cache(maxsize=1)
 def _child_excluded_section_ids() -> frozenset[str]:
-    """Các mục DS-260 không áp dụng cho hồ sơ con (chỉ người lớn — vợ/chồng, ly hôn, danh sách
-    con của chính người đó, tình trạng hôn nhân).
+    """Các mục DS-260 không áp dụng cho hồ sơ con (chỉ người lớn — vợ/chồng, ly hôn, phối ngẫu cũ).
 
-    section_work_education KHÔNG thuộc nhóm này — DS-260 yêu cầu mục Work/Education/Training
-    cho MỌI đương đơn, kể cả con (thường đang đi học — có "primary_occupation: Student" +
-    lịch sử trường lớp). Trước đây xóa trắng mục này cho mọi hồ sơ con khiến dữ liệu đã điền
-    đúng từ worksheet của chính người con (enrich_work_education_from_worksheet) bị xoá sạch
-    ngay sau đó (báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG — form của chính cô ấy, mục D
-    trống hoàn toàn dù worksheet của chính cô ấy ghi rõ "STUDENT" + tên trường)."""
+    Mục con cái (section_children) VẪN HIỂN THỊ và tự động điền children_used = 'No'.
+    Mục học vấn/việc làm (section_work_education) VẪN HIỂN THỊ cho con (học sinh/sinh viên).
+    """
     return frozenset({
         "section_spouse",
         "section_divorce",
         "section_previous_spouse",
-        "section_children",
     })
 
 
@@ -855,24 +895,41 @@ def _child_own_birth_cert_section_ids() -> frozenset[str]:
 
 
 def clear_child_adult_only_ds260_sections(sections_out: list[dict[str, Any]]) -> None:
-    """Hồ sơ con — không điền phối ngẫu, ly hôn, danh sách con, tình trạng hôn nhân."""
+    """Hồ sơ con — không điền phối ngẫu, ly hôn. Mục con cái vẫn hiển thị và đặt children_used = 'No'."""
     excluded = _child_excluded_section_ids()
     for sec in sections_out:
         if sec["id"] in excluded:
             for field in sec["fields"]:
                 field["value"] = ""
                 field["source"] = empty_ds260_field_source()
+        elif sec["id"] == "section_children":
+            for field in sec["fields"]:
+                k = field.get("key", "")
+                if k == "children_used":
+                    field["value"] = "No"
+                    field["source"] = {
+                        **empty_ds260_field_source(),
+                        "derived": "child_default_no_children",
+                    }
+                else:
+                    field["value"] = ""
+                    field["source"] = empty_ds260_field_source()
         elif sec["id"] == "section_a_personal":
             for field in sec["fields"]:
                 if field.get("key") == "current_marital_status":
-                    field["value"] = ""
-                    field["source"] = empty_ds260_field_source()
+                    field["value"] = "Single"
+                    field["source"] = {
+                        **empty_ds260_field_source(),
+                        "derived": "child_default_single",
+                    }
 
 
 def _spouse_name_from_marriage(
-    marriage_rec: ApplicantDocRecord,
+    marriage_rec: ApplicantDocRecord | None,
     passport_rec: ApplicantDocRecord | None,
 ) -> str:
+    if not marriage_rec:
+        return ""
     side = _pick_spouse_side_from_marriage(marriage_rec, passport_rec)
     if not side:
         return ""
@@ -975,11 +1032,248 @@ async def find_spouse_applicant(
     return pick_applicant_by_spouse_name(candidates, spouse_name, passport_names)
 
 
+def _occupation_from_worksheet_record(rec: ApplicantDocRecord | None) -> dict[str, str]:
+    if not rec:
+        return {}
+    ws_data = normalize_ds260_customer_raw(_merge_raw_dict(rec))
+    primary_occ = (
+        (ws_data.get("work_primary_occupation") or "")
+        or (ws_data.get("primary_occupation") or "")
+        or (ws_data.get("occupation") or "")
+        or (ws_data.get("employment.primary_occupation") or "")
+        or (ws_data.get("present_job_title") or "")
+        or (ws_data.get("job_title") or "")
+    ).strip()
+    other_occ = (
+        (ws_data.get("work_occupation_other_specify") or "")
+        or (ws_data.get("occupation_other_specify") or "")
+        or (ws_data.get("employment.occupation_other_specify") or "")
+        or (ws_data.get("other_occupation") or "")
+    ).strip()
+    out: dict[str, str] = {}
+    if primary_occ:
+        out["spouse_occupation"] = primary_occ
+    if other_occ:
+        out["spouse_occupation_other"] = other_occ
+    return out
+
+
+def pick_spouse_worksheet(
+    records: list[ApplicantDocRecord],
+    spouse_name: str,
+    person_name: str | None = None,
+) -> ApplicantDocRecord | None:
+    """Tìm worksheet DS-260 của người phối ngẫu trong danh sách records."""
+    worksheets = [r for r in records if r.doc_type == "ds260_customer_form"]
+    if not worksheets:
+        return None
+
+    # 1. Khớp theo tên người trên worksheet
+    if spouse_name:
+        for r in worksheets:
+            pname = _worksheet_person_name(r)
+            if pname and _names_same_person(pname, spouse_name):
+                return r
+        for r in worksheets:
+            raw = _merge_raw_dict(r)
+            for k in ("applicant_name_native", "applicant_name", "full_name", "name"):
+                val = (raw.get(k) or "").strip()
+                if val:
+                    val_clean = re.sub(r"(?i)^ds[\s-]*260[\s:_-]*", "", val).strip()
+                    if _names_same_person(val_clean, spouse_name):
+                        return r
+
+    # 2. Nếu có 2 worksheet và biết person_name của đương đơn hiện tại -> lấy worksheet còn lại
+    if person_name and len(worksheets) == 2:
+        other = [
+            r for r in worksheets
+            if not _names_same_person(_worksheet_person_name(r), person_name)
+        ]
+        if len(other) == 1:
+            return other[0]
+
+    return None
+
+
+def enrich_spouse_occupation_from_spouse_records(
+    fields_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    spouse_name: str,
+    person_name: str | None = None,
+) -> None:
+    """Bổ sung nghề nghiệp phối ngẫu từ worksheet / giấy việc làm / đơn xin việc của phối ngẫu trong cùng case."""
+    spouse_ws = pick_spouse_worksheet(records, spouse_name, person_name=person_name)
+    from_ws = _occupation_from_worksheet_record(spouse_ws)
+
+    from_emp: dict[str, str] = {}
+    emp_rec = None
+    if spouse_name:
+        for doc_t in ("employment_letter", "application_form"):
+            for r in records:
+                if r.doc_type != doc_t:
+                    continue
+                name_on_doc = _person_name_on_record(r)
+                if name_on_doc and _names_same_person(name_on_doc, spouse_name):
+                    emp_rec = r
+                    from_emp = _occupation_from_employment_record(r)
+                    break
+            if from_emp:
+                break
+
+    merged = _merge_occupation_fields(from_emp, from_ws)
+    if not merged:
+        return
+
+    for field in fields_out:
+        key = field.get("key", "")
+        val = (merged.get(key) or "").strip()
+        if not val:
+            continue
+        if (field.get("value") or "").strip():
+            continue
+        field["value"] = val
+        field.setdefault("source", {})
+        used_rec = spouse_ws if key in from_ws else emp_rec
+        doc_type = used_rec.doc_type if used_rec else "ds260_customer_form"
+        field["source"]["document_type"] = doc_type
+        field["source"]["source_field"] = (
+            "work_primary_occupation" if key == "spouse_occupation" else "work_occupation_other_specify"
+        )
+        field["source"]["derived"] = "spouse_occupation_from_spouse_ds260"
+        if used_rec:
+            if getattr(used_rec, "source_document_id", None):
+                field["source"]["document_id"] = str(used_rec.source_document_id)
+            if getattr(used_rec, "id", None):
+                field["source"]["record_id"] = str(used_rec.id)
+
+
+def sync_spouse_fields_from_spouse_records(
+    fields_out: list[dict[str, Any]],
+    records: list[ApplicantDocRecord],
+    spouse_name: str,
+    person_name: str | None = None,
+) -> None:
+    """Sync ALL spouse fields từ worksheet và passport của vợ/chồng trong cùng case (City/State/Country nơi sinh, Địa chỉ, DOB, Nghề nghiệp)."""
+    from app.services.birth_location import (
+        derive_birth_state_from_place,
+        derive_city_from_place,
+        derive_country_from_place,
+        format_address_english,
+        format_birth_city_display,
+        format_nationality_country,
+        format_place_name_title,
+    )
+
+    # 1. Thu thập dữ liệu từ worksheet của spouse
+    spouse_ws = pick_spouse_worksheet(records, spouse_name, person_name=person_name)
+    spouse_data = normalize_ds260_customer_raw(_merge_raw_dict(spouse_ws)) if spouse_ws else {}
+
+    # 2. Thu thập dữ liệu từ passport của spouse (nếu có trong case) - Hộ chiếu là nguồn chính thức
+    spouse_pp, _ = (
+        pick_luong1_pair_for_person(records, "passport", spouse_name)
+        if spouse_name
+        else (None, None)
+    )
+    if spouse_pp:
+        pp_pob = _resolve_from_record(spouse_pp, "place_of_birth", ("birth_place",))
+        if pp_pob:
+            pp_state = derive_birth_state_from_place(pp_pob)
+            pp_city = derive_city_from_place(pp_pob)
+            pp_country = derive_country_from_place(pp_pob) or "Vietnam"
+            if pp_state:
+                spouse_data["birth_state"] = pp_state
+            if pp_city:
+                spouse_data["birth_city"] = pp_city
+            if pp_country:
+                spouse_data["birth_country"] = pp_country
+        pp_dob = _resolve_from_record(spouse_pp, "date_of_birth", ("dob",))
+        if pp_dob:
+            spouse_data["date_of_birth"] = pp_dob
+
+    # 3. Chuẩn hóa họ tên phối ngẫu
+    full_name_cand = (spouse_data.get("applicant_name") or spouse_data.get("full_name") or spouse_name or "").strip()
+    if full_name_cand:
+        sur, given = _split_vn_person_name(full_name_cand)
+        if sur:
+            spouse_data["family_name"] = sur
+        if given:
+            spouse_data["given_names"] = given
+
+    # 4. Tự động trích xuất City/State/Country nếu worksheet ghi chung nơi sinh dạng chuỗi
+    pob = (spouse_data.get("place_of_birth") or spouse_data.get("birth_place") or "").strip()
+    if pob:
+        if not spouse_data.get("birth_city"):
+            derived_city = derive_city_from_place(pob)
+            if derived_city:
+                spouse_data["birth_city"] = derived_city
+        if not spouse_data.get("birth_state"):
+            derived_state = derive_birth_state_from_place(pob)
+            if derived_state:
+                spouse_data["birth_state"] = derived_state
+        if not spouse_data.get("birth_country"):
+            derived_country = derive_country_from_place(pob)
+            if derived_country:
+                spouse_data["birth_country"] = derived_country
+
+    spouse_field_map = {
+        "spouse_full_name": ("full_name", "name", "applicant_name", "applicant_name_native"),
+        "spouse_surname": ("family_name", "surname"),
+        "spouse_given_names": ("given_names", "first_name"),
+        "spouse_date_of_birth": ("date_of_birth", "dob"),
+        "spouse_birth_city": ("birth_city", "city_of_birth", "birth_place_city", "place_of_birth"),
+        "spouse_birth_state": ("birth_state", "state_of_birth", "province_of_birth", "birth_place_state"),
+        "spouse_birth_country": ("birth_country", "country_of_birth", "nationality"),
+        "spouse_address": ("current_address", "address", "residence_address", "street_address", "present_address", "living_address"),
+        "spouse_occupation": ("work_primary_occupation", "primary_occupation", "occupation", "employment.primary_occupation"),
+        "spouse_occupation_other": ("work_occupation_other_specify", "occupation_other_specify", "employment.occupation_other_specify"),
+    }
+
+    for field in fields_out:
+        key = field.get("key", "")
+        if key not in spouse_field_map:
+            continue
+
+        # Cho phép ghi đè nếu field đang trống HOẶC đang lấy từ marriage_certificate / birth_certificate (dữ liệu cũ/chưa chuẩn hóa)
+        src_doc = (field.get("source") or {}).get("document_type", "")
+        is_weak_source = src_doc in ("marriage_certificate", "birth_certificate", "")
+        if (field.get("value") or "").strip() and not is_weak_source:
+            continue
+
+        for src_key in spouse_field_map[key]:
+            val = (spouse_data.get(src_key) or "").strip()
+            if val:
+                if key == "spouse_address":
+                    val = format_address_english(val)
+                elif key == "spouse_birth_city":
+                    val = format_birth_city_display(val)
+                elif key == "spouse_birth_state":
+                    val = format_place_name_title(val)
+                elif key == "spouse_birth_country":
+                    val = format_nationality_country(val)
+
+                field["value"] = val
+                field.setdefault("source", {})
+                field["source"]["document_type"] = "ds260_customer_form" if spouse_ws else ("passport" if spouse_pp else "spouse_member_sync")
+                field["source"]["source_field"] = src_key
+                field["source"]["derived"] = (
+                    "spouse_occupation_from_spouse_ds260"
+                    if key in ("spouse_occupation", "spouse_occupation_other")
+                    else "spouse_fields_synced"
+                )
+                if spouse_ws and getattr(spouse_ws, "source_document_id", None):
+                    field["source"]["document_id"] = str(spouse_ws.source_document_id)
+                elif spouse_pp and getattr(spouse_pp, "source_document_id", None):
+                    field["source"]["document_id"] = str(spouse_pp.source_document_id)
+                if spouse_ws and getattr(spouse_ws, "id", None):
+                    field["source"]["record_id"] = str(spouse_ws.id)
+                break
+
+
 async def read_spouse_occupation_from_applicant(
     db: AsyncSession,
     spouse_applicant_id,
 ) -> dict[str, str]:
-    """Nghề nghiệp phối ngẫu từ DS-260 / profile việc làm của hồ sơ vợ hoặc chồng."""
+    """Nghề nghiệp phối ngẫu từ DS-260 worksheet / profile / employment letter."""
     keys = ("employment.primary_occupation", "employment.occupation_other_specify")
     result = await db.execute(
         select(ProfileField).where(
@@ -991,10 +1285,18 @@ async def read_spouse_occupation_from_applicant(
     from_profile = _occupation_from_profile_map(profile)
 
     recs = await list_doc_records(db, spouse_applicant_id)
+
+    ws_rec = pick_latest_by_variant(recs, "ds260_customer_form", "exception") or pick_latest_record(
+        recs, "ds260_customer_form"
+    )
+    from_worksheet = _occupation_from_worksheet_record(ws_rec)
+
     emp_rec = pick_latest_record(recs, "employment_letter")
     from_emp = _occupation_from_employment_record(emp_rec)
 
-    return _merge_occupation_fields(from_profile, from_emp)
+    # Merge: worksheet > employment letter > profile
+    merged = _merge_occupation_fields(from_profile, from_emp)
+    return _merge_occupation_fields(from_worksheet, merged)
 
 
 async def enrich_spouse_occupation_from_spouse_applicant(
@@ -1030,6 +1332,113 @@ async def enrich_spouse_occupation_from_spouse_applicant(
         )
         field["source"]["derived"] = "spouse_occupation_from_spouse_ds260"
         field["source"]["spouse_applicant_id"] = str(spouse_app.id)
+
+
+async def sync_spouse_fields_from_spouse_applicant(
+    fields_out: list[dict[str, Any]],
+    db: AsyncSession,
+    current: Applicant,
+    marriage_rec: ApplicantDocRecord | None,
+    passport_rec: ApplicantDocRecord | None,
+) -> None:
+    """Sync ALL spouse fields từ DS-260 của vợ/chồng vào section_spouse của principal.
+
+    Khi principal và spouse đi chung (family case), thông tin spouse trên DS-260 của
+    principal phải đồng bộ với thông tin cá nhân thật của spouse từ DS-260 worksheet của họ.
+
+    Fields sync: full_name, surname, given_names, date_of_birth, birth_city, birth_state,
+    birth_country, occupation.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    spouse_app = await find_spouse_applicant(db, current, marriage_rec, passport_rec)
+    if not spouse_app:
+        logger.info(f"[SYNC_SPOUSE] Cannot find spouse applicant for {current.display_name}")
+        return
+
+    logger.info(f"[SYNC_SPOUSE] Found spouse: {spouse_app.display_name} (id={spouse_app.id})")
+
+    # Lấy DS-260 form của spouse
+    spouse_recs = await list_doc_records(db, spouse_app.id)
+    spouse_ws = pick_latest_by_variant(spouse_recs, "ds260_customer_form", "exception") or pick_latest_record(
+        spouse_recs, "ds260_customer_form"
+    )
+    if not spouse_ws:
+        logger.info(f"[SYNC_SPOUSE] No DS-260 worksheet found for spouse {spouse_app.display_name}")
+        return
+
+    spouse_data = normalize_ds260_customer_raw(_merge_raw_dict(spouse_ws))
+    logger.info(f"[SYNC_SPOUSE] Spouse worksheet data keys: {list(spouse_data.keys())}")
+    logger.info(f"[SYNC_SPOUSE] Spouse occupation values: primary_occupation={spouse_data.get('primary_occupation')}, work_primary_occupation={spouse_data.get('work_primary_occupation')}")
+
+    from app.services.birth_location import (
+        derive_birth_state_from_place,
+        derive_city_from_place,
+        derive_country_from_place,
+        format_address_english,
+    )
+
+    pob = (spouse_data.get("place_of_birth") or spouse_data.get("birth_place") or "").strip()
+    if pob:
+        if not spouse_data.get("birth_city"):
+            derived_city = derive_city_from_place(pob)
+            if derived_city:
+                spouse_data["birth_city"] = derived_city
+        if not spouse_data.get("birth_state"):
+            derived_state = derive_birth_state_from_place(pob)
+            if derived_state:
+                spouse_data["birth_state"] = derived_state
+        if not spouse_data.get("birth_country"):
+            derived_country = derive_country_from_place(pob)
+            if derived_country:
+                spouse_data["birth_country"] = derived_country
+
+    # Mapping: principal's spouse_* key -> spouse's field key trong DS-260 worksheet
+    spouse_field_map = {
+        "spouse_full_name": ("full_name", "name", "applicant_name", "applicant_name_native"),
+        "spouse_surname": ("family_name", "surname"),
+        "spouse_given_names": ("given_names", "first_name"),
+        "spouse_date_of_birth": ("date_of_birth", "dob"),
+        "spouse_birth_city": ("birth_city", "city_of_birth", "birth_place_city", "place_of_birth"),
+        "spouse_birth_state": ("birth_state", "state_of_birth", "province_of_birth", "birth_place_state"),
+        "spouse_birth_country": ("birth_country", "country_of_birth", "nationality"),
+        "spouse_address": ("current_address", "address", "residence_address", "street_address", "present_address", "living_address"),
+        # Occupation: thử cả key gốc OCR lẫn key sau normalize
+        "spouse_occupation": ("work_primary_occupation", "primary_occupation", "occupation", "employment.primary_occupation"),
+        "spouse_occupation_other": ("work_occupation_other_specify", "occupation_other_specify", "employment.occupation_other_specify"),
+    }
+
+    for field in fields_out:
+        key = field.get("key", "")
+        if key not in spouse_field_map:
+            continue
+
+        # Bỏ qua nếu đã có giá trị (worksheet giữ quyền ưu tiên)
+        if (field.get("value") or "").strip():
+            continue
+
+        # Thử các keys theo thứ tự ưu tiên
+        for src_key in spouse_field_map[key]:
+            val = (spouse_data.get(src_key) or "").strip()
+            if val:
+                if key == "spouse_address":
+                    val = format_address_english(val)
+                field["value"] = val
+                field.setdefault("source", {})
+                field["source"]["document_type"] = "ds260_customer_form"
+                field["source"]["source_field"] = src_key
+                field["source"]["derived"] = (
+                    "spouse_occupation_from_spouse_ds260"
+                    if key in ("spouse_occupation", "spouse_occupation_other")
+                    else "spouse_fields_synced"
+                )
+                field["source"]["spouse_applicant_id"] = str(spouse_app.id)
+                if getattr(spouse_ws, "source_document_id", None):
+                    field["source"]["document_id"] = str(spouse_ws.source_document_id)
+                if getattr(spouse_ws, "id", None):
+                    field["source"]["record_id"] = str(spouse_ws.id)
+                break
 
 
 def _spouse_field_from_marriage(
@@ -1206,22 +1615,6 @@ def enrich_spouse_section_from_marriage(
     side = _pick_spouse_side_from_marriage(primary, passport_rec, passport_ref)
     if not side:
         return
-
-    # DOB không phụ thuộc spouse_full (đọc trực tiếp qua {side}_date_of_birth) — điền TRƯỚC khi
-    # có thể early-return vì không resolve được HỌ TÊN, để giấy kết hôn có ngày sinh rõ nhưng tên
-    # OCR lỗi/thiếu vẫn không bị mất luôn cả ngày sinh (báo lỗi thực tế: early-return chặn fill
-    # DOB dù dữ liệu ngày sinh hoàn toàn có sẵn và không liên quan gì đến việc thiếu tên).
-    spouse_dob = _spouse_field_from_marriage(
-        marriage_rec, passport_rec, "date_of_birth", marriage_ref=marriage_ref, passport_ref=passport_ref
-    )
-    if spouse_dob:
-        for field in fields_out:
-            if field.get("key") == "spouse_date_of_birth" and not (field.get("value") or "").strip():
-                field["value"] = spouse_dob
-                field.setdefault("source", {})
-                field["source"]["document_type"] = "marriage_certificate"
-                field["source"]["source_field"] = "spouse_date_of_birth"
-                field["source"]["derived"] = "spouse_dob_from_marriage"
 
     spouse_full = _resolve_from_record_luong1_fallback(
         marriage_rec,
@@ -1406,6 +1799,8 @@ def enrich_previous_spouse_from_divorce(
     fields_out: list[dict[str, Any]],
     divorce_rec: ApplicantDocRecord | None,
     passport_rec: ApplicantDocRecord | None,
+    *,
+    is_same_person_remarried: bool = False,
 ) -> None:
     """Điền section phối ngẫu cũ từ quyết định ly hôn — chọn vợ/chồng không trùng chủ hồ sơ."""
     if not divorce_rec:
@@ -2395,9 +2790,16 @@ def enrich_children_section_from_birth_certs(
             seen_keys.add(key)
             items.append((data, "birth_certificate_child", bc))
 
-    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
-        records, "ds260_customer_form"
-    )
+    ws_rec = None
+    if applicant_name:
+        scoped_ws_records = scope_worksheets_to_person(records, applicant_name, is_family_case=True)
+        ws_rec = pick_latest_by_variant(scoped_ws_records, "ds260_customer_form", "exception") or pick_latest_record(
+            scoped_ws_records, "ds260_customer_form"
+        )
+    if not ws_rec:
+        ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
+            records, "ds260_customer_form"
+        )
     ws_declared_count = ""
     ws_declares_no = False
     if ws_rec:
@@ -2602,24 +3004,11 @@ def _resolve_ds260_field_value(
     return "", mapping.field
 
 
-def pick_latest_record(
-    records: list[ApplicantDocRecord],
-    doc_type: str,
-) -> ApplicantDocRecord | None:
-    """Một doc_type có thể có nhiều file — lấy bản mới nhất (không phân biệt Luồng 1 / đối chiếu)."""
-    typed = [r for r in records if r.doc_type == doc_type]
-    if not typed:
-        return None
-    return max(typed, key=lambda r: (r.updated_at or r.id, str(r.id)))
-
-
 def pick_luong1_pair(
     records: list[ApplicantDocRecord],
     doc_type: str,
 ) -> tuple[ApplicantDocRecord | None, ApplicantDocRecord | None]:
     """Luồng 1 (standard) và bản đối chiếu khách upload (_new / exception)."""
-    from app.services.ds260_conflicts import pick_latest_by_variant
-
     return (
         pick_latest_by_variant(records, doc_type, "standard"),
         pick_latest_by_variant(records, doc_type, "exception"),
@@ -3354,6 +3743,12 @@ def enrich_empty_fields_from_all_doc_records(
             continue
         primary_ok = _section_primary_doc_present(records, section_id, person_name=person_name)
         for field in sec["fields"]:
+            if field.get("source", {}).get("derived") in (
+                "conflict_resolution",
+                "worksheet_conflict_resolution",
+                "manual_override",
+            ):
+                continue
             if not _is_empty_for_fallback(field.get("value") or ""):
                 continue
             field_key = field.get("key", "")
@@ -3394,7 +3789,8 @@ def enrich_empty_fields_from_all_doc_records(
             if not eligible:
                 continue
 
-            ordered = sorted(eligible, key=lambda r: _record_fill_priority(r, mapping))
+            target_mapping = mapping
+            ordered = sorted(eligible, key=lambda r: _record_fill_priority(r, target_mapping))
             for rec in ordered:
                 val, source_field = _resolve_field_from_record(rec, mapping)
                 if _is_empty_for_fallback(val):
@@ -3423,6 +3819,28 @@ def enrich_empty_fields_from_all_doc_records(
                     "derived": derived,
                 }
                 break
+
+
+def _phone_completeness_score(val: str) -> int:
+    s = (val or "").strip()
+    if not s:
+        return 0
+    digits = re.sub(r"\D", "", s)
+    if s.startswith("+") or digits.startswith("0084") or (digits.startswith("84") and len(digits) >= 11):
+        return 3
+    if s.startswith("0") or (digits.startswith("0") and len(digits) >= 10):
+        return 2
+    return 1
+
+
+def _pick_fuller_phone(val1: str, val2: str) -> str:
+    """Chọn số điện thoại đầy đủ hơn giữa 2 số cùng subscriber number:
+    ưu tiên +84 (score 3) > 0 (score 2) > số chỉ có 9 số không có đầu số (score 1)."""
+    s1 = _phone_completeness_score(val1)
+    s2 = _phone_completeness_score(val2)
+    if s2 > s1:
+        return val2
+    return val1
 
 
 def enrich_work_education_from_worksheet(
@@ -3458,6 +3876,12 @@ def enrich_work_education_from_worksheet(
     doc_id = str(ws_rec.source_document_id) if ws_rec.source_document_id else None
 
     for field in fields_out:
+        if field.get("source", {}).get("derived") in (
+            "conflict_resolution",
+            "worksheet_conflict_resolution",
+            "manual_override",
+        ):
+            continue
         if not _is_empty_for_fallback(field.get("value") or ""):
             continue
         key = field.get("key", "")
@@ -3530,6 +3954,7 @@ def reattribute_matching_worksheet_sources(
     """
     from app.services.ds260_conflicts import (
         WORKSHEET_OFFICIAL_DOC_OVERRIDES,
+        _PHONE_COMPARE_KEY_RE,
         _WORK_CURRENT_JOB_KEYS,
         _official_value_for_worksheet_compare,
         _place_or_school_values_match,
@@ -3575,6 +4000,9 @@ def reattribute_matching_worksheet_sources(
             if not matched:
                 continue
 
+            if _PHONE_COMPARE_KEY_RE.search(mapping_key):
+                field["value"] = _pick_fuller_phone(worksheet_val, official_val)
+
             doc_id = str(official_rec.source_document_id) if official_rec and official_rec.source_document_id else None
             field["source"] = {
                 **source,
@@ -3586,6 +4014,10 @@ def reattribute_matching_worksheet_sources(
                 "record_id": str(official_rec.id) if official_rec else None,
                 "derived": "golden_source_application_form",
             }
+
+
+# Alias tương thích ngược cho reattribute_matching_worksheet_sources
+reattribute_matched_worksheet_to_application_form = reattribute_matching_worksheet_sources
 
 
 def enrich_empty_fields_from_ds260_customer_worksheet(
@@ -3921,22 +4353,28 @@ def enrich_native_name_from_worksheet(
 def upgrade_partial_dates_from_worksheet(
     sections_out: list[dict[str, Any]],
     records: list[ApplicantDocRecord],
+    filename_map: dict[str, str] | None = None,
 ) -> None:
     """
     Field ngày đang ở dạng một phần (chỉ năm / tháng-năm) → nếu worksheet có NGÀY ĐẦY ĐỦ
     cùng năm thì thay bằng ngày đầy đủ (vd. mother_date_of_birth '1954' → '1954-12-30').
-    Giấy tờ chính thức vẫn ưu tiên về nội dung, chỉ bổ sung độ chi tiết của ngày.
+    Nguồn hiển thị được cập nhật sang DS-260 worksheet vì ngày đầy đủ xuất xứ từ worksheet.
     """
     from app.services.ds260_dates import is_date_field_key, is_partial_date_value
     from app.services.ds260_customer_keys import normalize_ds260_customer_raw
+    from app.services.ds260_conflicts import pick_latest_by_variant
 
-    ws_rec = pick_latest_record(records, "ds260_customer_form")
+    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
+        records, "ds260_customer_form"
+    )
     if not ws_rec:
         return
     ws = normalize_ds260_customer_raw(_merge_raw_dict(ws_rec))
     if not ws:
         return
     mappings = flatten_ds260_mappings()
+    filename_map = filename_map or {}
+    doc_id = str(ws_rec.source_document_id) if ws_rec.source_document_id else None
 
     for sec in sections_out:
         for field in sec.get("fields", []):
@@ -3953,8 +4391,15 @@ def upgrade_partial_dates_from_worksheet(
                 full = parse_full_date(ws_val)
                 if full and str(full.year) in val:
                     field["value"] = ws_val
-                    field.setdefault("source", {})
-                    field["source"]["derived"] = "partial_date_upgraded_from_worksheet"
+                    field["source"] = {
+                        "document_type": "ds260_customer_form",
+                        "source_field": ck,
+                        "document_id": doc_id,
+                        "document_filename": filename_map.get(doc_id or "", "") if doc_id else "",
+                        "variant": ws_rec.variant,
+                        "record_id": str(ws_rec.id),
+                        "derived": "partial_date_upgraded_from_worksheet",
+                    }
                     break
 
 
@@ -3978,16 +4423,8 @@ def reconcile_parent_living_status(sections_out: list[dict[str, Any]]) -> None:
 def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> None:
     """
     - Cha/mẹ đã mất → để trống khối địa chỉ hiện tại.
-    - Địa chỉ cha/mẹ trùng địa chỉ đương đơn → là rò rỉ (bleed) → xóa.
+    - Địa chỉ cha/mẹ trùng địa chỉ đương đơn chỉ coi là bleed khi OCR nhầm từ giấy tờ scan và cha/mẹ không còn sống.
     - Ô State (tỉnh hiện tại) chứa địa chỉ phố → xóa.
-
-    "Bleed" chỉ áp dụng cho dữ liệu OCR từ giấy tờ scan (worksheet/birth certificate...) — nơi
-    máy đọc nhầm địa chỉ đương đơn vào ô cha/mẹ là lỗi thật sự có thể xảy ra. KHÔNG áp dụng khi
-    địa chỉ cha/mẹ đến từ chính form DS-260 khách TỰ KHAI TAY (ds260_customer_form) — ở đó khách
-    chủ động trả lời, "trùng địa chỉ đương đơn" nhiều khả năng là SỰ THẬT (cha mẹ con sống chung),
-    không phải lỗi copy. Xóa nhầm khiến postal code/địa chỉ thật của cha mẹ bị mất, và export phải
-    tự đoán bù bằng dữ liệu kém tin cậy hơn (báo lỗi thực tế 2026-08-05: postal code cha/mẹ
-    NGUYEN HOANG YEN bị xóa dù DS-260 gốc ghi rõ).
     """
     from app.services.birth_location import normalize_location
 
@@ -4006,7 +4443,11 @@ def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> Non
         addr_field = idx.get(f"{parent}_address")
         parent_addr = normalize_location(_field_value(idx, f"{parent}_address"))
         from_customer_form = bool(
-            addr_field and (addr_field.get("source") or {}).get("document_type") == "ds260_customer_form"
+            addr_field
+            and (
+                (addr_field.get("source") or {}).get("document_type") in ("ds260_customer_form", "case_member")
+                or (addr_field.get("source") or {}).get("derived", "").startswith("child_")
+            )
         )
         bleed = bool(applicant_addr) and parent_addr == applicant_addr and not from_customer_form
         if not_living or bleed:
@@ -4025,11 +4466,152 @@ def reconcile_parent_spouse_addresses(sections_out: list[dict[str, Any]]) -> Non
             _set_value(field, "", "state_address_cleared")
 
 
+def reconcile_parent_living_addresses(sections_out: list[dict[str, Any]]) -> None:
+    """Đảm bảo địa chỉ cha/mẹ còn sống được điền đầy đủ (Street, City, State, Postal, Country).
+
+    Áp dụng cho mọi form (đương đơn, phối ngẫu, con cái):
+    1. Nếu cha/mẹ còn sống (is_living='Yes' hoặc có tên và không có năm mất):
+       - Nếu địa chỉ cha/mẹ ghi 'SAME' / 'Như trên' / 'Cùng địa chỉ' / 'Chung hộ khẩu':
+         lấy từ current_address, current_city, current_state, postal_code, current_country.
+       - Nếu có address (địa chỉ đường) nhưng thiếu City / State / Country / Postal code:
+         + Bổ sung City & State từ chuỗi địa chỉ (derive_city_from_place, derive_birth_state_from_place).
+         + Bổ sung Country (mặc định 'Vietnam' nếu địa chỉ VN hoặc cùng quốc gia của đương đơn).
+         + Bổ sung Postal code nếu City/State khớp với current_city/current_state của đương đơn.
+    2. Nếu cả cha và mẹ đều còn sống, một người có địa chỉ còn người kia để trống:
+       - Điền địa chỉ người còn lại theo địa chỉ cha/mẹ (cha mẹ sống chung).
+    """
+    from app.services.birth_location import (
+        derive_birth_state_from_place,
+        derive_city_from_place,
+        derive_country_from_place,
+    )
+
+    idx = _index_fields_by_key(sections_out)
+    curr_addr = _field_value(idx, "current_address")
+    curr_city = _field_value(idx, "current_city")
+    curr_state = _field_value(idx, "current_state")
+    curr_postal = _field_value(idx, "postal_code")
+    curr_country = _field_value(idx, "current_country") or "Vietnam"
+
+    same_keywords = {
+        "same", "nhu tren", "như trên", "cung dia chi", "cùng địa chỉ",
+        "chung dia chi", "chung địa chỉ", "y nhu tren", "y như trên",
+        "theo duong don", "theo đương đơn", "same as applicant",
+        "cung ho khau", "cùng hộ khẩu", "song chung", "sống chung",
+    }
+
+    for parent in ("father", "mother"):
+        living_f = idx.get(f"{parent}_is_living")
+        death_f = idx.get(f"{parent}_death_year")
+        name_f = idx.get(f"{parent}_surname") or idx.get(f"{parent}_given_names") or idx.get(f"{parent}_full_name")
+        has_name = bool((name_f.get("value") or "").strip()) if name_f else False
+
+        is_living_val = (living_f.get("value") or "").strip().lower() if living_f else ""
+        death_val = (death_f.get("value") or "").strip() if death_f else ""
+
+        # Nếu có tên cha/mẹ và không có năm mất (hoặc năm mất N/A) và chưa khai No -> mặc định Yes
+        if has_name and not is_living_val and (not death_val or _is_empty_for_fallback(death_val)):
+            if living_f:
+                _set_value(living_f, "Yes", f"{parent}_living_default_yes")
+                is_living_val = "yes"
+
+        if is_living_val != "yes":
+            continue
+
+        addr_f = idx.get(f"{parent}_address")
+        city_f = idx.get(f"{parent}_city")
+        state_f = idx.get(f"{parent}_state")
+        postal_f = idx.get(f"{parent}_postal_code")
+        country_f = idx.get(f"{parent}_country")
+
+        addr_val = (addr_f.get("value") or "").strip() if addr_f else ""
+        addr_clean = re.sub(r"[^\w\s]", " ", addr_val.lower()).strip()
+        addr_clean_compact = " ".join(addr_clean.split())
+
+        # Trường hợp ghi "SAME" hoặc cùng địa chỉ với đương đơn
+        if addr_clean_compact in same_keywords or (
+            not addr_val
+            and curr_addr
+            and addr_f
+            and (addr_f.get("source", {}).get("derived") or "").startswith(f"child_{parent}_")
+        ):
+            if curr_addr and addr_f:
+                _set_value(addr_f, curr_addr, f"{parent}_address_same_as_applicant")
+            if curr_city and city_f and not (city_f.get("value") or "").strip():
+                _set_value(city_f, curr_city, f"{parent}_city_same_as_applicant")
+            if curr_state and state_f and not (state_f.get("value") or "").strip():
+                _set_value(state_f, curr_state, f"{parent}_state_same_as_applicant")
+            if curr_postal and postal_f and not (postal_f.get("value") or "").strip():
+                _set_value(postal_f, curr_postal, f"{parent}_postal_same_as_applicant")
+            if curr_country and country_f and not (country_f.get("value") or "").strip():
+                _set_value(country_f, curr_country, f"{parent}_country_same_as_applicant")
+            continue
+
+        # Nếu có địa chỉ cụ thể:
+        addr_val = (addr_f.get("value") or "").strip() if addr_f else ""
+        if addr_val:
+            city_val = (city_f.get("value") or "").strip() if city_f else ""
+            state_val = (state_f.get("value") or "").strip() if state_f else ""
+            country_val = (country_f.get("value") or "").strip() if country_f else ""
+            postal_val = (postal_f.get("value") or "").strip() if postal_f else ""
+
+            parsed_city, parsed_state = _parse_birth_place_city_state(addr_val)
+            if not city_val and city_f:
+                derived_city = parsed_city or derive_city_from_place(addr_val)
+                if derived_city:
+                    _set_value(city_f, derived_city, f"{parent}_city_derived_from_address")
+            if not state_val and state_f:
+                derived_state = parsed_state or derive_birth_state_from_place(addr_val)
+                if derived_state:
+                    _set_value(state_f, derived_state, f"{parent}_state_derived_from_address")
+            if not country_val and country_f:
+                derived_country = derive_country_from_place(addr_val) or "Vietnam"
+                _set_value(country_f, derived_country, f"{parent}_country_default_vietnam")
+            if not postal_val and postal_f and curr_postal:
+                cur_p_city = (city_f.get("value") or "").strip() if city_f else ""
+                cur_p_state = (state_f.get("value") or "").strip() if state_f else ""
+                from app.services.birth_location import normalize_location
+
+                same_loc = (
+                    (cur_p_city and curr_city and (
+                        normalize_location(cur_p_city) == normalize_location(curr_city)
+                        or curr_city.lower() in cur_p_city.lower()
+                        or cur_p_city.lower() in curr_city.lower()
+                    ))
+                    or (cur_p_state and curr_state and normalize_location(cur_p_state) == normalize_location(curr_state))
+                )
+                if same_loc:
+                    _set_value(postal_f, curr_postal, f"{parent}_postal_from_applicant")
+
+    # 2. Nếu cả 2 cha mẹ cùng còn sống, một người có địa chỉ đầy đủ còn người kia để trống
+    f_living = (idx.get("father_is_living", {}).get("value") or "").strip().lower() == "yes"
+    m_living = (idx.get("mother_is_living", {}).get("value") or "").strip().lower() == "yes"
+    f_addr = (idx.get("father_address", {}).get("value") or "").strip()
+    m_addr = (idx.get("mother_address", {}).get("value") or "").strip()
+
+    if f_living and m_living:
+        if f_addr and not m_addr:
+            for suffix in ("address", "city", "state", "postal_code", "country"):
+                src_val = (idx.get(f"father_{suffix}", {}).get("value") or "").strip()
+                dst_f = idx.get(f"mother_{suffix}")
+                if src_val and dst_f and not (dst_f.get("value") or "").strip():
+                    _set_value(dst_f, src_val, "mother_address_from_father_same_household")
+        elif m_addr and not f_addr:
+            for suffix in ("address", "city", "state", "postal_code", "country"):
+                src_val = (idx.get(f"mother_{suffix}", {}).get("value") or "").strip()
+                dst_f = idx.get(f"father_{suffix}")
+                if src_val and dst_f and not (dst_f.get("value") or "").strip():
+                    _set_value(dst_f, src_val, "father_address_from_mother_same_household")
+
+
 def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
     """Điền giá trị mặc định cho các trường còn trống (CHỌN YES/NO, LUÔN KHAI CÓ).
 
     Chỉ áp dụng khi trường vẫn trống — không ghi đè giá trị từ giấy tờ, worksheet,
     conflict hay manual override. Trường con (child_N_*_future) chỉ điền khi con đó tồn tại.
+
+    Riêng has_vaccination_docs (Có giấy chích ngừa / Have vaccination documentation per U.S law?):
+    luôn luôn chọn "Yes" là default dù khách có khai "No" đi chăng nữa (trừ khi có manual override).
     """
     defaults = {k: m.default for k, m in flatten_ds260_mappings().items() if m.default}
     if not defaults:
@@ -4043,7 +4625,20 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
         for field in sec["fields"]:
             key = field.get("key", "")
             default = defaults.get(key)
-            if not default or (field.get("value") or "").strip():
+            if not default:
+                continue
+            # has_vaccination_docs: luôn luôn chọn "Yes" là default dù khách có khai "No" đi chăng nữa
+            if key == "has_vaccination_docs":
+                if field.get("source", {}).get("derived") == "manual_override":
+                    continue
+                if (field.get("value") or "").strip().lower() != "yes":
+                    field["value"] = "Yes"
+                    field["source"] = {
+                        **empty_ds260_field_source(),
+                        "derived": "default_value",
+                    }
+                continue
+            if (field.get("value") or "").strip():
                 continue
             # Không ghi đè manual override (user đã xóa field)
             if field.get("source", {}).get("derived") == "manual_override":
@@ -4064,20 +4659,31 @@ def apply_ds260_default_values(sections_out: list[dict[str, Any]]) -> None:
 # KHÔNG gồm *_is_living (N/A ở đó KHÔNG được suy thành "No" = đã mất) và children_count
 # (định dạng riêng "No, 0").
 _YESNO_QUESTION_EVIDENCE: dict[str, tuple[str, ...]] = {
+    "other_addresses_used": ("other_addresses_history",),
     "other_nationality_used": ("other_nationality_history",),
-    # "other_addresses_used" KHÔNG có ở đây — DS-260 yêu cầu người khai báo tự trả lời câu
-    # hỏi này. Nếu để trống, KHÔNG tự fill "No" (bởi vì nếu prior_address_history có dữ
-    # liệu thì user có thể muốn sửa từ "No" → "Yes" nhưng bị che mất).
     "other_phones_used": ("other_phones_history",),
     "other_emails_used": ("other_emails_history",),
     "other_social_media_used": ("other_social_history",),
     "work_other_occupation_used": ("work_other_occupation_detail",),
     "work_prior_jobs_used": ("work_prior_jobs_history",),
-    "traveled_countries_5yr_used": ("traveled_countries_history",),
+    # traveled_countries_5yr_used / other_languages_used: nếu khách để trống không khai thì để trống, không tự động khai No.
     "previous_spouses_used": ("previous_spouse_full_name",),
     "children_used": ("children_count", "child_1_full_name"),
     "military_served": ("military_full_name", "military_country", "military_branch"),
 }
+
+# Các trường khi history/detail có dữ liệu thì câu hỏi bắt buộc phải là "Yes" (tránh mâu thuẫn history có mà Yes/No là No)
+_AUTO_YES_WHEN_EVIDENCE_PRESENT = frozenset(
+    {
+        "other_addresses_used",
+        "other_nationality_used",
+        "other_phones_used",
+        "other_emails_used",
+        "other_social_media_used",
+        "work_other_occupation_used",
+        "work_prior_jobs_used",
+    }
+)
 
 
 def _is_na_value(val: str) -> bool:
@@ -4085,11 +4691,22 @@ def _is_na_value(val: str) -> bool:
     return (val or "").strip().lower().replace(" ", "").replace(".", "") in {"na", "n/a"}
 
 
+def _has_meaningful_evidence(val: str) -> bool:
+    """True khi trường lịch sử/chi tiết có nội dung thực tế (không phải rỗng, N/A, None, Không)."""
+    v = (val or "").strip()
+    if not v or _is_na_value(v):
+        return False
+    if v.lower() in {"no", "none", "không", "không có", "khong co", "khong"}:
+        return False
+    return True
+
+
 def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> None:
     """Hậu xử lý XÁC ĐỊNH (deterministic), chạy sau khi đã chuẩn hóa tiếng Anh:
 
-    - B4: câu hỏi Yes/No để "N/A" → "No"; để trống & KHÔNG có dữ liệu kèm → "No"
-      (nếu có dữ liệu kèm thì để nguyên cho review, không tự đoán).
+    - Nếu field lịch sử/bằng chứng (Prior address history, other phones, other emails...) CÓ DỮ LIỆU
+      → câu hỏi Yes/No tương ứng (Lived elsewhere since age 16?...) PHẢI LÀ 'Yes' (tránh mâu thuẫn).
+    - B4: câu hỏi Yes/No để "N/A" hoặc để trống & KHÔNG có dữ liệu kèm → "No".
     - A4: '*_death_year' lỡ nhận NGÀY đầy đủ (vd. 07/09/2006) → rút về NĂM (2006),
       đúng ô 'Year of death' và giảm rủi ro số liệu bịa quá chi tiết.
     """
@@ -4106,19 +4723,42 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
         field = index.get(qkey)
         if field is None:
             continue
-        # Không ghi đè manual override (user đã xóa field)
+        # Không ghi đè manual override (user đã chủ động sửa thủ công)
         if field.get("source", {}).get("derived") == "manual_override":
             continue
+
+        has_evidence = any(_has_meaningful_evidence(_val(e)) for e in evidence_keys)
+        if has_evidence:
+            if qkey in _AUTO_YES_WHEN_EVIDENCE_PRESENT:
+                # Lịch sử/bằng chứng có dữ liệu -> câu hỏi bắt buộc là "Yes"
+                field["value"] = "Yes"
+                field["source"] = {
+                    **empty_ds260_field_source(),
+                    "derived": "yesno_from_history",
+                }
+                continue
+            else:
+                # Có bằng chứng -> để review tự chốt Yes/No
+                continue
+
         cur = (field.get("value") or "").strip()
         if cur and not _is_na_value(cur):
-            continue  # đã có Yes/No (hoặc giá trị khác) hợp lệ → giữ nguyên
-        if any(_val(e) for e in evidence_keys):
-            continue  # có dữ liệu chứng minh → để review tự chốt Yes/No
+            if qkey in _AUTO_YES_WHEN_EVIDENCE_PRESENT and cur.lower() in ("yes", "y", "true", "1"):
+                pass  # Không có evidence -> đồng bộ về No (tránh mâu thuẫn Yes/No là Yes nhưng history trống)
+            else:
+                continue  # đã có Yes/No hợp lệ và không có evidence mâu thuẫn → giữ nguyên
+
+        if qkey == "other_addresses_used":
+            # "Lived elsewhere since age 16?": nếu khách không khai thì để trống, không tự điền "No"
+            field["value"] = ""
+            continue
+
         field["value"] = "No"
         field["source"] = {
             **empty_ds260_field_source(),
             "derived": "yesno_default_no",
         }
+
 
     # other_name_used: luôn điền "No" khi trống, không cần kiểm tra other_names.
     # Nếu người dùng thực sự có tên khác, họ sẽ tự sửa thành "Yes" trên worksheet.
@@ -4148,9 +4788,10 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
                     "derived": "yesno_default_no",
                 }
 
-    # been_in_us / issued_us_visa / refused_us_visa: nếu có US Visa document (visa dán trong
-    # passport, entry stamp Mỹ) → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type...
-    for field_key in ("been_in_us", "issued_us_visa", "refused_us_visa"):
+    # been_in_us / issued_us_visa: nếu có US Visa document (visa dán trong passport, entry stamp Mỹ)
+    # → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type, entry_stamp, visa_number, entry_date.
+    # Riêng issued_us_visa / refused_us_visa: nếu khách để trống không khai thì để trống, không tự động khai "No".
+    for field_key in ("been_in_us", "issued_us_visa"):
         field = index.get(field_key)
         if not field:
             continue
@@ -4170,8 +4811,8 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
                 **empty_ds260_field_source(),
                 "derived": "yesno_from_us_visa_document",
             }
-        elif not cur or _is_na_value(cur):
-            # Không có US Visa document → mặc định "No" (khách chưa từng đến Mỹ)
+        elif field_key == "been_in_us" and (not cur or _is_na_value(cur)):
+            # been_in_us: Không có US Visa document → mặc định "No" (khách chưa từng đến Mỹ)
             field["value"] = "No"
             field["source"] = {
                 **empty_ds260_field_source(),
@@ -4363,8 +5004,6 @@ async def resolve_ds260_form(
     Resolve toàn bộ DS260 fields từ doc records — không đọc profile merge.
     Với bộ hồ sơ gia đình: truyền member_id để điền DS-260 cho chồng/vợ/con cụ thể.
     """
-    import uuid as _uuid
-
     from app.services.family_case import (
         MemberContext,
         apply_child_sections_from_birth_cert,
@@ -4377,6 +5016,7 @@ async def resolve_ds260_form(
     )
 
     records = await list_doc_records(db, applicant_id)
+    all_case_records = list(records)
     filename_map = filename_map or {}
 
     from app.services.ds260_conflicts import (
@@ -4398,7 +5038,7 @@ async def resolve_ds260_form(
     if applicant:
         mid = member_id
         if isinstance(mid, str):
-            mid = _uuid.UUID(mid)
+            mid = uuid.UUID(mid)
         member_ctx = await resolve_member_context(db, applicant, mid)
 
     person_name = member_ctx.display_name if member_ctx else (applicant.display_name if applicant else "")
@@ -4514,9 +5154,17 @@ async def resolve_ds260_form(
                     src_extra = {}
 
                 if mapping.key in WORKSHEET_COMPARE_KEYS:
-                    wk_fk = worksheet_conflict_field_key(mapping.key)
-                    chosen = (resolutions.get(wk_fk) or "").strip()
-                    if chosen and not is_child_member:
+                    wk_fk_suffixed = worksheet_conflict_field_key(
+                        mapping.key, member_number if len(case_members_all) > 1 else None
+                    )
+                    wk_fk_plain = worksheet_conflict_field_key(mapping.key)
+                    chosen = None
+                    if wk_fk_suffixed in resolutions:
+                        chosen = resolutions[wk_fk_suffixed]
+                    elif wk_fk_plain in resolutions:
+                        chosen = resolutions[wk_fk_plain]
+
+                    if chosen is not None and not is_child_member:
                         apply_ws = True
                         if mapping.key == "current_marital_status":
                             apply_ws = False
@@ -4525,16 +5173,17 @@ async def resolve_ds260_form(
                             "date_of_birth",
                             "passport_number",
                             "gender",
-                        } and person_name and not _names_same_person(chosen, person_name):
+                        } and person_name and chosen and not _names_same_person(chosen, person_name):
                             apply_ws = False
                         if apply_ws:
-                            value = chosen
+                            value = (chosen or "").strip()
                             source_field = mapping.field
                             src_extra = {"derived": "worksheet_conflict_resolution"}
 
             doc_id = str(rec.source_document_id) if rec and rec.source_document_id else None
+            actual_doc_type = rec.doc_type if rec else mapping.document
             source_meta: dict[str, Any] = {
-                "document_type": mapping.document,
+                "document_type": actual_doc_type,
                 "source_field": source_field,
                 "document_id": doc_id,
                 "document_filename": filename_map.get(doc_id or "", "") if doc_id else "",
@@ -4607,14 +5256,14 @@ async def resolve_ds260_form(
             divorce_rec = pick_latest_record(records, "divorce")
             enrich_divorce_section_from_record(fields_out, divorce_rec)
         if sec.id == "section_spouse" and not is_child_member:
-            marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
-            divorce_rec = pick_latest_record(records, "divorce")
+            marriage_rec, marriage_ref = pick_luong1_pair(all_case_records, "marriage_certificate")
+            divorce_rec = pick_latest_record(all_case_records, "divorce")
             if has_applicable_marriage_certificate(
                 marriage_rec, marriage_ref, passport_rec, passport_ref
             ) and not _marriage_is_the_divorced_one(
                 marriage_rec, marriage_ref, divorce_rec, passport_rec, passport_ref
             ):
-                birth_certs = list_birth_certificate_records(records)
+                birth_certs = list_birth_certificate_records(all_case_records)
                 enrich_spouse_section_from_marriage(
                     fields_out,
                     marriage_rec,
@@ -4625,27 +5274,61 @@ async def resolve_ds260_form(
                 enrich_spouse_birth_place_from_birth_certificate(
                     fields_out, marriage_rec or marriage_ref, passport_rec, birth_certs
                 )
+                spouse_name = _spouse_name_from_marriage(marriage_rec or marriage_ref, passport_rec)
+                if not spouse_name and case_members_all:
+                    spouse_m = next((m for m in case_members_all if getattr(m, "role", "") == "spouse"), None)
+                    if not spouse_m and member_ctx and member_ctx.role == "spouse":
+                        spouse_m = next((m for m in case_members_all if getattr(m, "role", "") == "principal"), None)
+                    if spouse_m:
+                        spouse_name = spouse_m.display_name
+
+                # 1. Bổ sung nghề nghiệp và đồng bộ thông tin từ records trong cùng bộ hồ sơ (family case)
+                enrich_spouse_occupation_from_spouse_records(
+                    fields_out, all_case_records, spouse_name, person_name=person_name
+                )
+                sync_spouse_fields_from_spouse_records(
+                    fields_out, all_case_records, spouse_name, person_name=person_name
+                )
+
+                # 2. Bổ sung từ hồ sơ applicant phối ngẫu riêng (nếu có)
                 if applicant:
                     await enrich_spouse_occupation_from_spouse_applicant(
+                        fields_out, db, applicant, marriage_rec or marriage_ref, passport_rec
+                    )
+                    # Sync ALL spouse fields từ DS-260 của vợ/chồng (family case)
+                    await sync_spouse_fields_from_spouse_applicant(
                         fields_out, db, applicant, marriage_rec or marriage_ref, passport_rec
                     )
             else:
                 clear_spouse_section_fields(fields_out)
         if sec.id == "section_previous_spouse" and not is_child_member:
             divorce_rec = pick_latest_record(records, "divorce")
+            marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+            # Khi tái hôn cùng người (same person remarried), vẫn điền Previous Spouse
+            # vì giấy ly hôn mô tả cuộc hôn nhân trước với cùng người đó
+            is_same_person_remarried = (
+                bool(divorce_rec)
+                and bool(marriage_rec or marriage_ref)
+                and not _marriage_is_the_divorced_one(
+                    marriage_rec, marriage_ref, divorce_rec, passport_rec, passport_ref
+                )
+            )
             if divorce_rec:
-                enrich_previous_spouse_from_divorce(fields_out, divorce_rec, passport_rec)
+                enrich_previous_spouse_from_divorce(
+                    fields_out, divorce_rec, passport_rec,
+                    is_same_person_remarried=is_same_person_remarried,
+                )
             else:
                 # Không có giấy ly hôn — thử phối ngẫu cũ đã qua đời (goá).
                 enrich_previous_spouse_from_death(
                     fields_out, records, passport_rec, passport_ref
                 )
         if sec.id == "section_children" and not is_child_member:
-            child_recs = list_child_birth_records(records, filename_map=filename_map)
+            child_recs = list_child_birth_records(all_case_records, filename_map=filename_map)
             enrich_children_section_from_birth_certs(
                 fields_out,
                 child_recs,
-                all_records=records,
+                all_records=all_case_records,
                 filename_map=filename_map,
                 case_members=case_members_all,
                 applicant_name=person_name,
@@ -4697,8 +5380,8 @@ async def resolve_ds260_form(
             if sec["id"] == "section_a_personal":
                 enrich_child_member_personal(sec["fields"], child_bc, passport_rec)
 
-    marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
-    divorce_rec = pick_latest_record(records, "divorce")
+    marriage_rec, marriage_ref = pick_luong1_pair(all_case_records, "marriage_certificate")
+    divorce_rec = pick_latest_record(all_case_records, "divorce")
     if not has_applicable_marriage_certificate(
         marriage_rec, marriage_ref, passport_rec, passport_ref
     ) or _marriage_is_the_divorced_one(
@@ -4776,7 +5459,7 @@ async def resolve_ds260_form(
     # Giá trị mặc định (CHỌN YES/NO, LUÔN KHAI CÓ) — chỉ điền khi vẫn còn trống.
     apply_ds260_default_values(sections_out)
 
-    upgrade_partial_dates_from_worksheet(sections_out, records)
+    upgrade_partial_dates_from_worksheet(sections_out, records, filename_map)
     # Ngược chiều với hàm trên: giá trị LẤY TỪ worksheet không được chi tiết hơn chính
     # worksheet (KHAI '1963' thì không được xuất 'Jan 01, 1963').
     downgrade_fabricated_date_precision(sections_out, records)
@@ -4804,6 +5487,7 @@ async def resolve_ds260_form(
     # Hậu xử lý nghiệp vụ: chuẩn hóa nơi sinh, đối chiếu còn sống / địa chỉ cha mẹ.
     reconcile_parent_living_status(sections_out)
     reconcile_parent_spouse_addresses(sections_out)
+    reconcile_parent_living_addresses(sections_out)
     normalize_ds260_place_fields(sections_out)
 
     filled, total, applicable_filled, applicable_total = _attach_section_fill_stats(
@@ -4865,14 +5549,15 @@ def _overwrite_section_from_luong1_doc(
             mapping.field,
             mapping.aliases,
         )
-        if not val:
+        rec = standard_rec or reference_rec
+        if not rec:
             continue
         field["value"] = val
         field["source"] = {
             "document_type": doc_type,
             "source_field": mapping.field,
             "derived": derived,
-            "record_id": str((standard_rec or reference_rec).id),
+            "record_id": str(rec.id),
         }
 
 
