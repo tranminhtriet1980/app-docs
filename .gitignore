@@ -66,3 +66,4 @@ npm-debug.log*
 .claude/
 CLAUDE.md
 graphify-out/
+.vscode/
