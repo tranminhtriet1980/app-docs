@@ -3069,7 +3069,7 @@ def _resolve_from_record_luong1_fallback(
 
 
 LUONG1_PERSON_SCOPED_DOC_TYPES: frozenset[str] = frozenset(
-    {"birth_certificate", "passport", "judicial_certificate"}
+    {"birth_certificate", "passport", "judicial_certificate", "military_discharge"}
 )
 
 # Cha/mẹ: ưu tiên DS-260 worksheet (conf 1.0) trước birth certificate (conf thấp).
@@ -3150,7 +3150,7 @@ def _eligible_records_for_field_fill(
     field_key: str,
 ) -> list[ApplicantDocRecord]:
     """Hồ sơ gia đình — chỉ lấy giấy tờ đúng người khi điền trống."""
-    scoped = {"birth_certificate", "passport", "judicial_certificate"}
+    scoped = {"birth_certificate", "passport", "judicial_certificate", "military_discharge"}
     out: list[ApplicantDocRecord] = []
     for rec in records:
         if rec.doc_type == "birth_certificate_child":
@@ -4174,6 +4174,10 @@ def _attach_section_fill_stats(
         sec["applicable_count"] = sec_applicable
         sec["applicable_filled_count"] = sec_applicable_filled
         sec["document_missing"] = bool(primary_doc and primary_doc not in present_docs)
+        if sec["id"] == "section_military":
+            served_f = next((f for f in sec["fields"] if f.get("key") == "military_served"), None)
+            if served_f and (served_f.get("value") or "").strip().lower() == "no":
+                sec["document_missing"] = False
 
     return filled, total, applicable_filled, applicable_total
 
@@ -4832,6 +4836,31 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
             field["source"]["derived"] = "death_year_normalized"
 
 
+def reconcile_military_section(sections_out: list[dict[str, Any]]) -> None:
+    """
+    Đảm bảo tính nhất quán của mục Quân sự (section_military):
+    - Nếu military_served == 'No' (hoặc người dùng không từng phục vụ quân sự):
+      xóa toàn bộ các ô chi tiết quân sự (Tên, Quốc gia, Quân chủng, Cấp bậc, Chuyên môn, Ngày bắt đầu/kết thúc, Số giấy tờ)
+      để tránh trường hợp câu hỏi trả lời No nhưng các ô bên dưới vẫn bị điền dữ liệu (do bleed OCR hoặc tài liệu của người khác).
+    - Không ghi đè nếu trường đó có manual_override.
+    """
+    for sec in sections_out:
+        if sec.get("id") != "section_military":
+            continue
+        fields = sec.get("fields", [])
+        served_field = next((f for f in fields if f.get("key") == "military_served"), None)
+        served_val = (served_field.get("value") or "").strip().lower() if served_field else ""
+
+        if served_val in ("no", "none", "không", "khong", "false", "0"):
+            for field in fields:
+                if field.get("key") == "military_served":
+                    continue
+                if field.get("source", {}).get("derived") == "manual_override":
+                    continue
+                field["value"] = ""
+                field["source"] = empty_ds260_field_source()
+
+
 # Ô THÔNG TIN (số điện thoại, email, định danh MXH) — bỏ trống thì ghi 'N/A',
 # KHÔNG bao giờ là 'No'. Lỗi Case B-2: Work Phone hiển thị 'No'.
 _NA_NOT_NO_KEYS: frozenset[str] = frozenset(
@@ -5146,7 +5175,11 @@ async def resolve_ds260_form(
                         records, mapping.document, mapping
                     )
                 else:
-                    rec = pick_latest_record(records, mapping.document)
+                    if mapping.document in LUONG1_PERSON_SCOPED_DOC_TYPES and person_name:
+                        std, ref = pick_luong1_pair_for_person(records, mapping.document, person_name)
+                        rec = std or ref
+                    else:
+                        rec = pick_latest_record(records, mapping.document)
                     value, source_field = _resolve_ds260_field_value(mapping, rec)
                 if mapping.document == "spouse_applicant_profile":
                     rec = None
@@ -5476,6 +5509,9 @@ async def resolve_ds260_form(
     # Chốt Yes/No (N/A/trống-không-dữ-liệu → No) + rút '*_death_year' về năm. Chạy SAU khi đã
     # chuẩn hóa tiếng Anh để thao tác trên đúng giá trị hiển thị cuối cùng.
     reconcile_ds260_yesno_and_death_year(sections_out)
+
+    # Đảm bảo mục Quân sự nhất quán: nếu military_served là No -> xóa toàn bộ thông tin chi tiết
+    reconcile_military_section(sections_out)
 
     # Năm mất vô lý (trước khi chính người đó sinh, hoặc trước khi đương đơn ra đời)
     # → xoá thay vì in lên form. Chạy sau khi '*_death_year' đã được rút về năm.
