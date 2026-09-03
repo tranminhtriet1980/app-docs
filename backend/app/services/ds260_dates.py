@@ -77,6 +77,13 @@ def parse_full_date(val: str) -> date | None:
         except ValueError:
             return None
 
+    m_vn = re.search(r"(?i)(?:ngày\s*)?(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})", val)
+    if m_vn:
+        try:
+            return date(int(m_vn.group(3)), int(m_vn.group(2)), int(m_vn.group(1)))
+        except ValueError:
+            pass
+
     for fmt in _FULL_DATE_TEXT_FORMATS:
         try:
             return datetime.strptime(val, fmt).date()
@@ -93,6 +100,12 @@ def format_partial_ds260_date(val: str) -> str | None:
     val = (val or "").strip()
     if not val:
         return None
+
+    m_vn_mo = re.search(r"(?i)(?:tháng\s*)?(\d{1,2})\s*năm\s*(\d{4})", val)
+    if m_vn_mo:
+        mo, y = int(m_vn_mo.group(1)), int(m_vn_mo.group(2))
+        if 1 <= mo <= 12:
+            return f"{mo:02d}/{y}"
 
     m = re.match(r"^(\d{4})-(\d{2})$", val)
     if m:

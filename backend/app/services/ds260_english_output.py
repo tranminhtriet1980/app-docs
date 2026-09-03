@@ -94,7 +94,6 @@ _SKIP_KEYS = frozenset(
         "postal_code",
         "father_postal_code",
         "mother_postal_code",
-        "email",
         "primary_phone",
         "secondary_phone",
         "work_phone",
@@ -111,6 +110,8 @@ _SKIP_KEYS = frozenset(
         # (khách yêu cầu 2026-08-13). Đã format lại (3 dòng/entry, loại việc hiện tại trùng lặp)
         # ở resolve_work_prior_jobs_field() (ds260_mapping.py) — không xử lý gì thêm ở đây.
         "work_prior_jobs_history",
+        # Lịch sử nơi ở trước đây / từ 16 tuổi — giữ NGUYÊN như khách khai trên DS-260, không tự dịch hay đổi dạng
+        "other_addresses_history",
     }
 )
 
@@ -129,6 +130,9 @@ def _schema_yes_no_keys() -> frozenset[str]:
     keys: set[str] = set()
     for key, mapping in flatten_ds260_mappings().items():
         if mapping.default in ("Yes", "No"):
+            keys.add(key)
+            continue
+        if key in ("issued_us_visa", "refused_us_visa", "been_in_us", "other_languages_used", "traveled_countries_5yr_used"):
             keys.add(key)
             continue
         label = mapping.label or ""
@@ -217,6 +221,9 @@ def format_ds260_field_value(key: str, value: str) -> str:
     ):
         return v
 
+    if "email" in key or key in {"email", "other_emails_history"}:
+        from app.services.ds260_normalize import normalize_email
+        return normalize_email(v)
     if key.endswith("_native"):
         return format_native_name(v)
 
@@ -265,3 +272,7 @@ def format_sections_english_output(sections: list[dict[str, Any]]) -> None:
             if not str(val).strip():
                 continue
             field["value"] = format_ds260_field_value(key, str(val))
+            if "email" in key or (isinstance(val, str) and "@" in val and not key.startswith("section_")):
+                from app.services.ds260_normalize import normalize_email
+                field["value"] = normalize_email(str(field["value"]))
+

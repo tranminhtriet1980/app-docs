@@ -1064,10 +1064,129 @@ def test_spouse_work_conflict_no_conflict_when_marriage_cert_empty():
 
 def test_spouse_work_conflict_no_conflict_when_spouse_ds260_empty():
     """Khi spouse's DS-260 worksheet không có work info → không tạo Conflict."""
-    # Marriage certificate có spouse_occupation
     marriage_occ = "Công nhân"
-    # Spouse's DS-260 trống work info
     spouse_occ = ""
+    assert not spouse_occ
 
-    # spouse_occ rỗng → function sẽ skip vì không có giá trị để so sánh
-    assert not spouse_occ  # Truthy check: rỗng = falsy
+
+def test_spouse_identity_keys_include_dob_and_names():
+    from app.services.ds260_conflicts import (
+        SPOUSE_IDENTITY_COMPARE_KEYS,
+        SPOUSE_TO_APPLICANT_KEY_MAP,
+    )
+    assert "spouse_date_of_birth" in SPOUSE_IDENTITY_COMPARE_KEYS
+    assert "spouse_surname" in SPOUSE_IDENTITY_COMPARE_KEYS
+    assert "spouse_given_names" in SPOUSE_IDENTITY_COMPARE_KEYS
+    assert SPOUSE_TO_APPLICANT_KEY_MAP["spouse_date_of_birth"] == "date_of_birth"
+    assert SPOUSE_TO_APPLICANT_KEY_MAP["spouse_surname"] == "family_name"
+    assert SPOUSE_TO_APPLICANT_KEY_MAP["spouse_given_names"] == "given_names"
+
+
+
+def test_education_period_difference_creates_conflict_even_when_school_name_matches():
+    """Cùng trường học nhưng thời gian học/tốt nghiệp khác nhau -> phải tạo conflict."""
+    application = _rec(
+        {
+            "high_school_name": "TRUONG THPT HOANG VAN THU",
+            "high_school_period": "09/2010 - 05/2013",
+        },
+        "application_form",
+    )
+    worksheet = _rec(
+        {
+            "high_school_name": "TRUONG THPT HOANG VAN THU",
+            "high_school_period": "08/2010 - 06/2013",
+        },
+        "ds260_customer_form",
+    )
+    rows = build_worksheet_conflict_rows([application, worksheet], {})
+    keys = {r["field_key"] for r in rows}
+    assert "ds260.document_vs_worksheet.edu_high_school_period" in keys
+    assert "ds260.document_vs_worksheet.edu_high_school_name" not in keys
+
+
+def test_education_conflict_when_ds260_has_data_and_application_form_empty():
+    """DS-260 có dữ liệu trường học/thời gian nhưng Application Form trống -> phải tạo conflict."""
+    application = _rec(
+        {
+            "middle_school_name": "THCS NGUYEN TRAI",
+        },
+        "application_form",
+    )
+    worksheet = _rec(
+        {
+            "middle_school_name": "THCS NGUYEN TRAI",
+            "college_name": "DAI HOC BACH KHOA",
+            "college_period": "2015 - 2019",
+        },
+        "ds260_customer_form",
+    )
+    rows = build_worksheet_conflict_rows([application, worksheet], {})
+    keys = {r["field_key"] for r in rows}
+    assert "ds260.document_vs_worksheet.edu_college_name" in keys
+    assert "ds260.document_vs_worksheet.edu_college_period" in keys
+
+
+def test_education_conflict_when_application_form_has_data_and_ds260_empty():
+    """Application Form có dữ liệu học vấn nhưng DS-260 trống -> phải tạo conflict."""
+    application = _rec(
+        {
+            "middle_school_name": "THCS NGUYEN TRAI",
+            "middle_school_period": "2006 - 2010",
+        },
+        "application_form",
+    )
+    worksheet = _rec(
+        {
+            "middle_school_name": "THCS NGUYEN TRAI",
+            "middle_school_period": "",
+        },
+        "ds260_customer_form",
+    )
+    rows = build_worksheet_conflict_rows([application, worksheet], {})
+    keys = {r["field_key"] for r in rows}
+    assert "ds260.document_vs_worksheet.edu_middle_school_period" in keys
+
+
+def test_apply_ds260_resolved_conflicts_with_empty_value():
+    """Khi user giải quyết conflict bằng cách chọn giá trị trống (""), hệ thống phải tôn trọng
+    và gán value="", không bị bỏ qua hay ghi đè."""
+    from app.services.ds260_conflicts import apply_ds260_resolved_conflicts
+    from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
+
+    sections = [
+        {
+            "id": "section_work_education",
+            "fields": [
+                {
+                    "key": "work_prior_jobs_used",
+                    "value": "Yes",
+                    "source": {},
+                },
+                {
+                    "key": "work_prior_jobs_history",
+                    "value": "From 2015 to 2018 at ABC Corp",
+                    "source": {"document_type": "application_form"},
+                },
+            ],
+        }
+    ]
+
+    resolutions = {
+        "ds260.document_vs_worksheet.work_prior_jobs_history": "",
+    }
+
+    apply_ds260_resolved_conflicts(sections, resolutions)
+    
+    # work_prior_jobs_history phải được gán rỗng
+    field_history = next(f for f in sections[0]["fields"] if f["key"] == "work_prior_jobs_history")
+    assert field_history["value"] == ""
+    assert field_history["source"]["derived"] == "worksheet_conflict_resolution"
+
+    # Khi reconcile Yes/No: work_prior_jobs_used phải chuyển thành "No"
+    reconcile_ds260_yesno_and_death_year(sections)
+    field_used = next(f for f in sections[0]["fields"] if f["key"] == "work_prior_jobs_used")
+    assert field_used["value"] == "No"
+
+
+

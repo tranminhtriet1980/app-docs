@@ -143,7 +143,7 @@
         {"key": "spouse_surname", "label": "Spouse's Surnames / HỌ của CHỒNG/VỢ", "document": "marriage_certificate", "field": "spouse_surname", "aliases": ["wife_surname", "husband_surname"]},
         {"key": "spouse_given_names", "label": "Spouse's Given Names / TÊN của CHỒNG/VỢ", "document": "marriage_certificate", "field": "spouse_given_names", "aliases": ["wife_given_names", "husband_given_names"]},
         {"key": "spouse_full_name", "label": "Spouse Full Name / Họ tên phối ngẫu", "document": "marriage_certificate", "field": "spouse_full_name", "aliases": ["spouse_name", "wife_full_name", "husband_full_name"], "review_hidden": true},
-        {"key": "spouse_date_of_birth", "label": "Date of Birth / Ngày tháng năm sinh", "document": "marriage_certificate", "field": "spouse_date_of_birth", "aliases": ["wife_date_of_birth", "husband_date_of_birth", "spouse_dob"]},
+        {"key": "spouse_date_of_birth", "label": "Date of Birth / Ngày tháng năm sinh", "document": "ds260_customer_form", "field": "spouse_date_of_birth", "aliases": ["spouse_dob", "wife_date_of_birth", "husband_date_of_birth"]},
         {"key": "spouse_birth_city", "label": "City of Birth / THÀNH PHỐ nơi sinh", "document": "marriage_certificate", "field": "birth_city", "aliases": ["wife_birth_city", "husband_birth_city", "wife_place_of_birth", "husband_place_of_birth"]},
         {"key": "spouse_birth_state", "label": "State/Province of Birth / TỈNH/BANG nơi sinh", "document": "marriage_certificate", "field": "birth_state", "aliases": ["wife_birth_state", "husband_birth_state", "wife_place_of_birth", "husband_place_of_birth"]},
         {"key": "spouse_birth_country", "label": "Country/Region of Birth / QUỐC GIA nơi sinh", "document": "marriage_certificate", "field": "birth_country", "aliases": ["wife_birth_country", "husband_birth_country", "wife_place_of_birth", "husband_place_of_birth"]},
@@ -172,7 +172,7 @@
         {"key": "previous_marriage_date", "label": "Date of previous marriage", "document": "divorce", "field": "marriage_date", "aliases": ["date_of_marriage"]},
         {"key": "divorce_husband_name", "label": "Husband Full Name (ly hôn)", "document": "divorce", "field": "husband_full_name", "aliases": ["husband_name"]},
         {"key": "divorce_wife_name", "label": "Wife Full Name (ly hôn)", "document": "divorce", "field": "wife_full_name", "aliases": ["wife_name"]},
-        {"key": "divorce_document_number", "label": "Divorce Document Number", "document": "divorce", "field": "document_number"}
+        {"key": "divorce_document_number", "label": "Divorce Document Number", "document": "divorce", "field": "document_number", "review_hidden": true}
       ]
     },
     {
@@ -263,9 +263,9 @@
       "fields": [
         {"key": "been_in_us", "label": "Have you ever been in the U.S? / Đã từng đến Mỹ?", "document": "ds260_customer_form", "field": "been_in_us", "aliases": ["ever_been_in_us", "us_travel_used"], "default": "No"},
         {"key": "us_travel_history", "label": "U.S travel details (date/duration — I-94) / Chi tiết (ngày đến, ở bao lâu)", "document": "ds260_customer_form", "field": "us_travel_history", "aliases": ["us_travel_detail", "i94_history"]},
-        {"key": "issued_us_visa", "label": "Have you ever been issued a U.S visa? / Đã từng được cấp visa Mỹ?", "document": "ds260_customer_form", "field": "issued_us_visa", "aliases": ["us_visa_issued_used", "ever_issued_us_visa"], "default": "No"},
+        {"key": "issued_us_visa", "label": "Have you ever been issued a U.S visa? / Đã từng được cấp visa Mỹ?", "document": "ds260_customer_form", "field": "issued_us_visa", "aliases": ["us_visa_issued_used", "ever_issued_us_visa"]},
         {"key": "us_visa_history", "label": "U.S visa details (type/date/number — VISA) / Chi tiết visa (loại, ngày cấp, số visa)", "document": "ds260_customer_form", "field": "us_visa_history", "aliases": ["us_visa_detail"]},
-        {"key": "refused_us_visa", "label": "Refused U.S visa / admission / withdrawn? / Bị từ chối visa/nhập cảnh?", "document": "ds260_customer_form", "field": "refused_us_visa", "aliases": ["us_visa_refused_used", "ever_refused_us_visa"], "default": "No"},
+        {"key": "refused_us_visa", "label": "Refused U.S visa / admission / withdrawn? / Bị từ chối visa/nhập cảnh?", "document": "ds260_customer_form", "field": "refused_us_visa", "aliases": ["us_visa_refused_used", "ever_refused_us_visa"]},
         {"key": "us_visa_refusal_history", "label": "Refusal details (visa type/date/reason) / Chi tiết (loại visa, ngày, lý do)", "document": "ds260_customer_form", "field": "us_visa_refusal_history", "aliases": ["us_visa_refusal_detail"]}
       ]
     },
@@ -321,7 +321,7 @@
       "title": "DS-260 E.2 — Additional Information / Thông tin khác",
       "subtitle": "Nguồn: DS-260 khách khai",
       "fields": [
-        {"key": "other_languages_used", "label": "Use other languages besides native? / Dùng ngôn ngữ khác?", "document": "ds260_customer_form", "field": "other_languages_used", "aliases": ["uses_other_languages"], "default": "No"},
+        {"key": "other_languages_used", "label": "Use other languages besides native? / Dùng ngôn ngữ khác?", "document": "ds260_customer_form", "field": "other_languages_used", "aliases": ["uses_other_languages"]},
         {"key": "other_languages", "label": "Languages list / Liệt kê ngôn ngữ", "document": "ds260_customer_form", "field": "other_languages", "aliases": ["languages_spoken", "other_languages_list"]},
         {"key": "traveled_countries_5yr_used", "label": "Traveled to other countries in last 5 years? / Du lịch nước nào trong 5 năm qua?", "document": "ds260_customer_form", "field": "traveled_countries_5yr_used", "aliases": ["traveled_last_5_years_used", "countries_visited_used"]},
         {"key": "traveled_countries_history", "label": "Countries visited (last 5 years) / Danh sách nước đã đến", "document": "ds260_customer_form", "field": "traveled_countries_history", "aliases": ["countries_visited_history", "travel_history_5_years"]}

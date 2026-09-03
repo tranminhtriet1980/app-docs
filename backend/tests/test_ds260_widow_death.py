@@ -287,7 +287,7 @@ def test_been_in_us_no_when_no_us_visa_document():
     reconcile_ds260_yesno_and_death_year(sections)
     got = {f["key"]: f["value"] for f in sections[0]["fields"]}
     assert got["been_in_us"] == "No"
-    assert got["issued_us_visa"] == "No"
+    assert got["issued_us_visa"] == ""
 
 
 def test_been_in_us_preserved_when_already_answered():

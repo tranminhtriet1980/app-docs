@@ -505,9 +505,12 @@ async def find_spouse_member_in_case(
     for m in members:
         if m.id == current.id:
             continue
-        if m.role == PersonRole.spouse.value:
+        if current.role == PersonRole.principal.value and m.role == PersonRole.spouse.value:
+            return m
+        if current.role == PersonRole.spouse.value and m.role == PersonRole.principal.value:
             return m
     return None
+
 
 
 def pick_child_birth_cert_for_person(
@@ -1016,6 +1019,109 @@ def enrich_child_parent_details_from_case(
             continue
         label = member.role
 
+        # Nếu member này là cha/mẹ của con (principal hoặc spouse hoặc child khác trong cây gia phả):
+        # 1. Đặt is_living = "Yes"
+        _force_ds260_field(
+            fields_out,
+            f"{parent}_is_living",
+            "Yes",
+            document_type="case_member",
+            source_field="is_living",
+            record_id=str(member.id),
+            derived=f"child_{parent}_living_from_member",
+        )
+
+        # 2. Lấy địa chỉ hiện tại của member đó (chủ hồ sơ / phối ngẫu)
+        member_ws = None
+        for r in records:
+            if r.doc_type == "ds260_customer_form":
+                from app.services.ds260_mapping import _worksheet_person_name
+                pname = _worksheet_person_name(r)
+                if pname and _names_same_person(pname, member.display_name):
+                    member_ws = r
+                    break
+        if not member_ws:
+            for r in records:
+                if r.doc_type == "application_form":
+                    from app.services.ds260_mapping import _person_name_on_record
+                    pname = _person_name_on_record(r)
+                    if pname and _names_same_person(pname, member.display_name):
+                        member_ws = r
+                        break
+        if not member_ws:
+            member_ws = next((r for r in records if r.doc_type == "ds260_customer_form"), None)
+
+        if member_ws:
+            m_rid = str(member_ws.id)
+            m_doc_type = member_ws.doc_type or "ds260_customer_form"
+            m_addr = _resolve_from_record(
+                member_ws, "current_address", ("address", "residential_address", "street_address")
+            )
+            m_city = _resolve_from_record(member_ws, "current_city", ("city", "address_city"))
+            m_state = _resolve_from_record(
+                member_ws, "current_state", ("state", "address_state", "province")
+            )
+            m_postal = _resolve_from_record(
+                member_ws, "postal_code", ("zip_code", "zip", "postal_code")
+            )
+            m_country = (
+                _resolve_from_record(
+                    member_ws, "current_country", ("country", "address_country")
+                )
+                or "Vietnam"
+            )
+
+            if m_addr:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_address",
+                    m_addr,
+                    document_type=m_doc_type,
+                    source_field="current_address",
+                    record_id=m_rid,
+                    derived=f"child_{parent}_address_from_{label}",
+                )
+            if m_city:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_city",
+                    m_city,
+                    document_type=m_doc_type,
+                    source_field="current_city",
+                    record_id=m_rid,
+                    derived=f"child_{parent}_city_from_{label}",
+                )
+            if m_state:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_state",
+                    m_state,
+                    document_type=m_doc_type,
+                    source_field="current_state",
+                    record_id=m_rid,
+                    derived=f"child_{parent}_state_from_{label}",
+                )
+            if m_postal:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_postal_code",
+                    m_postal,
+                    document_type=m_doc_type,
+                    source_field="postal_code",
+                    record_id=m_rid,
+                    derived=f"child_{parent}_postal_from_{label}",
+                )
+            if m_country:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_country",
+                    m_country,
+                    document_type=m_doc_type,
+                    source_field="current_country",
+                    record_id=m_rid,
+                    derived=f"child_{parent}_country_from_{label}",
+                )
+
         passport_rec, _ = pick_luong1_pair_for_person(records, "passport", member.display_name)
         if passport_rec:
             rid = str(passport_rec.id)
@@ -1155,16 +1261,10 @@ def enrich_child_parent_details_from_own_worksheet(
     parent: str,
     records: list[ApplicantDocRecord],
 ) -> None:
-    """Bổ sung ngày sinh/nơi sinh cha-mẹ từ CHÍNH worksheet DS-260 của người con (khách tự
+    """Bổ sung ngày sinh/nơi sinh/địa chỉ cha-mẹ từ CHÍNH worksheet DS-260 của người con (khách tự
     khai) — dùng khi các nguồn khác (hộ chiếu/GKS/ly hôn/kết hôn của cha-mẹ, nếu họ CŨNG là
     case member trong bộ hồ sơ) không có dữ liệu. Chạy SAU enrich_child_parent_details_from_case
     nên chỉ điền field còn trống — nguồn giấy tờ chính thức vẫn ưu tiên hơn worksheet khách khai.
-
-    Báo lỗi thực tế 2026-08-05: NGUYEN MINH PHUONG — worksheet "03_6 DS260 - NGUYEN MINH
-    PHUONG.pdf" ghi rõ City/State/Country of Birth của cả cha lẫn mẹ, nhưng DS-260 form vẫn để
-    trống các field này vì KHÔNG có luồng nào từng đọc tới worksheet của chính người con cho
-    mục cha/mẹ — enrich_child_parent_details_from_case chỉ đọc giấy tờ của member khác (cha/mẹ
-    nếu họ có mặt trong bộ hồ sơ như một người riêng), không đọc worksheet của chính đứa con.
     """
     from app.services.ds260_conflicts import pick_latest_by_variant
     from app.services.ds260_mapping import _resolve_from_record, pick_latest_record
@@ -1176,6 +1276,18 @@ def enrich_child_parent_details_from_own_worksheet(
         return
     rid = str(ws_rec.id)
 
+    is_living = _resolve_from_record(ws_rec, f"{parent}_is_living", ())
+    if is_living:
+        _fill_empty_parent_ds260_field(
+            fields_out,
+            f"{parent}_is_living",
+            is_living,
+            document_type="ds260_customer_form",
+            source_field=f"{parent}_is_living",
+            record_id=rid,
+            derived=f"child_{parent}_from_own_worksheet",
+        )
+
     dob = _resolve_from_record(ws_rec, f"{parent}_date_of_birth", ())
     _fill_empty_parent_ds260_field(
         fields_out,
@@ -1186,8 +1298,17 @@ def enrich_child_parent_details_from_own_worksheet(
         record_id=rid,
         derived=f"child_{parent}_from_own_worksheet",
     )
-    for suffix in ("birth_city", "birth_state", "birth_country"):
-        val = _resolve_from_record(ws_rec, f"{parent}_{suffix}", ())
+    for suffix, aliases in (
+        ("birth_city", ()),
+        ("birth_state", ()),
+        ("birth_country", ()),
+        ("address", (f"{parent}_address_line1", f"{parent}_current_address")),
+        ("city", (f"{parent}_current_city",)),
+        ("state", (f"{parent}_current_state", f"{parent}_province")),
+        ("postal_code", (f"{parent}_zip", f"{parent}_zip_code")),
+        ("country", (f"{parent}_current_country",)),
+    ):
+        val = _resolve_from_record(ws_rec, f"{parent}_{suffix}", aliases)
         _fill_empty_parent_ds260_field(
             fields_out,
             f"{parent}_{suffix}",

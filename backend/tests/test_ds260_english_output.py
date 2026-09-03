@@ -41,9 +41,20 @@ def test_sections_english_output_batch():
             "fields": [
                 {"key": "applicant_name", "value": "Nguyễn Văn A"},
                 {"key": "nationality", "value": "VIỆT NAM"},
+                {"key": "email", "value": "NguyenVanA.Work@Gmail.COM"},
+                {"key": "other_emails_history", "value": "OLD.EMAIL1@YAHOO.COM, Old2@OUTLOOK.COM"},
             ],
         }
     ]
     format_sections_english_output(sections)
     assert sections[0]["fields"][0]["value"] == "NGUYEN VAN A"
     assert sections[0]["fields"][1]["value"] == "Vietnamese"
+    assert sections[0]["fields"][2]["value"] == "nguyenvana.work@gmail.com"
+    assert sections[0]["fields"][3]["value"] == "old.email1@yahoo.com, old2@outlook.com"
+
+
+def test_email_normalization_single_field():
+    assert format_ds260_field_value("email", "Test.User@Domain.COM") == "test.user@domain.com"
+    assert format_ds260_field_value("other_emails_history", "ABC@XYZ.ORG") == "abc@xyz.org"
+    assert format_ds260_field_value("email", "N/A") == "N/A"
+

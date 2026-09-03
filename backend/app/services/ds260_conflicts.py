@@ -237,29 +237,34 @@ def spouse_worksheet_conflict_field_key(mapping_key: str, spouse_applicant_id: s
     return f"{DS260_CONFLICT_PREFIX}{SPOUSE_WORKSHEET_SEGMENT}.{spouse_applicant_id}.{mapping_key}"
 
 
-# Các trường thông tin phối ngẫu cần so sánh identity (nơi sinh, địa chỉ)
-# khi phối ngẫu CŨNG là applicant trong case. Map từ spouse_* (marriage cert / đương đơn's view)
+# Các trường thông tin phối ngẫu cần so sánh identity (họ tên, ngày sinh, nơi sinh, địa chỉ)
+# khi phối ngẫu CŨNG là applicant trong case. Map từ spouse_* (đương đơn's view / worksheet / marriage cert)
 # sang field key tương ứng trong spouse's DS-260 worksheet.
 # NOTE: spouse_occupation/occupation_other được xử lý riêng trong build_spouse_work_conflict_rows
 # vì cần cross-language matching (_work_values_match).
 SPOUSE_IDENTITY_COMPARE_KEYS: frozenset[str] = frozenset({
+    "spouse_surname",         # worksheet / marriage cert: spouse_surname → spouse's: family_name
+    "spouse_given_names",     # worksheet / marriage cert: spouse_given_names → spouse's: given_names
+    "spouse_date_of_birth",   # worksheet / spouse's docs: spouse_date_of_birth → spouse's: date_of_birth
     # Nơi sinh
     "spouse_birth_city",      # marriage cert: birth_city → spouse's: birth_city
     "spouse_birth_state",     # marriage cert: birth_state → spouse's: birth_state
     "spouse_birth_country",   # marriage cert: birth_country → spouse's: birth_country
-    # Địa chỉ hiện tại (trên marriage cert có thể ghi)
-    "spouse_address",         # marriage cert: address → spouse's: current_address
+    # Địa chỉ hiện tại (trên marriage cert / worksheet có thể ghi)
+    "spouse_address",         # marriage cert / worksheet: address → spouse's: current_address
 })
 
-# Map từ spouse_* key (marriage cert) sang field key tương ứng trong spouse's DS-260 worksheet.
-# Khi phối ngẫu điền DS-260 riêng, họ dùng các field name khác (birth_city thay vì spouse_birth_city,
-# current_address thay vì spouse_address).
+# Map từ spouse_* key sang field key tương ứng của phối ngẫu trong DS-260 / giấy tờ của họ.
 SPOUSE_TO_APPLICANT_KEY_MAP: dict[str, str] = {
+    "spouse_surname": "family_name",
+    "spouse_given_names": "given_names",
+    "spouse_date_of_birth": "date_of_birth",
     "spouse_birth_city": "birth_city",
     "spouse_birth_state": "birth_state",
     "spouse_birth_country": "birth_country",
     "spouse_address": "current_address",
 }
+
 
 
 def spouse_identity_conflict_field_key(mapping_key: str, spouse_applicant_id: str) -> str:
@@ -362,6 +367,9 @@ def norm_conflict_value(mapping_key: str, val: str) -> str:
             return parsed.isoformat()
     if mapping_key == "gender":
         return _norm_gender(val)
+    if "email" in (mapping_key or "").lower():
+        from app.services.ds260_normalize import normalize_email
+        return normalize_email(val)
     if _PHONE_COMPARE_KEY_RE.search(mapping_key or ""):
         normalized = _norm_phone(val)
         if normalized:
@@ -407,8 +415,8 @@ async def load_ds260_manual_overrides(
     out: dict[str, str] = {}
     for pf in result.scalars():
         val = (pf.field_value or "").strip()
-        if not val:
-            continue
+        # Chỉ skip nếu field không tồn tại, KHÔNG skip khi value = ""
+        # Empty string là giá trị hợp lệ (field đã bị xoá/chỉnh sửa về rỗng)
         key = pf.field_key
         if member_prefix and key.startswith(member_prefix):
             mapping_key = key[len(member_prefix) :]
@@ -436,7 +444,10 @@ def apply_ds260_manual_overrides(
             key = field.get("key", "")
             if key not in overrides:
                 continue
-            field["value"] = overrides[key]
+            val = overrides[key]
+            if "email" in key.lower() and (val or "").strip().upper() != "N/A":
+                val = val.lower().strip()
+            field["value"] = val
             source = field.setdefault("source", {})
             source["derived"] = "manual_override"
 
@@ -486,9 +497,9 @@ def apply_ds260_resolved_conflicts(
     chosen_by_field: dict[str, tuple[str, str]] = {}
 
     for fk, chosen in resolutions.items():
-        val = (chosen or "").strip()
-        if not val:
+        if chosen is None:
             continue
+        val = (chosen or "").strip()
         parsed = parse_ds260_conflict_key(fk)
         if not parsed:
             continue
@@ -503,9 +514,9 @@ def apply_ds260_resolved_conflicts(
 
     identity_keys = frozenset({"applicant_name", "date_of_birth", "passport_number", "gender"})
     for fk, chosen in resolutions.items():
-        val = (chosen or "").strip()
-        if not val:
+        if chosen is None:
             continue
+        val = (chosen or "").strip()
         parsed = parse_ds260_conflict_key(fk)
         if not parsed:
             continue
@@ -526,6 +537,7 @@ def apply_ds260_resolved_conflicts(
             if (
                 suffix in identity_keys
                 and person_name
+                and val
                 and not _names_same_person(val, person_name)
             ):
                 continue
@@ -553,7 +565,7 @@ async def load_ds260_field_resolutions(db: AsyncSession, applicant_id) -> dict[s
     )
     out: dict[str, str] = {}
     for c in result.scalars():
-        if c.resolved_value:
+        if c.resolved_value is not None:
             out[c.field_key] = c.resolved_value.strip()
     return out
 
@@ -794,6 +806,22 @@ _ADDRESS_COMPARE_KEYS = frozenset(
     {"current_address", "current_city", "current_state", "postal_code", "current_country"}
 )
 
+_EDUCATION_COMPARE_KEYS = frozenset(
+    {
+        "edu_middle_school_name",
+        "edu_middle_school_address",
+        "edu_middle_school_period",
+        "edu_high_school_name",
+        "edu_high_school_address",
+        "edu_high_school_period",
+        "edu_college_name",
+        "edu_college_address",
+        "edu_college_major",
+        "edu_college_period",
+    }
+)
+
+
 
 def _json_values_if_json_like(text: str) -> str:
     """Model OCR đôi khi trả prior_jobs_history dạng JSON list/dict thay vì câu văn thường (báo
@@ -1023,9 +1051,17 @@ def build_worksheet_conflict_rows(
     sync_ds260_doc_conflicts(). `member_suffix` ('01', '02'…) gắn vào field_key khi hồ sơ có
     từ 2 thành viên trở lên, để conflict của mỗi người không ghi đè lẫn nhau.
     """
+    from app.services.ds260_mapping import pick_latest_record
+
     ds260_present = any(r.doc_type == "ds260_customer_form" for r in records)
     if not ds260_present:
         return []
+
+    app_rec = (
+        pick_latest_by_variant(records, "application_form", "standard")
+        or pick_latest_by_variant(records, "application_form", "exception")
+        or pick_latest_record(records, "application_form")
+    )
 
     rows: list[dict[str, Any]] = []
     for mapping_key in sorted(WORKSHEET_COMPARE_KEYS):
@@ -1037,6 +1073,38 @@ def build_worksheet_conflict_rows(
             records, mapping_key, resolutions, member_suffix
         )
         worksheet_val, worksheet_rec = _worksheet_value(records, mapping_key)
+
+        is_edu = mapping_key in _EDUCATION_COMPARE_KEYS
+        if is_edu and app_rec:
+            official_rec = official_rec or app_rec
+            off_str = official_val.strip()
+            ws_str = worksheet_val.strip()
+            if not off_str and not ws_str:
+                continue
+            if off_str and ws_str:
+                if mapping_key.endswith("_period"):
+                    if norm_conflict_value(mapping_key, off_str) == norm_conflict_value(mapping_key, ws_str):
+                        continue
+                elif mapping_key.endswith("_major"):
+                    if norm_conflict_value(mapping_key, off_str) == norm_conflict_value(mapping_key, ws_str):
+                        continue
+                else:
+                    if norm_conflict_value(mapping_key, off_str) == norm_conflict_value(mapping_key, ws_str):
+                        continue
+                    elif _PLACE_SCHOOL_COMPARE_KEY_RE.search(mapping_key) and _place_or_school_values_match(off_str, ws_str):
+                        continue
+
+            rows.append(
+                {
+                    "field_key": fk,
+                    "value_a": _display_conflict_date(mapping_key, official_val),
+                    "document_a_id": official_rec.source_document_id if official_rec else None,
+                    "value_b": _display_conflict_date(mapping_key, worksheet_val),
+                    "document_b_id": worksheet_rec.source_document_id if worksheet_rec else None,
+                }
+            )
+            continue
+
         if not official_val.strip():
             continue
 
@@ -1232,13 +1300,12 @@ async def build_spouse_work_conflict_rows(
             continue
 
         # Tạo conflict row
+        m_rec = marriage_rec or marriage_ref
         rows.append(
             {
                 "field_key": fk,
                 "value_a": marriage_val,  # Giá trị từ marriage certificate
-                "document_a_id": (marriage_rec or marriage_ref).source_document_id
-                if marriage_rec or marriage_ref
-                else None,
+                "document_a_id": m_rec.source_document_id if m_rec else None,
                 "value_b": spouse_work_val,  # Giá trị từ spouse's DS-260 worksheet
                 "document_b_id": spouse_rec.source_document_id if spouse_rec else None,
             }
@@ -1303,46 +1370,50 @@ async def build_spouse_identity_conflict_rows(
     rows: list[dict[str, Any]] = []
 
     # So sánh từng trường trong SPOUSE_IDENTITY_COMPARE_KEYS
-    for spouse_key in SPOUSE_IDENTITY_COMPARE_KEYS:
-        # Giá trị từ marriage certificate (cách enrich_spouse_section_from_marriage sử dụng)
-        if spouse_key == "spouse_birth_city":
-            marriage_val = _spouse_field_from_marriage(
-                marriage_rec, passport_rec, "birth_city",
-                marriage_ref=marriage_ref, passport_ref=None
-            )
-        elif spouse_key == "spouse_birth_state":
-            marriage_val = _spouse_field_from_marriage(
-                marriage_rec, passport_rec, "birth_state",
-                marriage_ref=marriage_ref, passport_ref=None
-            )
-        elif spouse_key == "spouse_birth_country":
-            marriage_val = _spouse_field_from_marriage(
-                marriage_rec, passport_rec, "birth_country",
-                marriage_ref=marriage_ref, passport_ref=None
-            )
-        elif spouse_key == "spouse_address":
-            marriage_val = _spouse_field_from_marriage(
-                marriage_rec, passport_rec, "address",
-                marriage_ref=marriage_ref, passport_ref=None
-            )
-        else:
-            marriage_val = ""
-        marriage_val = (marriage_val or "").strip()
+    for spouse_key in sorted(SPOUSE_IDENTITY_COMPARE_KEYS):
+        val_a = ""
+        doc_a_id = None
+        # 1. Thử lấy từ worksheet của đương đơn
+        ws_val, ws_rec = _worksheet_value(records, spouse_key)
+        if ws_val.strip():
+            val_a = ws_val.strip()
+            doc_a_id = ws_rec.source_document_id if ws_rec else None
 
-        if not marriage_val:
+        # 2. Nếu worksheet không có hoặc rỗng, thử từ marriage certificate
+        if not val_a:
+            if spouse_key == "spouse_surname":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "surname", marriage_ref=marriage_ref)
+            elif spouse_key == "spouse_given_names":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "given_names", marriage_ref=marriage_ref)
+            elif spouse_key == "spouse_birth_city":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "birth_city", marriage_ref=marriage_ref)
+            elif spouse_key == "spouse_birth_state":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "birth_state", marriage_ref=marriage_ref)
+            elif spouse_key == "spouse_birth_country":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "birth_country", marriage_ref=marriage_ref)
+            elif spouse_key == "spouse_address":
+                val_a = _spouse_field_from_marriage(marriage_rec, passport_rec, "address", marriage_ref=marriage_ref)
+            val_a = val_a.strip()
+            m_doc = marriage_rec or marriage_ref
+            if val_a and m_doc:
+                doc_a_id = m_doc.source_document_id
+
+        if not val_a:
             continue
 
-        # Map sang field key tương ứng trong spouse's DS-260 worksheet
+        # Map sang field key tương ứng trong hồ sơ của spouse
         spouse_ds260_key = SPOUSE_TO_APPLICANT_KEY_MAP.get(spouse_key)
         if not spouse_ds260_key:
             continue
 
-        # Lấy giá trị từ spouse's DS-260 worksheet
-        spouse_ds260_val, spouse_rec = _worksheet_value(spouse_records, spouse_ds260_key)
-        spouse_ds260_val = (spouse_ds260_val or "").strip()
+        # Lấy giá trị từ spouse's official docs hoặc worksheet
+        spouse_val, spouse_doc_rec = _official_value_for_worksheet_compare(spouse_records, spouse_ds260_key, resolutions)
+        if not spouse_val.strip():
+            spouse_val, spouse_doc_rec = _worksheet_value(spouse_records, spouse_ds260_key)
+        spouse_val = spouse_val.strip()
 
-        # Nếu spouse's DS-260 cũng trống → không có gì để so sánh
-        if not spouse_ds260_val:
+        # Nếu spouse records cũng trống → không có gì để so sánh
+        if not spouse_val:
             continue
 
         fk = spouse_identity_conflict_field_key(spouse_key, str(spouse_app.id))
@@ -1350,19 +1421,19 @@ async def build_spouse_identity_conflict_rows(
             continue
 
         # So sánh 2 giá trị
-        if norm_conflict_value(spouse_key, marriage_val) == norm_conflict_value(spouse_key, spouse_ds260_val):
+        if norm_conflict_value(spouse_key, val_a) == norm_conflict_value(spouse_key, spouse_val):
+            continue
+        if _PLACE_SCHOOL_COMPARE_KEY_RE.search(spouse_key) and _place_or_school_values_match(val_a, spouse_val):
             continue
 
         # Tạo conflict row
         rows.append(
             {
                 "field_key": fk,
-                "value_a": marriage_val,  # Giá trị từ marriage certificate
-                "document_a_id": (marriage_rec or marriage_ref).source_document_id
-                if marriage_rec or marriage_ref
-                else None,
-                "value_b": spouse_ds260_val,  # Giá trị từ spouse's DS-260 worksheet
-                "document_b_id": spouse_rec.source_document_id if spouse_rec else None,
+                "value_a": _display_conflict_date(spouse_key, val_a),
+                "document_a_id": doc_a_id,
+                "value_b": _display_conflict_date(spouse_key, spouse_val),
+                "document_b_id": spouse_doc_rec.source_document_id if spouse_doc_rec else None,
             }
         )
 
@@ -1444,6 +1515,9 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     from app.services.family_case import group_doc_records_by_member
     from app.services.identity_conflicts import build_identity_outlier_conflict_rows
 
+    # Khởi tạo desired TRƯỚC KHI sử dụng (bug fix: trước đây dùng trước khi khai báo)
+    desired: dict[str, dict] = {}
+
     # So sánh work/education của phối ngẫu: marriage certificate vs spouse's DS-260 worksheet
     # (khi phối ngẫu CŨNG là applicant trong case).
     for row in await build_spouse_work_conflict_rows(db, applicant_id, records, resolutions):
@@ -1456,8 +1530,6 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
 
     member_groups = await group_doc_records_by_member(db, applicant_id, records)
     multi_member = len(member_groups) > 1
-
-    desired: dict[str, dict] = {}
     for member_number, group_records in member_groups.items():
         suffix = member_number if multi_member else None
         for row in _sync_document_exception_conflicts(group_records, resolutions, suffix):
