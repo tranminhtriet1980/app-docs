@@ -74,12 +74,6 @@ function memberRoleLabel(role: CaseMember["role"]) {
   return "Con";
 }
 
-const CHILD_SKIP_DS260_SECTIONS = new Set([
-  "section_spouse",
-  "section_divorce",
-  "section_previous_spouse",
-]);
-
 // Các section này chỉ dùng nội bộ để điền DS-260/export, không hiển thị trên Review UI.
 const ALWAYS_HIDDEN_DS260_SECTIONS = new Set([
   "section_birth_certificate",
@@ -96,11 +90,7 @@ function memberPanelClass(role: CaseMember["role"]) {
 }
 
 function visibleDs260Sections(sections: Ds260Form["sections"], role: CaseMember["role"]) {
-  let visible = sections.filter((sec) => !ALWAYS_HIDDEN_DS260_SECTIONS.has(sec.id));
-  if (role === "child" || role === "grandchild") {
-    visible = visible.filter((sec) => !CHILD_SKIP_DS260_SECTIONS.has(sec.id));
-  }
-  return visible;
+  return sections.filter((sec) => !ALWAYS_HIDDEN_DS260_SECTIONS.has(sec.id));
 }
 
 type ConflictResolveModalState = {
