@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -94,20 +95,11 @@ DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         extract_keys=(
             "full_name", "date_of_birth", "place_of_birth", "gender",
             "father_name", "father_surname", "father_given_names",
-            "father_date_of_birth", "father_birth_city", "father_place_of_birth",
-            "father_birth_state", "father_birth_country",
+            "father_date_of_birth", "father_dob", "father_year_of_birth",
+            "father_address", "father_residence", "father_nationality",
             "mother_name", "mother_surname", "mother_given_names", "mother_full_name",
             "mother_date_of_birth", "mother_dob", "mother_year_of_birth",
-            "mother_birth_city", "mother_city",
-            "mother_place_of_birth", "mother_address", "mother_residence",
-            "mother_birth_country", "mother_country", "mother_nationality",
-            "mother_birth_state",
-            "father_name", "father_surname", "father_given_names", "father_full_name",
-            "father_date_of_birth", "father_dob", "father_year_of_birth",
-            "father_birth_city", "father_city",
-            "father_place_of_birth", "father_address", "father_residence",
-            "father_birth_country", "father_country", "father_nationality",
-            "father_birth_state",
+            "mother_address", "mother_residence", "mother_nationality",
             "registration_number",
         ),
         profile_keys=(
@@ -291,6 +283,39 @@ SUPPLEMENTAL_DOCUMENT_REGISTRY: tuple[DocTypeDef, ...] = (
         ),
         profile_keys=(),
     ),
+    # Phiếu mô tả & danh sách hồ sơ — checklist thành viên và giấy tờ
+    DocTypeDef(
+        code="document_checklist",
+        display_name="Phiếu mô tả & danh sách hồ sơ",
+        filename_tokens=(
+            "phieu mo ta & danh sach ho so",
+            "phieu mo ta danh sach ho so",
+            "phieu mo ta va danh sach ho so",
+            "phieu mo ta ho so",
+            "phieu mo ta",
+            "danh sach ho so",
+            "checklist ho so",
+            "document checklist",
+            "case document checklist",
+            "checklist",
+            "bang ke giay to",
+            "bảng kê giấy tờ",
+            "phiếu mô tả & danh sách hồ sơ",
+            "phiếu mô tả danh sách hồ sơ",
+            "phiếu mô tả",
+            "danh sách hồ sơ",
+        ),
+        form_section="Phiếu mô tả & danh sách hồ sơ (Checklist)",
+        extract_keys=(
+            "applicant_name",
+            "spouse_name",
+            "children_count",
+            "children_names",
+            "checklist_data",
+            "notes",
+        ),
+        profile_keys=(),
+    ),
 )
 
 RECORDABLE_REGISTRY_BY_CODE: dict[str, DocTypeDef] = {
@@ -321,10 +346,21 @@ CANONICAL_FILENAME_EXAMPLES["us_visa"] = {
     "standard": "US Visa",
     "exception": f"US Visa{EXCEPTION_SUFFIX}",
 }
+CANONICAL_FILENAME_EXAMPLES["document_checklist"] = {
+    "standard": "Phiếu mô tả & danh sách hồ sơ",
+    "exception": f"Phiếu mô tả & danh sách hồ sơ{EXCEPTION_SUFFIX}",
+}
+
+
+def _strip_accents(s: str) -> str:
+    s = unicodedata.normalize("NFD", s)
+    s = re.sub(r"[\u0300-\u036f]", "", s)
+    s = s.replace("đ", "d").replace("Đ", "d")
+    return unicodedata.normalize("NFC", s).lower()
 
 
 def _normalize_stem(filename: str) -> str:
-    stem = Path(filename).stem.lower()
+    stem = unicodedata.normalize("NFC", Path(filename).stem.lower())
     stem = re.sub(r"[_\-]+", " ", stem)
     stem = re.sub(r"\s+", " ", stem).strip()
     return stem
@@ -338,9 +374,13 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
     — cùng doc_type với bản standard; DS260 lấy bản mới nhất khi fill.
     """
     stem = _normalize_stem(filename)
-    is_exception = bool(re.search(r"\bnew$", stem) or stem.endswith(" new"))
+    stem_clean = _strip_accents(stem)
+    is_exception = bool(
+        re.search(r"\bnew$", stem) or stem.endswith(" new") or stem_clean.endswith(" new")
+    )
     if is_exception:
         stem = re.sub(r"\s+new$", "", stem).strip()
+        stem_clean = re.sub(r"\s+new$", "", stem_clean).strip()
 
     # DS-260 worksheet khách khai — luôn nguồn đối chiếu (exception)
     if re.search(r"\bds[\s\-]?260\b", stem) or stem.replace(" ", "") == "ds260":
@@ -356,10 +396,20 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
         return "application_form", is_exception
 
     # US Visa (dán trong passport, có entry stamp Mỹ) — standard + _new
-    if re.search(r"\bus\s+visa\b", stem) or "visa my" in stem or "visa usa" in stem or "visa mỹ" in stem:
+    if re.search(r"\bus\s+visa\b", stem) or "visa my" in stem_clean or "visa usa" in stem or "visa my" in stem:
         return "us_visa", is_exception
     if re.search(r"\bentry\s+stamp\b", stem) or "entry stamp" in stem:
         return "us_visa", is_exception
+
+    # Phiếu mô tả & danh sách hồ sơ (Checklist)
+    if (
+        "phieu mo ta" in stem_clean
+        or "danh sach ho so" in stem_clean
+        or "checklist" in stem_clean
+        or "bang ke giay to" in stem_clean
+        or "bang ke" in stem_clean
+    ):
+        return "document_checklist", is_exception
 
     # Longer tokens first (birth certificate child before birth certificate)
     # Quét cả SUPPLEMENTAL registry để bắt token "application" từ application_form
@@ -367,7 +417,8 @@ def parse_document_filename(filename: str) -> tuple[str | None, bool]:
     ranked = sorted(all_defs, key=lambda d: max(len(t) for t in d.filename_tokens), reverse=True)
     for defn in ranked:
         for token in defn.filename_tokens:
-            if token in stem:
+            token_clean = _strip_accents(token)
+            if token in stem or token_clean in stem_clean:
                 return defn.code, is_exception
     return None, is_exception
 

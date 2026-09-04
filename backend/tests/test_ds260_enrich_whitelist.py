@@ -23,14 +23,13 @@ def _rec(raw: dict, doc_type: str, *, variant: str = "standard") -> SimpleNamesp
 
 
 def test_passport_number_whitelist_excludes_judicial_and_divorce():
-    assert set(FIELD_ALLOWED_DOCS["passport_number"]) == {"passport", "ds260_customer_form"}
+    assert set(FIELD_ALLOWED_DOCS["passport_number"]) == {"passport"}
     assert "judicial_certificate" not in FIELD_ALLOWED_DOCS["passport_number"]
     assert "divorce" not in FIELD_ALLOWED_DOCS["passport_number"]
 
 
-def test_passport_number_fills_from_worksheet_when_passport_scan_missing_it():
-    """Ảnh passport OCR thiếu/sai số hộ chiếu nhưng khách đã khai đúng trong worksheet DS-260
-    → vẫn phải lấy được (báo lỗi thực tế 2026-08-17: field bị khóa cứng chỉ nhận từ ảnh passport)."""
+def test_passport_number_does_not_fill_from_worksheet():
+    """Thông tin Passport / Personal strictly lấy từ passport, không tự lấy từ worksheet."""
     worksheet = _rec({"passport_number": "B1234567"}, "ds260_customer_form")
     sections = [
         {
@@ -39,12 +38,12 @@ def test_passport_number_fills_from_worksheet_when_passport_scan_missing_it():
         }
     ]
     enrich_empty_fields_from_all_doc_records(sections, [worksheet], {})
-    assert sections[0]["fields"][0]["value"] == "B1234567"
+    assert sections[0]["fields"][0]["value"] == ""
 
 
 def test_passport_number_worksheet_fallback_ignores_unrelated_document_number():
     """Worksheet chứa document_number của MỤC LY HÔN (không phải hộ chiếu) — không được lọt
-    vào passport_number dù ds260_customer_form giờ đã nằm trong whitelist."""
+    vào passport_number."""
     worksheet = _rec(
         {"document_number": "DIV-555", "divorce_date": "2020-01-01"},
         "ds260_customer_form",
@@ -59,12 +58,8 @@ def test_passport_number_worksheet_fallback_ignores_unrelated_document_number():
     assert sections[0]["fields"][0]["value"] == ""
 
 
-def test_nationality_allows_passport_and_birth_certificate():
-    assert set(FIELD_ALLOWED_DOCS["nationality"]) == {
-        "passport",
-        "birth_certificate",
-        "ds260_customer_form",
-    }
+def test_nationality_allows_passport_only():
+    assert set(FIELD_ALLOWED_DOCS["nationality"]) == {"passport"}
 
 
 def test_phone_and_email_allow_worksheet_and_application_form():

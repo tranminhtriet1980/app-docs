@@ -127,18 +127,18 @@ def test_enrich_uses_ds260_when_no_official_source():
         doc_type="ds260_customer_form",
         variant="exception",
         source_document_id=uuid4(),
-        form_data=json.dumps({"applicant_name": "ONLY ON WORKSHEET"}),
-        raw_data=json.dumps({"applicant_name": "ONLY ON WORKSHEET"}),
+        form_data=json.dumps({"current_address": "123 LE LOI"}),
+        raw_data=json.dumps({"current_address": "123 LE LOI"}),
         updated_at=None,
     )
     sections = [
         {
-            "id": "section_a_personal",
-            "fields": [{"key": "applicant_name", "value": "", "source": {}}],
+            "id": "section_address",
+            "fields": [{"key": "current_address", "value": "", "source": {}}],
         }
     ]
     enrich_empty_fields_from_all_doc_records(sections, [ds260], {})
     field = sections[0]["fields"][0]
-    assert field["value"] == "ONLY ON WORKSHEET"
+    assert field["value"] == "123 LE LOI"
     assert field["source"]["document_type"] == "ds260_customer_form"
     assert field["source"]["derived"] == "ds260_worksheet_fill"

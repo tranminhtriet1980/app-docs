@@ -74,9 +74,6 @@ WORKSHEET_COMPARE_KEYS: frozenset[str] = frozenset(
         "birth_state",
         "birth_country",
         "id_card_number",
-        "passport_number",
-        "passport_issue_date",
-        "passport_expiration_date",
         "current_marital_status",
         "current_address",
         "current_city",
@@ -521,6 +518,32 @@ def apply_ds260_resolved_conflicts(
         if not parsed:
             continue
         seg, suffix = parsed
+        if seg == CHILD_IDENTITY_SEGMENT:
+            child_slug, _, field_name = suffix.rpartition(".")
+            if person_name and _slugify_child_name(person_name) == child_slug:
+                if field_name in mappings:
+                    chosen_by_field[field_name] = (val, "child_identity_conflict_resolution")
+            continue
+        if seg == CHILD_PARENT_IDENTITY_SEGMENT:
+            parts = suffix.split(".")
+            if len(parts) >= 3:
+                child_slug, parent_role, parent_field = parts[0], parts[1], parts[2]
+                if person_name and _slugify_child_name(person_name) == child_slug:
+                    target_key = f"{parent_role}_{parent_field}"
+                    if target_key in mappings:
+                        chosen_by_field[target_key] = (val, "child_parent_identity_conflict_resolution")
+            continue
+        if seg in (SPOUSE_WORKSHEET_SEGMENT, SPOUSE_IDENTITY_SEGMENT):
+            parts = suffix.split(".", 1)
+            mapping_key = parts[1] if len(parts) > 1 else ""
+            if member_role in (None, "principal"):
+                if mapping_key in mappings:
+                    chosen_by_field[mapping_key] = (val, "spouse_conflict_resolution")
+            elif member_role == "spouse":
+                work_key = _SPOUSE_TO_WORK_KEY_MAP.get(mapping_key, mapping_key)
+                if work_key in mappings:
+                    chosen_by_field[work_key] = (val, "spouse_conflict_resolution")
+            continue
         if seg != WORKSHEET_CONFLICT_SEGMENT:
             continue
         suffix, suffix_member = strip_member_suffix(suffix)
@@ -542,6 +565,26 @@ def apply_ds260_resolved_conflicts(
             ):
                 continue
         chosen_by_field[suffix] = (val, "worksheet_conflict_resolution")
+
+    for sec in sections_out:
+        if sec.get("id") == "section_children":
+            child_names_by_slot: dict[int, str] = {}
+            for f in sec.get("fields", []):
+                m = re.match(r"^child_(\d+)_full_name$", f.get("key", ""))
+                if m:
+                    child_names_by_slot[int(m.group(1))] = (f.get("value") or "").strip()
+            for fk, chosen in resolutions.items():
+                if chosen is None:
+                    continue
+                val = (chosen or "").strip()
+                parsed = parse_ds260_conflict_key(fk)
+                if not parsed or parsed[0] != CHILD_IDENTITY_SEGMENT:
+                    continue
+                child_slug, _, field_name = parsed[1].rpartition(".")
+                for slot_idx, c_name in child_names_by_slot.items():
+                    if c_name and _slugify_child_name(c_name) == child_slug:
+                        target_k = f"child_{slot_idx}_{field_name}"
+                        chosen_by_field[target_k] = (val, "child_identity_conflict_resolution")
 
     for sec in sections_out:
         for field in sec.get("fields", []):
@@ -900,6 +943,12 @@ def _place_or_school_values_match(a: str, b: str) -> bool:
     """CONTAINMENT (không phải Jaccard đầy đủ): 1 bên có thể ghi chi tiết hơn bên kia (vd. có
     thêm tên tỉnh) mà vẫn là cùng 1 địa danh/trường — chỉ cần bên NGẮN HƠN nằm phần lớn trong
     bên kia là đủ, không cần cả 2 bên tương đồng kích thước."""
+    # Nếu có chứa số nhà/số hiệu (chữ số) và dãy số giữa 2 bên khác nhau -> là địa chỉ khác nhau (Conflict)
+    nums_a = re.findall(r"\d+", a)
+    nums_b = re.findall(r"\d+", b)
+    if nums_a and nums_b and nums_a != nums_b:
+        return False
+
     from app.services.birth_location import place_or_school_identity_tokens
 
     a_tokens = place_or_school_identity_tokens(a)
@@ -1478,6 +1527,106 @@ def _get_spouse_name_from_marriage(
     return spouse_name.strip()
 
 
+async def build_child_not_living_with_parent_address_conflict_rows(
+    db: AsyncSession, applicant_id, records: list[ApplicantDocRecord], resolutions: dict[str, str]
+) -> list[dict[str, Any]]:
+    """
+    Khi đương đơn chính khai con không sống cùng ('Child Lives with you' = 'No'):
+    Đối chiếu 'Child Current address if not with you' (trên worksheet của đương đơn chính)
+    với 'Current Address' mà đứa con tự khai trong DS-260 worksheet của chính bé.
+    Nếu khác nhau -> tạo Conflict.
+    """
+    from app.services.family_case import load_case_members
+    from app.services.ds260_mapping import (
+        _child_data_from_worksheet,
+        _names_same_person,
+        _same_child,
+        _merge_raw_dict,
+        scope_worksheets_to_person,
+    )
+    members = await load_case_members(db, applicant_id)
+    if len(members) < 2:
+        return []
+
+    principal = next(
+        (
+            m
+            for m in members
+            if getattr(getattr(m, "role", None), "value", str(getattr(m, "role", ""))) == "principal"
+        ),
+        None,
+    )
+    if not principal:
+        return []
+
+    principal_ws_records = scope_worksheets_to_person(records, principal.display_name, is_family_case=True)
+    principal_ws = pick_latest_by_variant(principal_ws_records, "ds260_customer_form", "exception") or (
+        principal_ws_records[0] if principal_ws_records else None
+    )
+    if not principal_ws:
+        return []
+
+    child_slots = _child_data_from_worksheet(principal_ws)
+    rows: list[dict[str, Any]] = []
+
+    for member in members:
+        role_val = getattr(getattr(member, "role", None), "value", str(getattr(member, "role", "")))
+        if role_val not in ("child", "grandchild"):
+            continue
+        matched_slot = next(
+            (
+                s
+                for s in child_slots
+                if _same_child(s, {"full_name": member.display_name})
+                or _names_same_person(s.get("full_name") or "", member.display_name)
+            ),
+            None,
+        )
+        if not matched_slot:
+            continue
+        lives_with = (matched_slot.get("lives_with") or "").strip().lower()
+        if lives_with in ("yes", "có", "co", "true", "1", "y"):
+            continue
+
+        parent_declared_addr = (matched_slot.get("current_address") or "").strip()
+        if not parent_declared_addr:
+            continue
+
+        # Tìm worksheet của bé
+        child_ws_records = scope_worksheets_to_person(records, member.display_name, is_family_case=True)
+        child_ws = pick_latest_by_variant(child_ws_records, "ds260_customer_form", "exception") or (
+            child_ws_records[0] if child_ws_records else None
+        )
+        if not child_ws:
+            continue
+        child_ws_data = _merge_raw_dict(child_ws)
+        child_declared_addr = (child_ws_data.get("current_address") or "").strip()
+        if not child_declared_addr:
+            continue
+
+        if norm_conflict_value("current_address", parent_declared_addr) == norm_conflict_value("current_address", child_declared_addr):
+            continue
+        if _place_or_school_values_match(parent_declared_addr, child_declared_addr):
+            continue
+
+        norm_name = _slugify_child_name(member.display_name)
+        fk = f"{DS260_CONFLICT_PREFIX}child_address_not_with_parent.{norm_name}.current_address"
+        if fk in resolutions:
+            continue
+
+        rows.append(
+            {
+                "field_key": fk,
+                "value_a": parent_declared_addr,
+                "document_a_id": principal_ws.source_document_id if principal_ws else None,
+                "value_b": child_declared_addr,
+                "document_b_id": child_ws.source_document_id if child_ws else None,
+            }
+        )
+
+    return rows
+
+
 async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
     """
     So sánh:
@@ -1493,6 +1642,7 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
        spouse_worksheet (khi phối ngẫu CŨNG là applicant trong case)
     7) TẤT CẢ thông tin phối ngẫu (nơi sinh, địa chỉ, nghề nghiệp): marriage certificate vs
        spouse's DS-260 worksheet — spouse_identity (khi phối ngẫu CŨNG là applicant)
+    8) Địa chỉ con không sống cùng cha mẹ: parent's DS-260 vs child's DS-260
 
     Upsert theo field_key (KHÔNG xoá-hết-rồi-tạo-lại): sync chạy lại sau MỖI lần OCR xong
     một file, kể cả khi nội dung không đổi — xoá/tạo lại toàn bộ sẽ cấp UUID mới cho conflict
@@ -1536,11 +1686,13 @@ async def sync_ds260_doc_conflicts(db: AsyncSession, applicant_id) -> int:
             desired[row["field_key"]] = row
         for row in build_worksheet_conflict_rows(group_records, resolutions, suffix):
             desired[row["field_key"]] = row
-        for row in build_child_identity_conflict_rows(group_records, resolutions):
-            desired[row["field_key"]] = row
+    for row in build_child_identity_conflict_rows(records, resolutions):
+        desired[row["field_key"]] = row
     for row in await build_identity_outlier_conflict_rows(db, applicant_id, resolutions):
         desired[row["field_key"]] = row
     for row in await build_child_parent_identity_conflict_rows(db, applicant_id, resolutions):
+        desired[row["field_key"]] = row
+    for row in await build_child_not_living_with_parent_address_conflict_rows(db, applicant_id, records, resolutions):
         desired[row["field_key"]] = row
 
     open_result = await db.execute(

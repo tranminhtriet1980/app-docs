@@ -19,6 +19,7 @@ DOCUMENT_TYPES = [
     "application_form",
     "address_document",
     "ds260_customer_form",
+    "document_checklist",
     "photo",
     "other",
 ]
@@ -42,6 +43,7 @@ SOURCE_PRIORITY = [
     "application_form",
     "address_document",
     "ds260_customer_form",
+    "document_checklist",
     "other",
 ]
 
