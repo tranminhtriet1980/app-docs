@@ -448,6 +448,9 @@ async def get_ds260_conflicts(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Xung đột Luồng 1 vs _new và Luồng 1 vs DS-260 worksheet."""
+    from app.services.ds260_conflicts import sync_ds260_doc_conflicts
+
+    await sync_ds260_doc_conflicts(db, applicant.id)
     conflicts = await list_open_ds260_conflicts(db, applicant.id)
     doc_ids = {c.document_a_id for c in conflicts if c.document_a_id} | {
         c.document_b_id for c in conflicts if c.document_b_id

@@ -193,9 +193,10 @@ def test_worksheet_fills_passport_and_father_gaps():
     personal = {f["key"]: f["value"] for f in sections[0]["fields"]}
     passport = {f["key"]: f["value"] for f in sections[1]["fields"]}
     father = {f["key"]: f["value"] for f in sections[2]["fields"]}
-    assert personal["applicant_name"] == "NGUYEN VAN A"
-    assert personal["date_of_birth"] == "1990-01-15"
-    assert passport["passport_number"] == "B9999999"
+    # Section A.1 Personal & Passport are strictly from passport only (do not take from worksheet)
+    assert personal["applicant_name"] == ""
+    assert personal["date_of_birth"] == ""
+    assert passport["passport_number"] == ""
     assert father["father_surname"] == "NGUYEN"
     assert sections[3]["fields"][0]["value"] == "123 LE LOI"
     mappings = flatten_ds260_mappings()

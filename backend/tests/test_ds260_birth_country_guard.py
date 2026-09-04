@@ -87,7 +87,7 @@ def test_guard_runs_in_prepare_display_values():
 def test_boilerplate_defaults_present_in_schema():
     mappings = flatten_ds260_mappings()
     # Câu hỏi cố định phải có default để không bị bỏ trống khi AI đọc sót.
-    assert mappings["been_in_us"].default == "No"
+    assert mappings["been_in_us"].default is None
     assert mappings["issued_us_visa"].default is None
     assert mappings["refused_us_visa"].default is None
     assert mappings["other_languages_used"].default is None
@@ -101,7 +101,7 @@ def test_boilerplate_defaults_present_in_schema():
 
 
 def test_unanswered_questions_stay_empty_when_not_declared():
-    """other_languages_used, traveled_countries_5yr_used, issued_us_visa, refused_us_visa:
+    """other_languages_used, traveled_countries_5yr_used, issued_us_visa, refused_us_visa, been_in_us:
     nếu khách để trống không khai thì hệ thống cũng để trống, không tự động khai No.
     """
     from app.services.ds260_mapping import (
@@ -130,7 +130,7 @@ def test_unanswered_questions_stay_empty_when_not_declared():
     assert by_key["traveled_countries_5yr_used"] == ""
     assert by_key["issued_us_visa"] == ""
     assert by_key["refused_us_visa"] == ""
-    assert by_key["been_in_us"] == "No"
+    assert by_key["been_in_us"] == ""
 
 
 

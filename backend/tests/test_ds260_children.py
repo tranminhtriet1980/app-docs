@@ -628,3 +628,82 @@ def test_parent_worksheet_scoped_in_family_case_with_child_worksheet():
     assert by_key["child_2_full_name"] == "NGUYEN MINH PHUONG"
 
 
+def test_build_child_identity_conflict_rows_multiple_worksheets():
+    bc1 = _rec(
+        {"child_full_name": "NGUYEN VAN A", "child_date_of_birth": "2005-05-10"},
+        "birth_certificate_child",
+        rec_id="bc1",
+    )
+    bc2 = _rec(
+        {"child_full_name": "NGUYEN VAN B", "child_date_of_birth": "2008-08-20"},
+        "birth_certificate_child",
+        rec_id="bc2",
+    )
+    ws = _rec(
+        {
+            "child_1_full_name": "NGUYEN VAN A",
+            "child_1_date_of_birth": "2005-05-12",  # Different DOB
+            "child_2_full_name": "NGUYEN VAN B",
+            "child_2_date_of_birth": "2008-08-20",  # Same DOB
+        },
+        "ds260_customer_form",
+        variant="exception",
+        rec_id="ws",
+    )
+    rows = build_child_identity_conflict_rows([bc1, bc2, ws], resolutions={})
+    assert len(rows) == 1
+    assert rows[0]["field_key"] == "ds260.child_identity.NGUYEN_VAN_A.date_of_birth"
+    assert rows[0]["value_a"] == "10/05/2005"
+    assert rows[0]["value_b"] == "12/05/2005"
+
+
+def test_apply_child_identity_conflict_resolution():
+    from app.services.ds260_conflicts import apply_ds260_resolved_conflicts
+
+    # Principal section_children
+    sections_principal = [
+        {
+            "id": "section_children",
+            "fields": [
+                {"key": "child_1_full_name", "value": "NGUYEN VAN A", "source": {}},
+                {"key": "child_1_date_of_birth", "value": "10/05/2005", "source": {}},
+                {"key": "child_2_full_name", "value": "NGUYEN VAN B", "source": {}},
+                {"key": "child_2_date_of_birth", "value": "20/08/2008", "source": {}},
+            ],
+        }
+    ]
+    resolutions = {
+        "ds260.child_identity.NGUYEN_VAN_A.date_of_birth": "12/05/2005",
+    }
+    apply_ds260_resolved_conflicts(
+        sections_principal,
+        resolutions,
+        person_name="NGUYEN PHU HUYNH",
+        member_role="principal",
+        member_number="01",
+    )
+    fields_map = {f["key"]: f["value"] for f in sections_principal[0]["fields"]}
+    assert fields_map["child_1_date_of_birth"] == "12/05/2005"
+    assert fields_map["child_2_date_of_birth"] == "20/08/2008"
+
+    # Child's own personal form
+    sections_child = [
+        {
+            "id": "section_a_personal",
+            "fields": [
+                {"key": "applicant_name", "value": "NGUYEN VAN A", "source": {}},
+                {"key": "date_of_birth", "value": "10/05/2005", "source": {}},
+            ],
+        }
+    ]
+    apply_ds260_resolved_conflicts(
+        sections_child,
+        resolutions,
+        person_name="NGUYEN VAN A",
+        member_role="child",
+        member_number="03",
+    )
+    child_fields_map = {f["key"]: f["value"] for f in sections_child[0]["fields"]}
+    assert child_fields_map["date_of_birth"] == "12/05/2005"
+
+

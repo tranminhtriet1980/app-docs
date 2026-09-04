@@ -609,59 +609,133 @@ def _resolve_child_parent_name_for_fill(
     records: list[ApplicantDocRecord] | None = None,
 ) -> tuple[str, str, str, str]:
     """
-    Tên cha/mẹ trên DS-260 con: ưu tiên GKS con.
-
-    - Con (child): fallback chủ hồ sơ (cha) / phối ngẫu (mẹ) tùy thuộc vào giới tính.
-    - Cháu (grandchild): chỉ lấy từ GKS của cháu — cha/mẹ là một thành viên 'con'
+    Tên cha/mẹ trên DS-260 con:
+    - Con (child):
+      + Xác định đương đơn chính (principal) là cha (nam) hay mẹ (nữ).
+      + Xác định phối ngẫu (spouse) trong case_members hoặc từ giấy kết hôn/ly hôn.
+      + Đồng bộ thông tin cha/mẹ từ đương đơn chính và phối ngẫu.
+      + Nếu không có trong case_members/kết hôn/ly hôn thì mới lấy từ GKS con.
+    - Cháu (grandchild): lấy từ GKS của cháu — cha/mẹ là một thành viên 'con'
       trong hồ sơ, khớp tên ở bước enrich (cây gia phả), không fallback ông/bà.
     """
-    from app.services.ds260_mapping import _resolve_from_record
+    from app.services.ds260_mapping import _resolve_from_record, pick_latest_record, pick_luong1_pair
 
     doc_type = (
         child_rec.doc_type
         if child_rec and child_rec.doc_type in ("birth_certificate_child", "birth_certificate")
         else "birth_certificate_child"
     )
-    aliases = ("father_full_name",) if parent == "father" else ("mother_full_name",)
-    if child_rec:
-        name = _resolve_from_record(child_rec, f"{parent}_name", aliases)
-        if name.strip():
-            return name.strip(), doc_type, f"{parent}_name", "child_birth_cert_parent"
 
-    if not members or role == PersonRole.grandchild.value:
+    if role == PersonRole.grandchild.value:
+        if child_rec:
+            aliases = ("father_full_name",) if parent == "father" else ("mother_full_name",)
+            name = _resolve_from_record(child_rec, f"{parent}_name", aliases)
+            if name.strip():
+                return name.strip(), doc_type, f"{parent}_name", "child_birth_cert_parent"
         return "", "", "", ""
 
-    principal = next((m for m in members if m.role == PersonRole.principal.value), None)
-    spouse = next((m for m in members if m.role == PersonRole.spouse.value), None)
+    # Với vai trò con (child):
+    principal = next(
+        (
+            m
+            for m in (members or [])
+            if getattr(getattr(m, "role", None), "value", str(getattr(m, "role", ""))) == "principal"
+        ),
+        None,
+    )
+    spouse = next(
+        (
+            m
+            for m in (members or [])
+            if getattr(getattr(m, "role", None), "value", str(getattr(m, "role", ""))) == "spouse"
+        ),
+        None,
+    )
 
-    # Xử lý giới tính
     principal_is_female = _is_member_female(principal, records) if principal else False
-    spouse_is_female = _is_member_female(spouse, records) if spouse else False
-
     father_member = None
     mother_member = None
 
     if principal_is_female:
         mother_member = principal
         father_member = spouse
-    elif spouse_is_female:
-        father_member = principal
-        mother_member = spouse
     else:
-        # Default fallback
         father_member = principal
         mother_member = spouse
 
     if parent == "father":
         if father_member:
             source_field = "principal_display_name" if father_member == principal else "spouse_display_name"
-            derived = "child_father_from_principal_member" if father_member == principal else "child_father_from_spouse_member"
+            derived = (
+                "child_father_from_principal_member"
+                if father_member == principal
+                else "child_father_from_spouse_member"
+            )
             return (father_member.display_name or "").strip(), "case_member", source_field, derived
+        # Tìm từ giấy ly hôn / kết hôn nếu cha không phải case member
+        if records:
+            marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+            for rec in (marriage_rec, marriage_ref):
+                if rec:
+                    h_name = _resolve_from_record(rec, "husband_full_name", ("husband_name",))
+                    if h_name.strip():
+                        return (
+                            h_name.strip(),
+                            "marriage_certificate",
+                            "husband_full_name",
+                            "child_father_from_marriage_husband",
+                        )
+            divorce_rec = pick_latest_record(records, "divorce")
+            if divorce_rec:
+                h_name = _resolve_from_record(divorce_rec, "husband_full_name", ("husband_name",))
+                if h_name.strip():
+                    return (
+                        h_name.strip(),
+                        "divorce",
+                        "husband_full_name",
+                        "child_father_from_divorce_husband",
+                    )
+        if child_rec:
+            name = _resolve_from_record(child_rec, "father_name", ("father_full_name",))
+            if name.strip():
+                return name.strip(), doc_type, "father_name", "child_birth_cert_parent"
+
     else:  # parent == "mother"
         if mother_member:
             source_field = "principal_display_name" if mother_member == principal else "spouse_display_name"
-            derived = "child_mother_from_principal_member" if mother_member == principal else "child_mother_from_spouse_member"
+            derived = (
+                "child_mother_from_principal_member"
+                if mother_member == principal
+                else "child_mother_from_spouse_member"
+            )
             return (mother_member.display_name or "").strip(), "case_member", source_field, derived
+        # Tìm từ giấy ly hôn / kết hôn nếu mẹ không phải case member
+        if records:
+            marriage_rec, marriage_ref = pick_luong1_pair(records, "marriage_certificate")
+            for rec in (marriage_rec, marriage_ref):
+                if rec:
+                    w_name = _resolve_from_record(rec, "wife_full_name", ("wife_name",))
+                    if w_name.strip():
+                        return (
+                            w_name.strip(),
+                            "marriage_certificate",
+                            "wife_full_name",
+                            "child_mother_from_marriage_wife",
+                        )
+            divorce_rec = pick_latest_record(records, "divorce")
+            if divorce_rec:
+                w_name = _resolve_from_record(divorce_rec, "wife_full_name", ("wife_name",))
+                if w_name.strip():
+                    return (
+                        w_name.strip(),
+                        "divorce",
+                        "wife_full_name",
+                        "child_mother_from_divorce_wife",
+                    )
+        if child_rec:
+            name = _resolve_from_record(child_rec, "mother_name", ("mother_full_name",))
+            if name.strip():
+                return name.strip(), doc_type, "mother_name", "child_birth_cert_parent"
 
     return "", "", "", ""
 
@@ -751,8 +825,6 @@ def enrich_child_member_personal(
             child_rec, "child_birth_country", ("birth_country",)
         )
         derived["gender"] = _resolve_from_record(child_rec, "child_gender", ("gender",))
-        derived["father_full_name"] = _resolve_from_record(child_rec, "father_name", ())
-        derived["mother_full_name"] = _resolve_from_record(child_rec, "mother_name", ())
         pob = _resolve_from_record(
             child_rec, "child_place_of_birth", ("place_of_birth", "child_birth_city")
         )
@@ -785,8 +857,14 @@ def enrich_child_member_personal(
         )
         for key, field, aliases in passport_fields:
             val = _resolve_from_record(passport_rec, field, aliases)
-            if key == "applicant_name_native" and not val:
-                val = _resolve_from_record(passport_rec, "full_name", ("name",))
+            if key == "applicant_name_native":
+                # Giữ tên có dấu từ giấy khai sinh nếu hộ chiếu không có tên bản địa có dấu
+                curr_native = derived.get("applicant_name_native") or ""
+                from app.services.document_registry import _strip_accents
+                if curr_native and _strip_accents(curr_native) != curr_native:
+                    val = curr_native
+                elif not val:
+                    val = _resolve_from_record(passport_rec, "full_name", ("name",))
             if val:
                 derived[key] = val
 
@@ -1032,47 +1110,39 @@ def enrich_child_parent_details_from_case(
         )
 
         # 2. Lấy địa chỉ hiện tại của member đó (chủ hồ sơ / phối ngẫu)
-        member_ws = None
-        for r in records:
-            if r.doc_type == "ds260_customer_form":
-                from app.services.ds260_mapping import _worksheet_person_name
-                pname = _worksheet_person_name(r)
-                if pname and _names_same_person(pname, member.display_name):
-                    member_ws = r
-                    break
-        if not member_ws:
-            for r in records:
-                if r.doc_type == "application_form":
-                    from app.services.ds260_mapping import _person_name_on_record
-                    pname = _person_name_on_record(r)
-                    if pname and _names_same_person(pname, member.display_name):
-                        member_ws = r
-                        break
-        if not member_ws:
-            member_ws = next((r for r in records if r.doc_type == "ds260_customer_form"), None)
+        from app.services.ds260_conflicts import pick_latest_by_variant
+        from app.services.ds260_mapping import scope_worksheets_to_person
+        app_form = pick_latest_by_variant(records, "application_form", "standard") or pick_latest_by_variant(
+            records, "application_form", "exception"
+        )
+        member_ws_records = scope_worksheets_to_person(records, member.display_name, is_family_case=True)
+        member_ws = pick_latest_by_variant(member_ws_records, "ds260_customer_form", "exception") or (
+            member_ws_records[0] if member_ws_records else None
+        )
+        addr_source = app_form or member_ws
 
-        if member_ws:
-            m_rid = str(member_ws.id)
-            m_doc_type = member_ws.doc_type or "ds260_customer_form"
+        if addr_source:
+            m_rid = str(addr_source.id)
+            m_doc_type = addr_source.doc_type or "ds260_customer_form"
             m_addr = _resolve_from_record(
-                member_ws, "current_address", ("address", "residential_address", "street_address")
+                addr_source, "current_address", ("address", "residential_address", "street_address")
             )
-            m_city = _resolve_from_record(member_ws, "current_city", ("city", "address_city"))
+            m_city = _resolve_from_record(addr_source, "current_city", ("city", "address_city"))
             m_state = _resolve_from_record(
-                member_ws, "current_state", ("state", "address_state", "province")
+                addr_source, "current_state", ("state", "address_state", "province")
             )
             m_postal = _resolve_from_record(
-                member_ws, "postal_code", ("zip_code", "zip", "postal_code")
+                addr_source, "postal_code", ("zip_code", "zip", "postal_code")
             )
             m_country = (
                 _resolve_from_record(
-                    member_ws, "current_country", ("country", "address_country")
+                    addr_source, "current_country", ("country", "address_country")
                 )
                 or "Vietnam"
             )
 
             if m_addr:
-                _fill_empty_parent_ds260_field(
+                _force_ds260_field(
                     fields_out,
                     f"{parent}_address",
                     m_addr,
@@ -1082,7 +1152,7 @@ def enrich_child_parent_details_from_case(
                     derived=f"child_{parent}_address_from_{label}",
                 )
             if m_city:
-                _fill_empty_parent_ds260_field(
+                _force_ds260_field(
                     fields_out,
                     f"{parent}_city",
                     m_city,
@@ -1092,7 +1162,7 @@ def enrich_child_parent_details_from_case(
                     derived=f"child_{parent}_city_from_{label}",
                 )
             if m_state:
-                _fill_empty_parent_ds260_field(
+                _force_ds260_field(
                     fields_out,
                     f"{parent}_state",
                     m_state,
@@ -1102,7 +1172,7 @@ def enrich_child_parent_details_from_case(
                     derived=f"child_{parent}_state_from_{label}",
                 )
             if m_postal:
-                _fill_empty_parent_ds260_field(
+                _force_ds260_field(
                     fields_out,
                     f"{parent}_postal_code",
                     m_postal,
@@ -1112,7 +1182,7 @@ def enrich_child_parent_details_from_case(
                     derived=f"child_{parent}_postal_from_{label}",
                 )
             if m_country:
-                _fill_empty_parent_ds260_field(
+                _force_ds260_field(
                     fields_out,
                     f"{parent}_country",
                     m_country,
@@ -1162,7 +1232,9 @@ def enrich_child_parent_details_from_case(
                     )
 
         # GKS của thành viên đó — chủ hồ sơ dùng birth_certificate, con dùng birth_certificate_child.
-        bc = pick_child_birth_cert_for_person(records, member.display_name)
+        bc, _ = pick_luong1_pair_for_person(records, "birth_certificate", member.display_name)
+        if not bc:
+            bc = pick_child_birth_cert_for_person(records, member.display_name)
         if bc:
             rid = str(bc.id)
             dob = _resolve_from_record(
@@ -1254,6 +1326,50 @@ def enrich_child_parent_details_from_case(
                     record_id=rid,
                     derived=f"child_{parent}_from_marriage_{side}",
                 )
+            p_addr = _resolve_from_record(
+                rec, f"{side}_address", (f"{side}_current_address", f"{side}_address_line1")
+            )
+            if p_addr:
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_address",
+                    p_addr,
+                    document_type="marriage_certificate",
+                    source_field=f"{side}_address",
+                    record_id=rid,
+                    derived=f"child_{parent}_address_from_marriage_{side}",
+                )
+                from app.services.ds260_mapping import _parse_birth_place_city_state
+                p_c, p_s = _parse_birth_place_city_state(p_addr)
+                if p_c:
+                    _fill_empty_parent_ds260_field(
+                        fields_out,
+                        f"{parent}_city",
+                        p_c,
+                        document_type="marriage_certificate",
+                        source_field=f"{side}_address",
+                        record_id=rid,
+                        derived=f"child_{parent}_city_from_marriage_{side}",
+                    )
+                if p_s:
+                    _fill_empty_parent_ds260_field(
+                        fields_out,
+                        f"{parent}_state",
+                        p_s,
+                        document_type="marriage_certificate",
+                        source_field=f"{side}_address",
+                        record_id=rid,
+                        derived=f"child_{parent}_state_from_marriage_{side}",
+                    )
+                _fill_empty_parent_ds260_field(
+                    fields_out,
+                    f"{parent}_country",
+                    "Vietnam",
+                    document_type="marriage_certificate",
+                    source_field=f"{side}_address",
+                    record_id=rid,
+                    derived=f"child_{parent}_country_from_marriage_{side}",
+                )
 
 
 def enrich_child_parent_details_from_own_worksheet(
@@ -1336,11 +1452,11 @@ def enrich_child_parent_section_from_birth_cert(
         "birth_certificate",
     ) else "birth_certificate_child"
     rid = str(child_rec.id)
-    aliases = ("father_full_name",) if parent == "father" else ("mother_full_name",)
-    full = _resolve_from_record(child_rec, f"{parent}_name", aliases)
-    if not full and not has_parent_info_on_birth_cert(child_rec, parent):
-        return
-
+    full = _resolve_from_record(
+        child_rec,
+        f"{parent}_name",
+        (f"{parent}_full_name", f"{parent}_given_names"),
+    )
     if full:
         _fill_child_parent_identity(
             fields_out,
@@ -1457,57 +1573,47 @@ def apply_child_sections_from_birth_cert(
             field["source"] = empty_ds260_field_source()
 
         if sec["id"] == "section_father":
-            if child_rec or father_name:
-                bc_father_name = ""
-                if child_rec:
-                    bc_father_name = _resolve_from_record(
-                        child_rec, "father_name", ("father_full_name",)
-                    )
-                if bc_father_name.strip():
-                    enrich_child_parent_section_from_birth_cert(sec["fields"], child_rec, "father")
-                elif father_name:
-                    rid = str(child_rec.id) if child_rec else None
-                    _fill_child_parent_identity(
-                        sec["fields"],
-                        "father",
-                        father_name,
-                        document_type=father_doc_type,
-                        source_field=father_src_field,
-                        record_id=rid,
-                        derived=father_derived,
-                    )
-                if records is not None and members is not None and father_name:
-                    enrich_child_parent_details_from_case(
-                        sec["fields"], "father", father_name, records, members
-                    )
-                if records is not None:
-                    enrich_child_parent_details_from_own_worksheet(sec["fields"], "father", records)
+            if father_name:
+                rid = str(child_rec.id) if child_rec else None
+                _fill_child_parent_identity(
+                    sec["fields"],
+                    "father",
+                    father_name,
+                    document_type=father_doc_type,
+                    source_field=father_src_field,
+                    record_id=rid,
+                    derived=father_derived,
+                )
+            elif child_rec:
+                enrich_child_parent_section_from_birth_cert(sec["fields"], child_rec, "father")
+
+            if records is not None and members is not None and father_name:
+                enrich_child_parent_details_from_case(
+                    sec["fields"], "father", father_name, records, members
+                )
+            if records is not None:
+                enrich_child_parent_details_from_own_worksheet(sec["fields"], "father", records)
         elif sec["id"] == "section_mother":
-            if child_rec or mother_name:
-                bc_mother_name = ""
-                if child_rec:
-                    bc_mother_name = _resolve_from_record(
-                        child_rec, "mother_name", ("mother_full_name",)
-                    )
-                if bc_mother_name.strip():
-                    enrich_child_parent_section_from_birth_cert(sec["fields"], child_rec, "mother")
-                elif mother_name:
-                    rid = str(child_rec.id) if child_rec else None
-                    _fill_child_parent_identity(
-                        sec["fields"],
-                        "mother",
-                        mother_name,
-                        document_type=mother_doc_type,
-                        source_field=mother_src_field,
-                        record_id=rid,
-                        derived=mother_derived,
-                    )
-                if records is not None and members is not None and mother_name:
-                    enrich_child_parent_details_from_case(
-                        sec["fields"], "mother", mother_name, records, members
-                    )
-                if records is not None:
-                    enrich_child_parent_details_from_own_worksheet(sec["fields"], "mother", records)
+            if mother_name:
+                rid = str(child_rec.id) if child_rec else None
+                _fill_child_parent_identity(
+                    sec["fields"],
+                    "mother",
+                    mother_name,
+                    document_type=mother_doc_type,
+                    source_field=mother_src_field,
+                    record_id=rid,
+                    derived=mother_derived,
+                )
+            elif child_rec:
+                enrich_child_parent_section_from_birth_cert(sec["fields"], child_rec, "mother")
+
+            if records is not None and members is not None and mother_name:
+                enrich_child_parent_details_from_case(
+                    sec["fields"], "mother", mother_name, records, members
+                )
+            if records is not None:
+                enrich_child_parent_details_from_own_worksheet(sec["fields"], "mother", records)
         elif sec["id"] == "section_birth_certificate" and child_rec:
             enrich_child_birth_certificate_section(sec["fields"], child_rec)
             rid = str(child_rec.id)
@@ -1618,3 +1724,116 @@ def apply_sibling_parent_fallback(
             derived="sibling_parent_from_principal_birth_cert",
         )
         enrich_child_parent_details_from_case(sec["fields"], parent, name, records, members)
+
+
+def reconcile_child_address_from_parent(
+    sections_out: list[dict[str, Any]],
+    all_case_records: list[ApplicantDocRecord],
+    case_members: list[Any],
+    child_display_name: str,
+) -> None:
+    """
+    Quy tắc địa chỉ cho hồ sơ con cái:
+    Kiểm tra mục 'DS-260 5 — THÔNG TIN CỦA CON CÁI' trên worksheet của đương đơn chính (cha/mẹ):
+    - Nếu 'Child Lives with you' của đứa con đó là 'Yes' -> phần địa chỉ của hồ sơ con cái
+      đồng bộ với địa chỉ hiện tại của đương đơn chính (cha/mẹ).
+    - Nếu là 'No' -> địa chỉ của bé giữ theo khai báo của bé (không tự động đồng bộ).
+    """
+    from app.services.ds260_mapping import (
+        _child_data_from_worksheet,
+        _names_same_person,
+        _same_child,
+        _merge_raw_dict,
+        scope_worksheets_to_person,
+    )
+    from app.services.ds260_conflicts import pick_latest_by_variant
+
+    # 1. Tìm worksheet của đương đơn chính (principal)
+    principal_member = next(
+        (
+            m
+            for m in case_members
+            if getattr(getattr(m, "role", None), "value", str(getattr(m, "role", ""))) == "principal"
+        ),
+        None,
+    )
+    principal_name = getattr(principal_member, "display_name", "") if principal_member else ""
+
+    principal_ws_records = scope_worksheets_to_person(all_case_records, principal_name, is_family_case=True)
+    principal_ws = pick_latest_by_variant(principal_ws_records, "ds260_customer_form", "exception") or (
+        principal_ws_records[0] if principal_ws_records else None
+    )
+    if not principal_ws:
+        return
+
+    # 2. Tìm slot con tương ứng với child_display_name trên worksheet đương đơn chính
+    child_slots = _child_data_from_worksheet(principal_ws)
+    matched_child_slot = next(
+        (
+            slot
+            for slot in child_slots
+            if _same_child(slot, {"full_name": child_display_name})
+            or _names_same_person(slot.get("full_name") or "", child_display_name)
+        ),
+        None,
+    )
+    if not matched_child_slot:
+        return
+
+    lives_with = (matched_child_slot.get("lives_with") or "").strip().lower()
+    if lives_with not in ("yes", "có", "co", "true", "1", "y"):
+        return
+
+    # 3. Lấy địa chỉ của đương đơn chính (ưu tiên application_form chính thức nếu có, sau đó đến principal_ws)
+    app_form = pick_latest_by_variant(all_case_records, "application_form", "standard") or pick_latest_by_variant(
+        all_case_records, "application_form", "exception"
+    )
+
+    addr_source_rec = app_form or principal_ws
+    addr_source_data = _merge_raw_dict(addr_source_rec)
+    doc_type = addr_source_rec.doc_type
+    doc_id = str(addr_source_rec.source_document_id) if addr_source_rec.source_document_id else None
+    rid = str(addr_source_rec.id)
+
+    curr_address = addr_source_data.get("current_address") or ""
+    curr_city = addr_source_data.get("address_city") or addr_source_data.get("current_city") or ""
+    curr_state = addr_source_data.get("address_state") or addr_source_data.get("current_state") or ""
+    postal_code = addr_source_data.get("postal_code") or ""
+    curr_country = addr_source_data.get("address_country") or addr_source_data.get("current_country") or ""
+
+    if not curr_address:
+        return
+
+    # 4. Ghi đè vào section_address của con
+    for sec in sections_out:
+        if sec.get("id") != "section_address":
+            continue
+        for field in sec.get("fields", []):
+            k = field.get("key")
+            val = None
+            src_f = ""
+            if k == "current_address":
+                val = curr_address
+                src_f = "current_address"
+            elif k == "current_city":
+                val = curr_city
+                src_f = "address_city" if "address_city" in addr_source_data else "current_city"
+            elif k == "current_state":
+                val = curr_state
+                src_f = "address_state" if "address_state" in addr_source_data else "current_state"
+            elif k == "postal_code":
+                val = postal_code
+                src_f = "postal_code"
+            elif k == "current_country":
+                val = curr_country
+                src_f = "address_country" if "address_country" in addr_source_data else "current_country"
+
+            if val is not None:
+                field["value"] = val
+                field.setdefault("source", {})
+                field["source"]["document_type"] = doc_type
+                field["source"]["source_field"] = src_f
+                field["source"]["document_id"] = doc_id
+                field["source"]["record_id"] = rid
+                field["source"]["derived"] = "synced_from_parent_address"
+

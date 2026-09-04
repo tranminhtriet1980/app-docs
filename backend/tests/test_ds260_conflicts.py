@@ -61,7 +61,6 @@ def test_worksheet_conflict_label_shows_ds260_section_not_just_generic_worksheet
 def test_worksheet_compare_keys_cover_user_fields():
     assert "applicant_name" in WORKSHEET_COMPARE_KEYS
     assert "place_of_birth" in WORKSHEET_COMPARE_KEYS
-    assert "passport_expiration_date" in WORKSHEET_COMPARE_KEYS
     assert "current_marital_status" in WORKSHEET_COMPARE_KEYS
     assert "current_address" in WORKSHEET_COMPARE_KEYS
     assert "primary_phone" in WORKSHEET_COMPARE_KEYS

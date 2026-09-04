@@ -508,8 +508,13 @@ def derive_country_from_place(place_of_birth: str | None) -> str:
     if not raw:
         return ""
 
+    if find_vn_locality(raw) or find_vn_locality_match(raw)[0]:
+        return "Vietnam"
+
     segments = [s.strip() for s in raw.split(",") if s.strip()]
     for segment in reversed(segments):
+        if find_vn_locality(segment) or find_vn_locality_match(segment)[0]:
+            return "Vietnam"
         country = _match_country_alias(segment)
         if country:
             return country

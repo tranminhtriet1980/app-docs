@@ -50,7 +50,7 @@ Bước 1: Xác định loại tài liệu từ nội dung (ảnh/PDF). Các lo�
 - birth_certificate_child
 - military_discharge
 
-Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, application_form, address_document, ds260_customer_form, photo, other
+Các loại khác (nếu không thuộc 8 loại trên): visa, i20, i94, diploma_transcript, financial, employment_letter, application_form, address_document, ds260_customer_form, document_checklist, photo, other
 
 application_form = đơn xin việc / Job Application — có mục "Applicant's Information" (địa chỉ cá nhân, số điện thoại, email, chức danh, lịch sử việc làm, học vấn). KHÁC employment_letter (chỉ xác nhận việc làm hiện tại). Đây là giấy tờ chính thức để đối chiếu địa chỉ trong DS-260 worksheet.
 
@@ -60,6 +60,8 @@ ds260_customer_form = bản DS-260 khách tự khai (worksheet khách điền ta
 (b) bản MỚI trùng mẫu DS-260 export.
 Chọn loại này cho MỌI worksheet khách tự khai, kể cả khi có nhiều mục — KHÔNG hạ xuống "other" hay
 "address_document". address_document chỉ dành cho hoá đơn/hợp đồng thuê/giấy xác nhận cư trú riêng lẻ.
+
+document_checklist = Phiếu mô tả & danh sách hồ sơ / Bảng kê giấy tờ — file Excel/Word/PDF dạng bảng liệt kê các thành viên trong bộ hồ sơ (Đương đơn, Người phối ngẫu, Con 1, Con 2...) và các giấy tờ tương ứng của từng người (có đánh dấu X hoặc checklist).
 
 QUY TẮC CHỐNG BỊA:
 - KHÔNG ĐƯỢC đoán/suy luận loại tài liệu khi không rõ ràng từ nội dung.
@@ -725,7 +727,13 @@ def _mock_classification(filename: str) -> dict:
         ("lease", "address_document"),
         ("residence", "address_document"),
         ("ds260", "ds260_customer_form"),
-        ("ds-260", "ds260_customer_form"),
+        ("phieu mo ta", "document_checklist"),
+        ("phiếu mô tả", "document_checklist"),
+        ("danh sach ho so", "document_checklist"),
+        ("danh sách hồ sơ", "document_checklist"),
+        ("checklist", "document_checklist"),
+        ("bang ke", "document_checklist"),
+        ("bảng kê", "document_checklist"),
         ("photo", "photo"),
     ]
     for token, doc_type in rules:

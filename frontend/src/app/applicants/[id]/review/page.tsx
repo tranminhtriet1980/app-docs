@@ -350,11 +350,26 @@ function deriveSourceHint(derived: string | undefined, sourceField: string): str
   return "";
 }
 
+function slugifyName(name: string): string {
+  return (
+    (name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "unknown"
+  );
+}
+
 function findConflictForField(
   f: Ds260Form["sections"][0]["fields"][0],
   conflicts: Conflict[],
   memberNumber: string | undefined,
-  isFamilyCase: boolean
+  isFamilyCase: boolean,
+  allSectionFields?: Ds260Form["sections"][0]["fields"],
+  memberDisplayName?: string
 ): Conflict | undefined {
   if (!conflicts || conflicts.length === 0) return undefined;
 
@@ -369,7 +384,63 @@ function findConflictForField(
       cleanKey = cleanKey.substring(0, cleanKey.length - suffixMatch[0].length);
     }
 
-    // Check if suffix matches
+    // 1. Child identity conflict: ds260.child_identity.<child_slug>.<field>
+    if (cleanKey.startsWith("ds260.child_identity.")) {
+      const rest = cleanKey.substring("ds260.child_identity.".length);
+      const lastDot = rest.lastIndexOf(".");
+      if (lastDot !== -1) {
+        const childSlug = rest.substring(0, lastDot);
+        const childField = rest.substring(lastDot + 1);
+
+        // Case A: In section_children on Principal/Spouse (field is child_N_...)
+        const childSlotMatch = f.key.match(/^child_(\d+)_(.+)$/);
+        if (childSlotMatch) {
+          const slotNum = childSlotMatch[1];
+          const slotField = childSlotMatch[2];
+          if (slotField === childField) {
+            const nameField = allSectionFields?.find((sf) => sf.key === `child_${slotNum}_full_name`);
+            const childName = nameField?.value || "";
+            if (childName && slugifyName(childName) === childSlug) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        // Case B: On Child's own personal section (member role is child)
+        if (memberDisplayName && slugifyName(memberDisplayName) === childSlug) {
+          return f.key === childField || f.key === `child_${childField}`;
+        }
+      }
+      return false;
+    }
+
+    // 2. Child parent identity conflict: ds260.child_parent_identity.<child_slug>.<parent>.<field>
+    if (cleanKey.startsWith("ds260.child_parent_identity.")) {
+      const rest = cleanKey.substring("ds260.child_parent_identity.".length);
+      const parts = rest.split(".");
+      if (parts.length >= 3) {
+        const childSlug = parts[0];
+        const parentRole = parts[1]; // father or mother
+        const parentField = parts[2]; // date_of_birth or birth_country
+        if (memberDisplayName && slugifyName(memberDisplayName) === childSlug) {
+          return f.key === `${parentRole}_${parentField}`;
+        }
+      }
+      return false;
+    }
+
+    // 3. Spouse worksheet / identity conflicts
+    if (cleanKey.startsWith("ds260.spouse_worksheet.") || cleanKey.startsWith("ds260.spouse_identity.")) {
+      const parts = cleanKey.split(".");
+      if (parts.length >= 3) {
+        const fieldKey = parts.slice(2).join(".");
+        return f.key === fieldKey;
+      }
+      return false;
+    }
+
+    // 4. Check member suffix for member-scoped conflicts
     if (isFamilyCase) {
       const targetSuffix = memberNumber || "01";
       const currentSuffix = suffixMember || "01";
@@ -378,20 +449,24 @@ function findConflictForField(
       }
     }
 
-    // 1. Worksheet conflict
+    // 5. Worksheet conflict: ds260.document_vs_worksheet.<key>
     if (cleanKey.startsWith("ds260.document_vs_worksheet.")) {
       const mappingKey = cleanKey.substring("ds260.document_vs_worksheet.".length);
       return mappingKey === f.key;
     }
 
-    // 2. Standard document conflict
+    // 6. Standard document conflict: ds260.<doc_type>.<source_field>
     if (cleanKey.startsWith("ds260.")) {
       const rest = cleanKey.substring("ds260.".length);
       const firstDot = rest.indexOf(".");
       if (firstDot !== -1) {
         const docType = rest.substring(0, firstDot);
         const sourceField = rest.substring(firstDot + 1);
-        return docType === f.source.document_type && sourceField === f.source.source_field;
+        if (docType === f.source.document_type) {
+          if (sourceField === f.source.source_field || sourceField === f.key) {
+            return true;
+          }
+        }
       }
     }
 
@@ -492,10 +567,13 @@ function InputTooltip({ value }: { value: string }) {
   );
 }
 
+const FE_HIDDEN_KEYS = new Set(["divorce_husband_name", "divorce_wife_name"]);
+
 function Ds260FieldGrid({
   applicantId,
   memberId,
   memberNumber,
+  memberDisplayName,
   isFamilyCase,
   ds260Conflicts,
   fields,
@@ -506,11 +584,12 @@ function Ds260FieldGrid({
   applicantId: string;
   memberId?: string;
   memberNumber?: string;
+  memberDisplayName?: string;
   isFamilyCase: boolean;
   ds260Conflicts: Conflict[];
   fields: Ds260Form["sections"][0]["fields"];
   canEdit: boolean;
-  onFieldSaved: () => void;
+  onFieldSaved: (updatedForm?: Ds260Form, savedMemberId?: string) => void;
   addressWarnings?: Ds260ValidationIssue[];
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -539,13 +618,13 @@ function Ds260FieldGrid({
     }
     setSavingKey(key);
     try {
-      await api.updateDs260Field(applicantId, key, trimmed, memberId);
+      const updatedForm = await api.updateDs260Field(applicantId, key, trimmed, memberId);
       setDrafts((d) => {
         const next = { ...d };
         delete next[key];
         return next;
       });
-      onFieldSaved();
+      onFieldSaved(updatedForm, memberId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Không thể lưu trường DS-260");
     } finally {
@@ -556,13 +635,13 @@ function Ds260FieldGrid({
   const clearOverride = async (key: string) => {
     setSavingKey(key);
     try {
-      await api.updateDs260Field(applicantId, key, "");
+      const updatedForm = await api.updateDs260Field(applicantId, key, "", memberId);
       setDrafts((d) => {
         const next = { ...d };
         delete next[key];
         return next;
       });
-      onFieldSaved();
+      onFieldSaved(updatedForm, memberId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Không thể xóa chỉnh sửa");
     } finally {
@@ -572,9 +651,16 @@ function Ds260FieldGrid({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {fields.filter((f) => !f.review_hidden).map((f) => {
+      {fields.filter((f) => !f.review_hidden && !FE_HIDDEN_KEYS.has(f.key)).map((f) => {
         const isManual = f.source.derived === "manual_override";
-        const matchedConflict = findConflictForField(f, ds260Conflicts, memberNumber, isFamilyCase);
+        const matchedConflict = findConflictForField(
+          f,
+          ds260Conflicts,
+          memberNumber,
+          isFamilyCase,
+          fields,
+          memberDisplayName
+        );
         const isConflicted = !!matchedConflict;
         const busy = savingKey === f.key;
         // Warning / trống cho other_addresses_used: highlight đỏ nếu khách chưa khai (để trống) hoặc có warning
@@ -726,7 +812,7 @@ function Ds260MemberMappingBlock({
   member: CaseMember;
   form: Ds260Form;
   canEdit: boolean;
-  onFieldSaved: () => void;
+  onFieldSaved: (updatedForm?: Ds260Form, savedMemberId?: string) => void;
   onExport: (member: CaseMember) => void;
   exportBusy: boolean;
   ds260Conflicts: Conflict[];
@@ -845,6 +931,7 @@ function Ds260MemberMappingBlock({
                     applicantId={applicantId}
                     memberId={member.id === PRINCIPAL_ONLY_ID ? undefined : member.id}
                     memberNumber={member.member_number || undefined}
+                    memberDisplayName={member.display_name}
                     isFamilyCase={isFamilyCase}
                     ds260Conflicts={ds260Conflicts}
                     fields={sec.fields}
@@ -1178,7 +1265,6 @@ export default function ReviewPage() {
       return prev;
     });
     if (validation?.warnings?.some((w) => w.code === "missing_address_before_16" || w.code === "address_contradiction")) {
-      // Chỉ hiện modal warning LẦN ĐẦU trong session — đánh dấu vào sessionStorage
       if (typeof window !== "undefined" && sessionStorage.getItem(`ds260_address_warning_shown_${id}`) !== "true") {
         sessionStorage.setItem(`ds260_address_warning_shown_${id}`, "true");
         setHasShownAddressWarningModal(true);
@@ -1187,28 +1273,31 @@ export default function ReviewPage() {
     setDocTables(tables);
     setReferenceTables(refTables);
 
+    // Tải bảng tài liệu gốc trong nền để không chặn render DS-260
     const withStandard = tables.filter((t) => (t.standard_count ?? t.record_count) > 0);
-    const standardSets = await Promise.all(
+    Promise.all(
       withStandard.map((t) =>
         api.getDocumentTable(id, t.doc_type, "standard").catch(() => [] as DocRecord[])
       )
-    );
-    const byType: Record<string, DocRecord[]> = {};
-    withStandard.forEach((t, i) => {
-      byType[t.doc_type] = standardSets[i];
+    ).then((standardSets) => {
+      const byType: Record<string, DocRecord[]> = {};
+      withStandard.forEach((t, i) => {
+        byType[t.doc_type] = standardSets[i];
+      });
+      setDocRecordsByType(byType);
     });
-    setDocRecordsByType(byType);
 
-    const refSets = await Promise.all(
+    Promise.all(
       refTables.map((t) =>
         api.getDocumentTable(id, t.doc_type, "exception").catch(() => [] as DocRecord[])
       )
-    );
-    const refByType: Record<string, DocRecord[]> = {};
-    refTables.forEach((t, i) => {
-      refByType[t.doc_type] = refSets[i];
+    ).then((refSets) => {
+      const refByType: Record<string, DocRecord[]> = {};
+      refTables.forEach((t, i) => {
+        refByType[t.doc_type] = refSets[i];
+      });
+      setReferenceRecordsByType(refByType);
     });
-    setReferenceRecordsByType(refByType);
   }, [id]);
 
   const load = useCallback(async () => {
@@ -1995,7 +2084,21 @@ export default function ReviewPage() {
                         member={m}
                         form={form}
                         canEdit={canEditDs260}
-                        onFieldSaved={load}
+                        onFieldSaved={(updatedForm, savedMemberId) => {
+                          if (updatedForm) {
+                            if (savedMemberId) {
+                              setDs260FormsByMember((prev) => ({ ...prev, [savedMemberId]: updatedForm }));
+                              if (savedMemberId === selectedMemberId) {
+                                setDs260Form(updatedForm);
+                              }
+                            } else {
+                              setDs260Form(updatedForm);
+                            }
+                          }
+                          // Cập nhật validation & conflict trong background không reload lại toàn trang
+                          api.getDs260Validation(id).then(setDs260Validation).catch(() => undefined);
+                          api.getDs260Conflicts(id).then(setDs260Conflicts).catch(() => undefined);
+                        }}
                         onExport={(member) => {
                           if (member.id === PRINCIPAL_ONLY_ID) void exportDs260();
                           else void exportDs260ForMember(member);

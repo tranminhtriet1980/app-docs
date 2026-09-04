@@ -271,8 +271,8 @@ def test_been_in_us_yes_when_us_visa_document_present():
     assert got["issued_us_visa"] == "Yes"
 
 
-def test_been_in_us_no_when_no_us_visa_document():
-    """Không có US Visa document và been_in_us trống → No."""
+def test_been_in_us_stays_empty_when_no_us_visa_document():
+    """Không có US Visa document và been_in_us trống → để trống."""
     from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
 
     sections = [
@@ -286,7 +286,7 @@ def test_been_in_us_no_when_no_us_visa_document():
     ]
     reconcile_ds260_yesno_and_death_year(sections)
     got = {f["key"]: f["value"] for f in sections[0]["fields"]}
-    assert got["been_in_us"] == "No"
+    assert got["been_in_us"] == ""
     assert got["issued_us_visa"] == ""
 
 
@@ -328,8 +328,8 @@ def test_been_in_us_na_becomes_yes_with_visa():
     assert got["been_in_us"] == "Yes"
 
 
-def test_been_in_us_na_becomes_no_without_visa():
-    """been_in_us = N/A và không có US Visa → No."""
+def test_been_in_us_na_stays_empty_without_visa():
+    """been_in_us = N/A và không có US Visa → để trống."""
     from app.services.ds260_mapping import reconcile_ds260_yesno_and_death_year
 
     sections = [
@@ -342,5 +342,5 @@ def test_been_in_us_na_becomes_no_without_visa():
     ]
     reconcile_ds260_yesno_and_death_year(sections)
     got = {f["key"]: f["value"] for f in sections[0]["fields"]}
-    assert got["been_in_us"] == "No"
+    assert got["been_in_us"] == "N/A"
 

@@ -70,21 +70,21 @@ def test_mother_residence_and_nationality_never_leak_into_birth_place():
 
 
 def test_mother_explicit_birth_place_still_resolves():
-    """Khi giấy khai sinh CÓ ghi rõ nơi sinh của mẹ (field birth-place thật, không phải thường
-    trú), vẫn phải điền bình thường vào birth_city/state/country."""
+    """Nơi sinh của mẹ lấy từ worksheet DS-260 khách khai (không lấy từ Giấy khai sinh)."""
     from app.services.ds260_mapping import _resolve_ds260_field_value, flatten_ds260_mappings
 
     raw = {
         "mother_name": "ĐẶNG THỊ TIÊM",
-        "mother_birth_place": "Hue, Thua Thien Hue",
+        "mother_birth_state": "Thua Thien Hue",
+        "mother_birth_country": "Vietnam",
     }
-    rec = _rec(raw=raw)
+    rec = _rec(raw=raw, doc_type="ds260_customer_form")
     mappings = flatten_ds260_mappings()
 
     state, _ = _resolve_ds260_field_value(mappings["mother_birth_state"], rec)
     country, _ = _resolve_ds260_field_value(mappings["mother_birth_country"], rec)
 
-    assert "Hue" in state
+    assert state == "Thua Thien Hue"
     assert country == "Vietnam"
 
 

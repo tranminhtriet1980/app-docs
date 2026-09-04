@@ -2466,16 +2466,29 @@ _CHILD_WORKSHEET_ONLY_FIELDS = ("lives_with", "current_address", "immigrating", 
 
 def _same_child(a: dict[str, str], b: dict[str, str]) -> bool:
     """Cùng một đứa trẻ khi TÊN khớp (dùng _names_same_person — chịu được có/không dấu, thứ tự
-    chữ) — KHÔNG còn đòi hỏi ngày sinh khớp. Ngày sinh khác nhau giữa 2 nguồn (worksheet vs
-    giấy khai sinh) là MÂU THUẪN DỮ LIỆU cần cảnh báo (xem build_child_identity_conflict_rows),
-    không phải bằng chứng đây là 2 người khác nhau — trước đây so khớp cứng theo cả tên lẫn
-    ngày sinh khiến 1 người bị tách thành 2 slot con khi một nguồn OCR đọc sai ngày (báo lỗi
-    thực tế 2026-08-05: giấy khai sinh NGUYEN MINH PHUONG bị OCR đọc nhầm số quyển "208/2015"
-    thành ngày sinh, trong khi hộ chiếu + worksheet đều ghi đúng 29/01/2007 — cùng 1 người bị
-    hiện thành cả child_2 và child_3)."""
+    chữ, hoặc sai lệch chữ đệm do OCR đọc nhầm như Gia -> Ha khi họ và tên chính khớp)."""
     name_a = (a.get("full_name") or "").strip()
     name_b = (b.get("full_name") or "").strip()
-    return bool(name_a) and bool(name_b) and _names_same_person(name_a, name_b)
+    if not name_a or not name_b:
+        return False
+    if _names_same_person(name_a, name_b):
+        return True
+    
+    # So khớp họ (first word) + tên chính (last word) khi có cùng năm sinh/ngày sinh
+    from app.services.document_registry import _strip_accents
+    parts_a = [p for p in _strip_accents(name_a).upper().split() if p]
+    parts_b = [p for p in _strip_accents(name_b).upper().split() if p]
+    if len(parts_a) >= 2 and len(parts_b) >= 2:
+        if parts_a[0] == parts_b[0] and parts_a[-1] == parts_b[-1]:
+            dob_a = a.get("date_of_birth", "")
+            dob_b = b.get("date_of_birth", "")
+            year_a = re.search(r"\b(19\d\d|20\d\d)\b", dob_a)
+            year_b = re.search(r"\b(19\d\d|20\d\d)\b", dob_b)
+            if year_a and year_b and year_a.group(1) == year_b.group(1):
+                return True
+            if not dob_a or not dob_b:
+                return True
+    return False
 
 
 def _dedupe_children(
@@ -2548,13 +2561,17 @@ def build_child_identity_conflict_rows(
         if (data.get("full_name") or "").strip():
             items.append((data, std or ref))
 
-    ws_rec = pick_latest_by_variant(records, "ds260_customer_form", "exception") or pick_latest_record(
-        records, "ds260_customer_form"
-    )
-    if ws_rec:
+    ws_records = [r for r in records if r.doc_type == "ds260_customer_form"]
+    seen_ws_items: set[tuple[str, str]] = set()
+    for ws_rec in ws_records:
         for data in _child_data_from_worksheet(ws_rec):
-            if (data.get("full_name") or "").strip():
-                items.append((data, ws_rec))
+            fn = (data.get("full_name") or "").strip()
+            dob = (data.get("date_of_birth") or "").strip()
+            if fn:
+                ws_key = (fn.upper(), dob)
+                if ws_key not in seen_ws_items:
+                    seen_ws_items.add(ws_key)
+                    items.append((data, ws_rec))
 
     rows: list[dict[str, Any]] = []
     emitted: set[str] = set()
@@ -4302,12 +4319,7 @@ def normalize_ds260_place_fields(sections_out: list[dict[str, Any]]) -> None:
             continue
         city_val, state_val = result
         if city_f is not None:
-            curr_city = (city_f.get("value") or "").strip()
-            if city_val == "N/A" and curr_city and curr_city.upper() != "N/A" and not looks_like_address_or_facility(curr_city):
-                # Khách khai hoặc giấy tờ đã có tên địa danh nơi sinh -> giữ nguyên thay vì ép thành N/A
-                pass
-            else:
-                _set_value(city_f, city_val, "birthplace_normalized")
+            _set_value(city_f, city_val, "birthplace_normalized")
         if state_f is not None:
             _set_value(state_f, state_val, "birthplace_normalized")
 
@@ -4588,12 +4600,17 @@ def reconcile_parent_living_addresses(sections_out: list[dict[str, Any]]) -> Non
                     _set_value(postal_f, curr_postal, f"{parent}_postal_from_applicant")
 
     # 2. Nếu cả 2 cha mẹ cùng còn sống, một người có địa chỉ đầy đủ còn người kia để trống
+    # (chỉ áp dụng khi không có ly hôn / previous spouse)
     f_living = (idx.get("father_is_living", {}).get("value") or "").strip().lower() == "yes"
     m_living = (idx.get("mother_is_living", {}).get("value") or "").strip().lower() == "yes"
     f_addr = (idx.get("father_address", {}).get("value") or "").strip()
     m_addr = (idx.get("mother_address", {}).get("value") or "").strip()
+    has_divorce = bool(
+        (idx.get("divorce_date", {}).get("value") or "").strip()
+        or (idx.get("previous_spouse_full_name", {}).get("value") or "").strip()
+    )
 
-    if f_living and m_living:
+    if f_living and m_living and not has_divorce:
         if f_addr and not m_addr:
             for suffix in ("address", "city", "state", "postal_code", "country"):
                 src_val = (idx.get(f"father_{suffix}", {}).get("value") or "").strip()
@@ -4792,10 +4809,10 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
                     "derived": "yesno_default_no",
                 }
 
-    # been_in_us / issued_us_visa: nếu có US Visa document (visa dán trong passport, entry stamp Mỹ)
-    # → điền "Yes" (khách đã từng đến Mỹ). Evidence: visa_type, entry_stamp, visa_number, entry_date.
-    # Riêng issued_us_visa / refused_us_visa: nếu khách để trống không khai thì để trống, không tự động khai "No".
-    for field_key in ("been_in_us", "issued_us_visa"):
+    # been_in_us / issued_us_visa / refused_us_visa:
+    # Nếu có US Visa document (visa dán trong passport, entry stamp Mỹ) → điền "Yes" (evidence: visa_type, entry_stamp, visa_number, entry_date).
+    # Nếu khách để trống không khai (và không có evidence) → để trống, không tự động điền "No".
+    for field_key in ("been_in_us", "issued_us_visa", "refused_us_visa"):
         field = index.get(field_key)
         if not field:
             continue
@@ -4806,22 +4823,16 @@ def reconcile_ds260_yesno_and_death_year(sections_out: list[dict[str, Any]]) -> 
         if cur and not _is_na_value(cur):
             continue  # đã có giá trị Yes/No hợp lệ → giữ nguyên
         # Kiểm tra evidence từ US Visa (visa_type, entry_stamp, visa_number...)
-        has_us_visa_evidence = any(
-            _val(e) for e in ("visa_type", "entry_stamp", "visa_number", "entry_date")
-        )
-        if has_us_visa_evidence:
-            field["value"] = "Yes"
-            field["source"] = {
-                **empty_ds260_field_source(),
-                "derived": "yesno_from_us_visa_document",
-            }
-        elif field_key == "been_in_us" and (not cur or _is_na_value(cur)):
-            # been_in_us: Không có US Visa document → mặc định "No" (khách chưa từng đến Mỹ)
-            field["value"] = "No"
-            field["source"] = {
-                **empty_ds260_field_source(),
-                "derived": "yesno_default_no",
-            }
+        if field_key in ("been_in_us", "issued_us_visa"):
+            has_us_visa_evidence = any(
+                _val(e) for e in ("visa_type", "entry_stamp", "visa_number", "entry_date")
+            )
+            if has_us_visa_evidence:
+                field["value"] = "Yes"
+                field["source"] = {
+                    **empty_ds260_field_source(),
+                    "derived": "yesno_from_us_visa_document",
+                }
 
     for key, field in index.items():
         if not key.endswith("_death_year"):
@@ -5461,13 +5472,16 @@ async def resolve_ds260_form(
         apply_child_sections_from_birth_cert(
             sections_out,
             child_bc,
-            records=records,
+            records=all_case_records,
             members=case_members,
             role=member_ctx.role if member_ctx else "child",
         )
         if child_bc:
             for sec in sections_out:
                 enrich_child_member_personal(sec["fields"], child_bc, passport_rec)
+        # Đồng bộ địa chỉ nếu con sống cùng cha/mẹ (Lives with you = Yes trên DS-260 đương đơn chính)
+        from app.services.family_case import reconcile_child_address_from_parent
+        reconcile_child_address_from_parent(sections_out, all_case_records, case_members, person_name)
         # Con/cháu mặc định độc thân (Single) trên DS-260.
         for sec in sections_out:
             if sec["id"] != "section_a_personal":
