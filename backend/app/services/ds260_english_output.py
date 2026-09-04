@@ -210,6 +210,8 @@ def format_ds260_field_value(key: str, value: str) -> str:
     v = (value or "").strip()
     if not v or key in _SKIP_KEYS:
         return v
+    if "\n" in v:
+        return "\n".join(format_ds260_field_value(key, line) for line in v.split("\n"))
     # Ngày & khoảng thời gian đã được chuẩn hoá ở format_sections_date_display → GIỮ nguyên,
     # không title-case lại (tránh làm hỏng '15 Aug 2004 - 01 Jun 2008').
     from app.services.ds260_dates import is_date_field_key, is_date_range_field_key
