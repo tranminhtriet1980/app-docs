@@ -1234,6 +1234,11 @@ wife_address, wife_occupation.
 Marriage: marriage_date (YYYY-MM-DD), marriage_place (full), marriage_city, marriage_state, marriage_country.
 document_number / registration_number if shown.
 Use ISO dates. Names UPPERCASE as printed.
+
+CẢNH BÁO QUAN TRỌNG VỀ GIẤY KẾT HÔN VIỆT NAM:
+- marriage_date (Ngày kết hôn / Ngày đăng ký kết hôn): nằm ở GÓC DƯỚI BÊN TRÁI form, tại dòng "Ngày, tháng, năm đăng ký: ......" (vd. "26 - 9 - 2013" → 2013-09-26). ĐÂY LÀ NGÀY KẾT HÔN DUY NHẤT.
+- Góc TRÊN BÊN PHẢI form ("Số: .../20xx", "Quyển số: .../20xx", vd. "Số: 131/2013", "Quyển số: 01/2013"): đây là document_number ("131/2013") và registration_number ("01/2013") — TUYỆT ĐỐI KHÔNG đọc nhầm thành ngày kết hôn (vd. KHÔNG được đọc "131/2013" thành ngày 13/01/2013).
+- Dấu chứng thực sao y bản chính / công chứng (màu đỏ/xanh, vd. "Số chứng thực: ... Ngày 17-06-2024"): đây là ngày công chứng bản sao, KHÔNG PHẢI ngày kết hôn.
 """
 
 DEATH_EXTRACT_HINT = """
@@ -1263,9 +1268,15 @@ không rõ ràng, để trống và thêm warning — TUYỆT ĐỐI không lấ
 """
 
 MILITARY_EXTRACT_HINT = """
-For MILITARY DISCHARGE, extract:
-full_name, military_country, military_branch, military_rank, military_specialty,
-service_from_date, service_to_date, document_number.
+For MILITARY DISCHARGE (Quyết định xuất ngũ / Giấy chứng nhận xuất ngũ / Phục viên), extract:
+- full_name: Họ và tên quân nhân (IN HOA, có dấu).
+- military_country: Quốc gia phục vụ (mặc định "Việt Nam" hoặc "Vietnam").
+- military_branch: Đơn vị / Khu / Chiến khu phục vụ. PHẢI LẤY ĐẦY ĐỦ từ cấp nhỏ nhất (Tiểu đoàn / Đại đội / Trung đội) đến cấp Lữ đoàn / Trung đoàn / Quân khu, KHÔNG ĐƯỢC RÚT GỌN (vd. "Tiểu đoàn 741, Lữ đoàn Công binh 25, Quân khu 7").
+- military_rank: Cấp bậc khi xuất ngũ (vd. "Binh nhất", "Hạ sĩ", "Trung sĩ"...).
+- military_specialty: Chức vụ / Chuyên môn kỹ thuật (vd. "Chiến sĩ; Công binh vượt sông", "Bộ binh", "Lái xe"...).
+- service_from_date: Ngày bắt đầu phục vụ nghĩa vụ quân sự. Lấy ở mục "tham gia công tác có đóng BHXH từ ngày: ......", hoặc ngày nhập ngũ. Định dạng YYYY-MM-DD nếu có đủ ngày/tháng/năm, hoặc YYYY-MM nếu chỉ có tháng/năm.
+- service_to_date: Ngày kết thúc phục vụ nghĩa vụ quân sự. Lấy ở mục "Điều 3. Quyết định này có hiệu lực kể từ ngày: ......", hoặc ngày xuất ngũ / ngày ký quyết định. Định dạng YYYY-MM-DD nếu có đủ ngày/tháng/năm, hoặc YYYY-MM nếu chỉ có tháng/năm.
+- document_number: Số quyết định (vd. "47/QĐ-LĐ25").
 """
 
 DS260_CUSTOMER_FORM_EXTRACT_HINT = """
@@ -1351,6 +1362,10 @@ middle_school_name (Cấp 2 = Trung học cơ sở / THCS / Secondary), middle_s
 high_school_name (Cấp 3 = Trung học phổ thông / THPT / Highschool), high_school_address, high_school_period,
 college_name (Cao đẳng/Đại học), college_address, college_major, college_period.
 Map by level: "Trung học cơ sở"/"THCS" → middle_school_*, "Trung học phổ thông"/"THPT" → high_school_*.
+- Nếu khách khai NHIỀU TRƯỜNG trong cùng 1 cấp học (vd. học 2 trường Cấp 2 hoặc 2 trường Cấp 3):
+  PHẢI gộp tất cả trường vào chung field tương ứng (cách nhau bởi newline \n), TUYỆT ĐỐI KHÔNG bỏ sót trường nào
+  (vd. middle_school_name: "School A (Grade 6-7)\nSchool B (Grade 8-9)", middle_school_address: "Addr A\nAddr B",
+  middle_school_period: "from 05/09/1998 to 16/05/2000\nfrom 05/09/2000 to 16/05/2002").
 
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
@@ -1459,6 +1474,7 @@ EDUCATION: middle_school_name (Cấp 2 / Trung học cơ sở / THCS),
 middle_school_address, middle_school_period,
 high_school_name (Cấp 3 / Trung học phổ thông / THPT), high_school_address, high_school_period,
 college_name, college_address, college_major, college_period.
+(Nếu học nhiều trường cùng cấp: gộp vào chung field, cách nhau bởi \n).
 
 Yes/No for yes-no questions. Dates as printed.
 """

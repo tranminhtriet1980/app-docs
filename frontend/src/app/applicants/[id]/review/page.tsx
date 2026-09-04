@@ -567,7 +567,11 @@ function InputTooltip({ value }: { value: string }) {
   );
 }
 
-const FE_HIDDEN_KEYS = new Set(["divorce_husband_name", "divorce_wife_name"]);
+const FE_HIDDEN_KEYS = new Set([
+  "divorce_husband_name",
+  "divorce_wife_name",
+  "military_document_number",
+]);
 
 function Ds260FieldGrid({
   applicantId,

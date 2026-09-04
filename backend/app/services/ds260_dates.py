@@ -263,10 +263,14 @@ def format_ds260_display_date_range(val: str) -> str:
 
     'Aug 15, 2004 - Jun 01, 2008' → '15/08/2004 - 01/06/2008'; giữ 'Present' cho đầu mở
     (Now/nay). Không tách được (không phải khoảng) → thử format như 1 ngày, không được thì giữ nguyên.
+    Hỗ trợ chuỗi nhiều dòng (nhiều khoảng thời gian cách nhau bởi newline).
     """
     v = (val or "").strip()
     if not v:
         return ""
+    if "\n" in v:
+        lines = [format_ds260_display_date_range(line) for line in v.split("\n") if line.strip()]
+        return "\n".join(lines)
     v = re.sub(r"^\s*(?:from|từ|tu)\s+", "", v, flags=re.IGNORECASE)
     parts = _RANGE_SEP_RE.split(v, maxsplit=1)
     if len(parts) != 2:
@@ -278,10 +282,14 @@ def format_ds260_export_date_range(val: str) -> str:
     """Format khoảng thời gian cho Word export — 'dd Mon yyyy - dd Mon yyyy'.
 
     '05/09/2007 - 30/05/2011' → '05 Sep 2007 - 30 May 2011'; giữ 'Present' cho đầu mở.
+    Hỗ trợ chuỗi nhiều dòng (nhiều khoảng thời gian cách nhau bởi newline).
     """
     v = (val or "").strip()
     if not v:
         return ""
+    if "\n" in v:
+        lines = [format_ds260_export_date_range(line) for line in v.split("\n") if line.strip()]
+        return "\n".join(lines)
     v = re.sub(r"^\s*(?:from|từ|tu)\s+", "", v, flags=re.IGNORECASE)
     parts = _RANGE_SEP_RE.split(v, maxsplit=1)
     if len(parts) != 2:

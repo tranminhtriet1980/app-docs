@@ -128,3 +128,33 @@ def test_military_discharge_scoped_to_person():
     # Check section primary doc present
     assert not _section_primary_doc_present(records, "section_military", person_name="NGUYEN VAN A")
     assert _section_primary_doc_present(records, "section_military", person_name="TRAN THI B")
+
+
+def test_military_discharge_vs_worksheet_conflict():
+    from app.services.ds260_conflicts import build_worksheet_conflict_rows
+
+    mil_doc = ApplicantDocRecord(
+        id=uuid.uuid4(),
+        source_document_id=uuid.uuid4(),
+        doc_type="military_discharge",
+        variant="standard",
+        form_data='{"full_name": "NGUYEN BA CHUONG", "military_country": "Viet Nam", "military_branch": "Lu doan Cong binh 25", "military_rank": "Binh nhat", "military_specialty": "Chien si", "service_from_date": "2011-09-08", "service_to_date": "2013-01-29", "document_number": "47/QD-LD25"}',
+    )
+    ws_doc = ApplicantDocRecord(
+        id=uuid.uuid4(),
+        source_document_id=uuid.uuid4(),
+        doc_type="ds260_customer_form",
+        variant="standard",
+        form_data='{"military_served": "Yes", "military_country": "Viet Nam", "military_branch": "Military Region 7", "military_rank": "Soldier", "military_specialty": "Combat Engineer", "military_service_start": "2011-09-01", "military_service_end": "2013-01-29", "military_full_name": "NGUYEN BA CHUONG"}',
+    )
+    records = [mil_doc, ws_doc]
+    conflicts = build_worksheet_conflict_rows(records, {})
+    conflict_keys = {c["field_key"] for c in conflicts}
+
+    assert "ds260.document_vs_worksheet.military_branch" in conflict_keys
+    assert "ds260.document_vs_worksheet.military_rank" in conflict_keys
+    assert "ds260.document_vs_worksheet.military_specialty" in conflict_keys
+    assert "ds260.document_vs_worksheet.military_service_start" in conflict_keys
+    # service_end is same (2013-01-29) -> no conflict
+    assert "ds260.document_vs_worksheet.military_service_end" not in conflict_keys
+

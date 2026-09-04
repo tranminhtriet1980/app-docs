@@ -33,6 +33,7 @@ LUONG1_DOC_TYPES: frozenset[str] = frozenset(
         "judicial_certificate",
         "marriage_certificate",
         "application_form",
+        "military_discharge",
     }
 )
 
@@ -54,56 +55,73 @@ def _application_form_worksheet_keys() -> frozenset[str]:
     return frozenset(k for k, m in flatten_ds260_mappings().items() if m.document == "application_form")
 
 
-# DS-260 mapping keys compared: official (Luồng 1 resolved) vs ds260_customer_form
-WORKSHEET_COMPARE_KEYS: frozenset[str] = frozenset(
+_MILITARY_COMPARE_KEYS: frozenset[str] = frozenset(
     {
-        # DS-260 A.1 — Personal Information: TOÀN BỘ field nguồn passport phải đối chiếu với
-        # DS-260 khách khai, không chỉ vài field — trước đây thiếu applicant_name_native,
-        # family_name, given_names, birth_city, birth_state, birth_country, id_card_number nên
-        # passport và worksheet khác nhau ở các field này không hề bị phát hiện (khách yêu cầu
-        # 2026-08-14).
-        "applicant_name",
-        "applicant_name_native",
-        "family_name",
-        "given_names",
-        "date_of_birth",
-        "gender",
-        "nationality",
-        "place_of_birth",
-        "birth_city",
-        "birth_state",
-        "birth_country",
-        "id_card_number",
-        "current_marital_status",
-        "current_address",
-        "current_city",
-        "current_state",
-        "postal_code",
-        "current_country",
-        "primary_phone",
-        "email",
-        # Thông tin cha/mẹ — trước đây KHÔNG nằm trong danh sách này nên birth_certificate và
-        # worksheet DS-260 khách khai chưa bao giờ được đối chiếu (báo lỗi thực tế 2026-08-05).
-        # Đương đơn: nguồn chính thức là birth_certificate của chính họ (mapping.document mặc
-        # định — không cần override). Con cái: birth_certificate của con không tồn tại (con chỉ
-        # có birth_certificate_child do cha/mẹ khai, chỉ có father_name/mother_name gộp, không
-        # tách surname/given_names/ngày sinh/nơi sinh) — xem _WORKSHEET_OFFICIAL_DOC_FALLBACK.
-        "father_full_name",
-        "father_surname",
-        "father_given_names",
-        "father_date_of_birth",
-        "father_birth_city",
-        "father_birth_state",
-        "father_birth_country",
-        "mother_full_name",
-        "mother_surname",
-        "mother_given_names",
-        "mother_date_of_birth",
-        "mother_birth_city",
-        "mother_birth_state",
-        "mother_birth_country",
+        "military_full_name",
+        "military_country",
+        "military_branch",
+        "military_rank",
+        "military_specialty",
+        "military_service_start",
+        "military_service_end",
+        "military_document_number",
     }
-) | _application_form_worksheet_keys()
+)
+
+# DS-260 mapping keys compared: official (Luồng 1 resolved) vs ds260_customer_form
+WORKSHEET_COMPARE_KEYS: frozenset[str] = (
+    frozenset(
+        {
+            # DS-260 A.1 — Personal Information: TOÀN BỘ field nguồn passport phải đối chiếu với
+            # DS-260 khách khai, không chỉ vài field — trước đây thiếu applicant_name_native,
+            # family_name, given_names, birth_city, birth_state, birth_country, id_card_number nên
+            # passport và worksheet khác nhau ở các field này không hề bị phát hiện (khách yêu cầu
+            # 2026-08-14).
+            "applicant_name",
+            "applicant_name_native",
+            "family_name",
+            "given_names",
+            "date_of_birth",
+            "gender",
+            "nationality",
+            "place_of_birth",
+            "birth_city",
+            "birth_state",
+            "birth_country",
+            "id_card_number",
+            "current_marital_status",
+            "current_address",
+            "current_city",
+            "current_state",
+            "postal_code",
+            "current_country",
+            "primary_phone",
+            "email",
+            # Thông tin cha/mẹ — trước đây KHÔNG nằm trong danh sách này nên birth_certificate và
+            # worksheet DS-260 khách khai chưa bao giờ được đối chiếu (báo lỗi thực tế 2026-08-05).
+            # Đương đơn: nguồn chính thức là birth_certificate của chính họ (mapping.document mặc
+            # định — không cần override). Con cái: birth_certificate của con không tồn tại (con chỉ
+            # có birth_certificate_child do cha/mẹ khai, chỉ có father_name/mother_name gộp, không
+            # tách surname/given_names/ngày sinh/nơi sinh) — xem _WORKSHEET_OFFICIAL_DOC_FALLBACK.
+            "father_full_name",
+            "father_surname",
+            "father_given_names",
+            "father_date_of_birth",
+            "father_birth_city",
+            "father_birth_state",
+            "father_birth_country",
+            "mother_full_name",
+            "mother_surname",
+            "mother_given_names",
+            "mother_date_of_birth",
+            "mother_birth_city",
+            "mother_birth_state",
+            "mother_birth_country",
+        }
+    )
+    | _application_form_worksheet_keys()
+    | _MILITARY_COMPARE_KEYS
+)
 
 # Giá trị "chính thức" so với worksheet — override mapping.document khi cần.
 # Address/contact trên worksheet; nguồn đối chiếu là Application form (Job Application, mục 1.
@@ -1880,6 +1898,15 @@ def conflict_label_vi(field_key: str, *, person_hint: str | None = None) -> str:
             "edu_college_address": "Địa chỉ trường ĐH/CĐ",
             "edu_college_major": "Chuyên ngành",
             "edu_college_period": "Thời gian học ĐH/CĐ",
+            "military_served": "Đã từng phục vụ quân đội",
+            "military_full_name": "Họ và tên quân nhân",
+            "military_country": "Quốc gia phục vụ quân đội",
+            "military_branch": "Đơn vị/Khu phục vụ quân đội",
+            "military_rank": "Cấp bậc quân đội",
+            "military_specialty": "Chuyên môn quân sự",
+            "military_service_start": "Ngày bắt đầu phục vụ quân đội",
+            "military_service_end": "Ngày kết thúc phục vụ quân đội",
+            "military_document_number": "Số quyết định xuất ngũ",
         }
         field_label = labels.get(name)
         if not field_label:
@@ -1895,5 +1922,6 @@ def conflict_label_vi(field_key: str, *, person_hint: str | None = None) -> str:
         "birth_certificate": "Birth certificate",
         "judicial_certificate": "JUDICIAL CERTIFICATE",
         "marriage_certificate": "Marriage certificate",
+        "military_discharge": "Military discharge",
     }
     return f"{doc_labels.get(doc_type, doc_type)} · {source_field}"
