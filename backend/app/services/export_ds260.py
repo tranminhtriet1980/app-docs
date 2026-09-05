@@ -492,7 +492,7 @@ def _normalize_vn_phone(v: str) -> str:
 def _normalize_birth_city_state(out: dict[str, str]) -> None:
     """Quy ước DS-260: sinh tại TP trực thuộc TW (Hà Nội/HCM/Hải Phòng/Đà Nẵng/Cần Thơ/Huế)
     → City = tên TP, State/Province = 'N/A'. Chặn lỗi để cả City lẫn State = tên TP."""
-    for city_key, state_key in (
+    pairs: list[tuple[str, str]] = [
         ("birth_city", "birth_state"),
         ("father_birth_city", "father_birth_state"),
         ("mother_birth_city", "mother_birth_state"),
@@ -502,10 +502,28 @@ def _normalize_birth_city_state(out: dict[str, str]) -> None:
         ("father_city", "father_state"),
         ("mother_city", "mother_state"),
         ("spouse_city", "spouse_state"),
-    ):
-        if canonical_vn_city(out.get(city_key, "")):
+    ]
+    for k in list(out.keys()):
+        if k.startswith("child_") and k.endswith("_birth_city"):
+            p = k[: -len("birth_city")]
+            pairs.append((f"{p}birth_city", f"{p}birth_state"))
+        elif k.startswith("child_") and k.endswith("_city"):
+            p = k[: -len("city")]
+            pairs.append((f"{p}city", f"{p}state"))
+
+    for city_key, state_key in pairs:
+        city_val = out.get(city_key, "")
+        state_val = out.get(state_key, "")
+        canon_city = canonical_vn_city(city_val)
+        canon_state = canonical_vn_city(state_val)
+
+        if canon_city:
+            out[city_key] = canon_city
             if normalize_location(out.get(state_key, "")) not in ("n/a", "na"):
                 out[state_key] = "N/A"
+        elif canon_state:
+            out[city_key] = canon_state
+            out[state_key] = "N/A"
 
 
 def _cross_check_birth_country(out: dict[str, str]) -> None:

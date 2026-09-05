@@ -89,6 +89,8 @@ _ADDRESS_WHOLE_MAP: dict[str, str] = {
     "tp hcm": "Ho Chi Minh",
     "tp.hcm": "Ho Chi Minh",
     "tp ho chi minh": "Ho Chi Minh",
+    "hcmc": "Ho Chi Minh",
+    "hcm": "Ho Chi Minh",
 }
 
 
@@ -403,6 +405,19 @@ def find_city_alias_in_province(text: str, province: str) -> str:
     return best
 
 
+_HCM_KEYWORDS = re.compile(
+    r"(?i)\b(ho chi minh|hồ chí minh|hcm|hcmc|tphcm|tp\.hcm|saigon|sai gon|sài gòn)\b"
+)
+
+
+def is_ho_chi_minh_city(text: str) -> bool:
+    """Kiểm tra chuỗi có chứa tên Hồ Chí Minh / Sài Gòn / TP.HCM hay không."""
+    if not (text or "").strip():
+        return False
+    stripped = _strip_accents(text)
+    return bool(_HCM_KEYWORDS.search(text) or _HCM_KEYWORDS.search(stripped))
+
+
 @lru_cache(maxsize=1)
 def _municipality_alias_set() -> dict[str, str]:
     """alias_norm → tên TP trực thuộc TW (khớp CHÍNH XÁC cả chuỗi)."""
@@ -415,14 +430,22 @@ def _municipality_alias_set() -> dict[str, str]:
 
 def canonical_vn_city(text: str) -> str:
     """
-    Chuẩn hóa tên TP trực thuộc TW (vd. 'Hcm'/'HCMC'/'Go Vap' → 'Ho Chi Minh').
-    CHỈ khớp chính xác alias municipality để KHÔNG biến 'Hue' thành tên tỉnh.
+    Chuẩn hóa tên TP trực thuộc TW (vd. 'Hcm'/'HCMC'/'Go Vap'/'Thành phố Hồ Chí Minh' → 'Ho Chi Minh').
     """
+    if not (text or "").strip():
+        return ""
+    if is_ho_chi_minh_city(text):
+        return "Ho Chi Minh"
     norm = normalize_location(text)
     if not norm:
         return ""
     name = _municipality_alias_set().get(norm, "")
-    return municipality_display_name(name) if name else ""
+    if name:
+        return municipality_display_name(name)
+    muni, _ = find_vn_locality_match(text, only_municipality=True)
+    if muni:
+        return municipality_display_name(muni)
+    return ""
 
 
 def looks_like_address_or_facility(text: str) -> bool:
@@ -447,6 +470,11 @@ def split_birthplace_city_state(*blobs: str) -> tuple[str, str] | None:
     text = " , ".join(b for b in blobs if (b or "").strip())
     if not text.strip():
         return None
+    for b in blobs:
+        if is_ho_chi_minh_city(b):
+            return "Ho Chi Minh", "N/A"
+    if is_ho_chi_minh_city(text):
+        return "Ho Chi Minh", "N/A"
     muni, _ = find_vn_locality_match(text, only_municipality=True)
     if muni:
         return municipality_display_name(muni), "N/A"

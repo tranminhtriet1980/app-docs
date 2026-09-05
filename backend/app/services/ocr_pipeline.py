@@ -1363,9 +1363,22 @@ high_school_name (Cấp 3 = Trung học phổ thông / THPT / Highschool), high_
 college_name (Cao đẳng/Đại học), college_address, college_major, college_period.
 Map by level: "Trung học cơ sở"/"THCS" → middle_school_*, "Trung học phổ thông"/"THPT" → high_school_*.
 - Nếu khách khai NHIỀU TRƯỜNG trong cùng 1 cấp học (vd. học 2 trường Cấp 2 hoặc 2 trường Cấp 3):
-  PHẢI gộp tất cả trường vào chung field tương ứng (cách nhau bởi newline \n), TUYỆT ĐỐI KHÔNG bỏ sót trường nào
-  (vd. middle_school_name: "School A (Grade 6-7)\nSchool B (Grade 8-9)", middle_school_address: "Addr A\nAddr B",
-  middle_school_period: "from 05/09/1998 to 16/05/2000\nfrom 05/09/2000 to 16/05/2002").
+  DỒN HẾT tất cả tên trường, địa chỉ, thời gian học của các trường đó vào DUY NHẤT field School Name tương ứng
+  (middle_school_name / high_school_name / college_name) theo định dạng nhiều dòng:
+  <TÊN TRƯỜNG 1>
+  Address: <Địa chỉ 1>
+  Attendance: <Thời gian học 1>
+  <TÊN TRƯỜNG 2>
+  Address: <Địa chỉ 2>
+  Attendance: <Thời gian học 2>
+  (Ví dụ:
+  PHU DONG (GRADE 6-7)
+  Address: 22B Xo Viet Nghe Tinh, Ward 19, Binh Thanh District, Hcmc
+  Attendance: 05/09/1998 - 16/05/2000
+  PHU MY (GRADE 8-9)
+  Address: 120B Ngo Tat To, Ward 19, Binh Thanh District, Hcmc
+  Attendance: 05/09/2000 - 16/05/2002)
+  Và để TRỐNG ô Address và Period tương ứng (middle_school_address="", middle_school_period="") để nhân viên hệ thống tự xử lý.
 
 MILITARY: military_country, military_branch, military_rank, military_specialty,
 military_service_start, military_service_end.
@@ -1474,7 +1487,7 @@ EDUCATION: middle_school_name (Cấp 2 / Trung học cơ sở / THCS),
 middle_school_address, middle_school_period,
 high_school_name (Cấp 3 / Trung học phổ thông / THPT), high_school_address, high_school_period,
 college_name, college_address, college_major, college_period.
-(Nếu học nhiều trường cùng cấp: gộp vào chung field, cách nhau bởi \n).
+(Nếu học nhiều trường cùng cấp: dồn toàn bộ tên, Address, Attendance vào DUY NHẤT ô School Name theo mẫu nhiều dòng, để trống Address & Period).
 
 Yes/No for yes-no questions. Dates as printed.
 """

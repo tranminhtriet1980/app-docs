@@ -455,3 +455,74 @@ def test_resolve_work_prior_jobs_field_applies_formatting_and_dedup():
     value, *_ = resolve_work_prior_jobs_field(records, mappings["work_prior_jobs_history"], {})
     assert "Greentech" in value
     assert "Tan Nguyen" not in value
+
+
+def test_reconcile_multischool_bundles_all_info_into_school_name():
+    """Khi học 2 trường cùng cấp -> dồn Name, Address, Attendance vào 1 ô School Name và xóa trống Address/Period."""
+    from app.services.ds260_english_output import format_sections_english_output
+    from app.services.ds260_mapping import reconcile_multischool_education
+
+    sections = [
+        {
+            "id": "section_work_education",
+            "fields": [
+                {
+                    "key": "edu_middle_school_name",
+                    "value": "Phu Dong (Grade 6-7)\nPhu My (Grade 8-9)",
+                    "source": {},
+                },
+                {
+                    "key": "edu_middle_school_address",
+                    "value": "22B Xo Viet Nghe Tinh, Ward 19, Binh Thanh District, Hcmc\n120B Ngo Tat To, Ward 19, Binh Thanh District, Hcmc",
+                    "source": {},
+                },
+                {
+                    "key": "edu_middle_school_period",
+                    "value": "05/09/1998 - 16/05/2000\n05/09/2000 - 16/05/2002",
+                    "source": {},
+                },
+            ],
+        }
+    ]
+
+    reconcile_multischool_education(sections)
+    format_sections_english_output(sections)
+    by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
+
+    expected_name = (
+        "PHU DONG (GRADE 6-7)\n"
+        "Address: 22B Xo Viet Nghe Tinh, Ward 19, Binh Thanh District, Ho Chi Minh\n"
+        "Attendance: 05/09/1998 - 16/05/2000\n"
+        "PHU MY (GRADE 8-9)\n"
+        "Address: 120B Ngo Tat To, Ward 19, Binh Thanh District, Ho Chi Minh\n"
+        "Attendance: 05/09/2000 - 16/05/2002"
+    )
+    assert by_key["edu_middle_school_name"] == expected_name
+    assert by_key["edu_middle_school_address"] == ""
+    assert by_key["edu_middle_school_period"] == ""
+
+
+def test_single_school_not_bundled():
+    """Học 1 trường thì giữ nguyên từng ô Name, Address, Period."""
+    from app.services.ds260_english_output import format_sections_english_output
+    from app.services.ds260_mapping import reconcile_multischool_education
+
+    sections = [
+        {
+            "id": "section_work_education",
+            "fields": [
+                {"key": "edu_middle_school_name", "value": "Le Do Secondary School", "source": {}},
+                {"key": "edu_middle_school_address", "value": "82 Nguyen Trung Truc, Da Nang", "source": {}},
+                {"key": "edu_middle_school_period", "value": "05/09/1986 - 30/05/1990", "source": {}},
+            ],
+        }
+    ]
+
+    reconcile_multischool_education(sections)
+    format_sections_english_output(sections)
+    by_key = {f["key"]: f["value"] for f in sections[0]["fields"]}
+
+    assert by_key["edu_middle_school_name"] == "LE DO SECONDARY SCHOOL"
+    assert by_key["edu_middle_school_address"] == "82 Nguyen Trung Truc, Da Nang"
+    assert by_key["edu_middle_school_period"] == "05/09/1986 - 30/05/1990"
+

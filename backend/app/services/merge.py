@@ -93,6 +93,8 @@ def _sync_birth_state_from_city(merged: dict) -> None:
     """If Tỉnh/Bang nơi sinh is empty, copy from Thành phố nơi sinh (VN forms often use city only)."""
     if not merged:
         return
+    from app.services.birth_location import canonical_vn_city
+
     sample = next(iter(merged.values()))
     pairs = [
         ("identity.birth_city", "identity.birth_state"),
@@ -107,10 +109,11 @@ def _sync_birth_state_from_city(merged: dict) -> None:
         state_val = ((state_pf.field_value if state_pf else None) or "").strip()
         if not city_val or state_val:
             continue
+        fill_val = "N/A" if canonical_vn_city(city_val) else city_val
         merged[state_key] = ProfileField(
             applicant_id=sample.applicant_id,
             field_key=state_key,
-            field_value=city_val,
+            field_value=fill_val,
             source_document_id=city_pf.source_document_id if city_pf else None,
             confidence=city_pf.confidence if city_pf else None,
             is_manual=False,

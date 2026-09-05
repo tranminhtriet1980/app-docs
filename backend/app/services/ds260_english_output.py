@@ -229,6 +229,38 @@ def format_ds260_field_value(key: str, value: str) -> str:
     if key.endswith("_native"):
         return format_native_name(v)
 
+    if key in {
+        "edu_middle_school_name",
+        "edu_high_school_name",
+        "edu_college_name",
+        "middle_school_name",
+        "high_school_name",
+        "college_name",
+        "education.middle_school_name",
+        "education.high_school_name",
+        "education.college_name",
+    }:
+        if "\n" in v or "Address:" in v or "Attendance:" in v:
+            out_lines: list[str] = []
+            for line in v.split("\n"):
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                if re.match(r"(?i)^address:\s*", line_str):
+                    rest = re.sub(r"(?i)^address:\s*", "", line_str)
+                    from app.services.birth_location import format_address_english
+
+                    out_lines.append(f"Address: {format_address_english(rest)}")
+                elif re.match(r"(?i)^(attendance|period|from):\s*", line_str):
+                    out_lines.append(line_str)
+                elif re.match(r"(?i)^major:\s*", line_str):
+                    rest = re.sub(r"(?i)^major:\s*", "", line_str)
+                    out_lines.append(f"Major: {format_place_name_title(rest)}")
+                else:
+                    out_lines.append(format_person_name_ascii(line_str))
+            return "\n".join(out_lines)
+        return format_person_name_ascii(v)
+
     if key in {"nationality", "judicial_nationality"}:
         # Giấy tờ đôi khi ghi song ngữ "Viet Nam / Vietnamese" — CHỈ giữ 1 giá trị, KHÔNG
         # ghép cả 2 ngôn ngữ vào field (khách yêu cầu 2026-08-12). Thử khớp từng phần tách bởi

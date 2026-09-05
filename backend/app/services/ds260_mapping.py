@@ -28,10 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entities import Applicant, ApplicantDocRecord, ProfileField
 from app.services.birth_location import (
+    canonical_vn_city,
     derive_birth_state_from_place,
     derive_city_from_place,
     derive_country_from_place,
     extract_city_token,
+    is_ho_chi_minh_city,
     looks_like_address_or_facility,
     split_birthplace_city_state,
 )
@@ -4294,7 +4296,12 @@ def _is_vietnam_birth(country: str) -> bool:
     from app.services.birth_location import normalize_location
 
     c = normalize_location(country)
-    return c == "" or c in {"vietnam", "viet nam"}
+    return (
+        c == ""
+        or c in {"vietnam", "viet nam", "vn", "vietnamese"}
+        or "vietnam" in c
+        or "viet nam" in c
+    )
 
 
 def normalize_ds260_place_fields(sections_out: list[dict[str, Any]]) -> None:
@@ -4303,18 +4310,41 @@ def normalize_ds260_place_fields(sections_out: list[dict[str, Any]]) -> None:
       TP trực thuộc TW → City; Tỉnh → State; cái còn lại → N/A; bỏ tên bệnh viện/địa chỉ.
     Áp cho đương đơn, cha, mẹ, phối ngẫu, từng con. Chỉ áp cho nơi sinh ở VN.
     """
+    from app.services.birth_location import find_vn_locality
+
     idx = _index_fields_by_key(sections_out)
-    for prefix in _PLACE_GROUP_PREFIXES:
+    prefixes: set[str] = set(_PLACE_GROUP_PREFIXES)
+    for key in idx:
+        if key.endswith("birth_city"):
+            prefixes.add(key[: -len("birth_city")])
+        elif key.endswith("birth_state"):
+            prefixes.add(key[: -len("birth_state")])
+
+    for prefix in sorted(prefixes):
         city_f = idx.get(f"{prefix}birth_city")
         state_f = idx.get(f"{prefix}birth_state")
         if not city_f and not state_f:
             continue
-        if not _is_vietnam_birth(_field_value(idx, f"{prefix}birth_country")):
-            continue
+        country_val = _field_value(idx, f"{prefix}birth_country")
         blobs = [_field_value(idx, f"{prefix}birth_state"), _field_value(idx, f"{prefix}birth_city")]
         if prefix == "":
             blobs.append(_field_value(idx, "place_of_birth"))
+
+        combined_text = " , ".join(b for b in blobs if b)
+        if not (_is_vietnam_birth(country_val) or find_vn_locality(combined_text)):
+            continue
+
         result = split_birthplace_city_state(*blobs)
+        if result is None:
+            city_str = _field_value(idx, f"{prefix}birth_city")
+            state_str = _field_value(idx, f"{prefix}birth_state")
+            muni_c = canonical_vn_city(city_str)
+            muni_s = canonical_vn_city(state_str)
+            if muni_c:
+                result = (muni_c, "N/A")
+            elif muni_s:
+                result = (muni_s, "N/A")
+
         if result is None:
             continue
         city_val, state_val = result
@@ -4870,6 +4900,88 @@ def reconcile_military_section(sections_out: list[dict[str, Any]]) -> None:
                     continue
                 field["value"] = ""
                 field["source"] = empty_ds260_field_source()
+
+
+def reconcile_multischool_education(sections_out: list[dict[str, Any]]) -> None:
+    """
+    Nếu một cấp học (THCS / THPT / ĐH) có từ 2 trường trở lên:
+    Dồn toàn bộ Tên trường, Địa chỉ, Thời gian học của các trường đó vào DUY NHẤT ô School Name
+    theo cấu trúc:
+      <TÊN TRƯỜNG 1>
+      Address: <Địa chỉ 1>
+      Attendance: <Thời gian học 1>
+      <TÊN TRƯỜNG 2>
+      Address: <Địa chỉ 2>
+      Attendance: <Thời gian học 2>
+    Và xóa trống ô Address / Period / Major tương ứng để nhân viên hệ thống tự xử lý.
+    """
+    from app.services.birth_location import format_address_english, format_person_name_ascii, format_place_name_title
+
+    idx = _index_fields_by_key(sections_out)
+    edu_levels = [
+        ("edu_middle_school_name", "edu_middle_school_address", "edu_middle_school_period", None),
+        ("edu_high_school_name", "edu_high_school_address", "edu_high_school_period", None),
+        ("edu_college_name", "edu_college_address", "edu_college_period", "edu_college_major"),
+    ]
+
+    for name_key, addr_key, period_key, major_key in edu_levels:
+        name_f = idx.get(name_key)
+        addr_f = idx.get(addr_key)
+        period_f = idx.get(period_key)
+        major_f = idx.get(major_key) if major_key else None
+
+        name_val = (name_f.get("value") or "").strip() if name_f else ""
+        addr_val = (addr_f.get("value") or "").strip() if addr_f else ""
+        period_val = (period_f.get("value") or "").strip() if period_f else ""
+        major_val = (major_f.get("value") or "").strip() if major_f else ""
+
+        # Check if already formatted as combined multi-school block
+        if re.search(r"(?i)\baddress:\s*", name_val) and (re.search(r"(?i)\battendance:\s*", name_val) or "\n" in name_val):
+            if addr_f and addr_f.get("value") and addr_f.get("source", {}).get("derived") != "manual_override":
+                _set_value(addr_f, "", "multischool_bundled_to_name")
+            if period_f and period_f.get("value") and period_f.get("source", {}).get("derived") != "manual_override":
+                _set_value(period_f, "", "multischool_bundled_to_name")
+            if major_f and major_f.get("value") and major_f.get("source", {}).get("derived") != "manual_override":
+                _set_value(major_f, "", "multischool_bundled_to_name")
+            continue
+
+        names = [n.strip() for n in name_val.split("\n") if n.strip()]
+        addrs = [a.strip() for a in addr_val.split("\n") if a.strip()]
+        periods = [p.strip() for p in period_val.split("\n") if p.strip()]
+        majors = [m.strip() for m in major_val.split("\n") if m.strip()]
+
+        is_multi = len(names) >= 2 or len(addrs) >= 2 or len(periods) >= 2
+        if not is_multi:
+            continue
+
+        count = max(len(names), len(addrs), len(periods), len(majors))
+        lines: list[str] = []
+        for i in range(count):
+            sch_name = names[i] if i < len(names) else f"School {i+1}"
+            sch_name = format_person_name_ascii(sch_name)
+            lines.append(sch_name)
+
+            sch_addr = addrs[i] if i < len(addrs) else ""
+            if sch_addr:
+                lines.append(f"Address: {format_address_english(sch_addr)}")
+
+            sch_period = periods[i] if i < len(periods) else ""
+            if sch_period:
+                lines.append(f"Attendance: {sch_period}")
+
+            sch_major = majors[i] if i < len(majors) else ""
+            if sch_major:
+                lines.append(f"Major: {format_place_name_title(sch_major)}")
+
+        combined_text = "\n".join(lines)
+        if name_f is not None and name_f.get("source", {}).get("derived") != "manual_override":
+            _set_value(name_f, combined_text, "multischool_bundled_to_name")
+        if addr_f is not None and addr_f.get("source", {}).get("derived") != "manual_override":
+            _set_value(addr_f, "", "multischool_bundled_to_name")
+        if period_f is not None and period_f.get("source", {}).get("derived") != "manual_override":
+            _set_value(period_f, "", "multischool_bundled_to_name")
+        if major_f is not None and major_f.get("source", {}).get("derived") != "manual_override":
+            _set_value(major_f, "", "multischool_bundled_to_name")
 
 
 # Ô THÔNG TIN (số điện thoại, email, định danh MXH) — bỏ trống thì ghi 'N/A',
@@ -5515,6 +5627,8 @@ async def resolve_ds260_form(
     from app.services.ds260_dates import format_sections_date_display
 
     format_sections_date_display(sections_out)
+
+    reconcile_multischool_education(sections_out)
 
     from app.services.ds260_english_output import format_sections_english_output
 
